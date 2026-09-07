@@ -393,7 +393,10 @@ impl<'a> Evaluator<'a> {
                 let Some(value) = parse_integer(literal.spelling()) else {
                     return invalid_flow();
                 };
-                Value::Integer(IntegerValue::new(*primitive, value))
+                let Some(value) = IntegerValue::new(*primitive, value) else {
+                    return invalid_flow();
+                };
+                Value::Integer(value)
             }
             LiteralKind::Float
             | LiteralKind::FormatString
@@ -623,7 +626,7 @@ impl<'a> Evaluator<'a> {
                 [Value::Integer(left), Value::Integer(right)]
                     if left.primitive() == right.primitive() =>
                 {
-                    wrapping_add(*left, *right)
+                    left.wrapping_add(*right)
                         .map(|value| Flow::Value(RuntimeValue::Value(Value::Integer(value))))
                         .unwrap_or_else(invalid_flow)
                 }
@@ -699,7 +702,7 @@ impl<'a> Evaluator<'a> {
         let Some(destination) = self.view.primitive_type(operation.result()) else {
             return invalid_flow();
         };
-        match checked_integer(operation.operator(), destination, left, Some(right)) {
+        match left.checked(operation.operator(), destination, Some(right)) {
             IntegerEvaluation::Value(value) => {
                 Flow::Value(RuntimeValue::Value(Value::Integer(value)))
             }
@@ -752,7 +755,7 @@ impl<'a> Evaluator<'a> {
         let Some(destination) = self.view.primitive_type(operation.result()) else {
             return invalid_flow();
         };
-        match checked_integer(operation.operator(), destination, value, None) {
+        match value.checked(operation.operator(), destination, None) {
             IntegerEvaluation::Value(value) => {
                 Flow::Value(RuntimeValue::Value(Value::Integer(value)))
             }

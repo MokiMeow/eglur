@@ -332,7 +332,7 @@ impl<'a> Planner<'a> {
                 UnsupportedFeature::InvalidCheckedProgram,
             ));
         };
-        if !is_fixed_width_integer(result) {
+        if !result.is_fixed_width_integer() {
             return Err(SupportReason::Feature(
                 UnsupportedFeature::InvalidCheckedProgram,
             ));

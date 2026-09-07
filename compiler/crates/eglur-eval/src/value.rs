@@ -1,30 +1,7 @@
 use std::collections::BTreeMap;
 
-use eglur_sema::{CanonicalTarget, PrimitiveType};
-
-/// One exact integer or integer-valued domain-scalar runtime value.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct IntegerValue {
-    primitive: PrimitiveType,
-    value: i128,
-}
-
-impl IntegerValue {
-    #[must_use]
-    pub(crate) const fn new(primitive: PrimitiveType, value: i128) -> Self {
-        Self { primitive, value }
-    }
-
-    #[must_use]
-    pub const fn primitive(self) -> PrimitiveType {
-        self.primitive
-    }
-
-    #[must_use]
-    pub const fn value(self) -> i128 {
-        self.value
-    }
-}
+use eglur_sema::CanonicalTarget;
+pub use eglur_sema::IntegerValue;
 
 /// Runtime diagnostic retained outside compile diagnostics.
 #[derive(Clone, Debug, Eq, PartialEq)]
