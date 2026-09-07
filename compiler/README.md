@@ -104,8 +104,9 @@ cargo build --workspace --locked
 It resolves dtype aliases, checks dimensions against `Nat`, and records the
 `Tensor[T]` result and call effects. Dynamic dimensions do not require shape
 inference. The evaluator rejects these calls before executing the program.
-Dimension expressions still require supported core operations: unary negation,
-including a negative literal, currently reports a missing operator capability.
+Direct negative integer literals share the core range checks: `-0` is a valid
+`Nat`, while negative nonzero dimensions report `DOMAIN_INVALID_VALUE`.
+Other dimension expressions still require supported core operations.
 Ordinary-call constructor forms, named dimensions, tensor operations, and
 storage or backend implementation remain unsupported; the core profile does
 not enable constructor checks.

@@ -790,3 +790,53 @@ fn decorated() -> Unit = ()
         .collect::<Vec<_>>();
     assert_eq!(written, ["key = nested(1)", "\"value\""]);
 }
+
+#[test]
+fn direct_integer_minus_retains_one_literal_and_its_complete_source_span() {
+    let text = "fn value() -> i8 = - /* sign */ 128\n";
+    let parse = parse_text(91, text);
+    assert!(parse.is_success());
+    let hir = lower(&parse);
+    let (_, body) = hir.bodies().next().unwrap();
+    let literals = body
+        .expressions()
+        .filter_map(|(_, expression)| match expression.kind() {
+            ExprKind::Literal(literal) => Some(literal),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(literals.len(), 1);
+    assert_eq!(literals[0].spelling(), "-128");
+    let SourceOrigin::Written(span) = hir.origin(literals[0].origin()) else {
+        panic!("written span");
+    };
+    assert_eq!(
+        &text[span.range().start().get() as usize..span.range().end().get() as usize],
+        "- /* sign */ 128"
+    );
+}
+
+#[test]
+fn nonliteral_and_grouped_negation_keep_operator_structure() {
+    for source in [
+        "fn value(x: i8) -> i8 = -x\n",
+        "fn value() -> i8 = -(128)\n",
+        "fn value() -> i8 = --128\n",
+    ] {
+        let parse = parse_text(92, source);
+        assert!(parse.is_success(), "{source}");
+        let hir = lower(&parse);
+        assert!(
+            hir.bodies()
+                .flat_map(|(_, body)| body.expressions())
+                .any(|(_, expression)| matches!(
+                    expression.kind(),
+                    ExprKind::Unary {
+                        operator: eglur_hir::UnaryOperator::Negate,
+                        ..
+                    }
+                )),
+            "{source}"
+        );
+    }
+}

@@ -271,10 +271,6 @@ fn broader_tensor_forms_remain_explicitly_unsupported() {
             "import std::tensor::ones\nfn make() -> Unit { let t = ones[f32](dims = 2)\nyield () }\n",
             TypecheckCapability::AnalyzeTensorSource,
         ),
-        (
-            "import std::tensor::ones\nfn make() -> Unit { let t = ones[f32](-1)\nyield () }\n",
-            TypecheckCapability::CheckOperators,
-        ),
     ] {
         let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
         let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
@@ -295,6 +291,11 @@ fn broader_tensor_forms_remain_explicitly_unsupported() {
 
 #[test]
 fn aliases_normalize_before_closed_dtype_checks_and_nat_remains_exact() {
+    reject(
+        "import std::tensor::ones\nfn make() -> Unit { let t = ones[f32](-1)\nyield () }\n",
+        "DOMAIN_INVALID_VALUE",
+    );
+    accept("import std::tensor::ones\nfn make() -> Unit { let t = ones[f32](-0)\nyield () }\n");
     accept(
         "import std::tensor::zeros\nimport std::tensor::Tensor\ntype Flag = Bool\ntype FlagAgain = Flag\nfn make() -> Tensor[Bool] = zeros[FlagAgain](1)\n",
     );

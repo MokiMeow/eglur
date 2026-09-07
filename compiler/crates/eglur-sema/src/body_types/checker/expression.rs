@@ -434,8 +434,28 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             (self.primitive(PrimitiveType::I64)?, PrimitiveType::I64)
         };
 
-        if let Some(maximum) = fixed_width_integer_max(primitive)
-            && !decimal_literal_fits(literal.spelling(), maximum)
+        let (negative, magnitude) = literal
+            .spelling()
+            .strip_prefix('-')
+            .map_or((false, literal.spelling()), |digits| (true, digits));
+        let zero = decimal_literal_is_zero(magnitude);
+        let maximum = if negative && !zero {
+            match primitive {
+                PrimitiveType::I8 => Some("128"),
+                PrimitiveType::I16 => Some("32768"),
+                PrimitiveType::I32 => Some("2147483648"),
+                PrimitiveType::I64 => Some("9223372036854775808"),
+                PrimitiveType::U8
+                | PrimitiveType::U16
+                | PrimitiveType::U32
+                | PrimitiveType::U64 => Some("0"),
+                _ => None,
+            }
+        } else {
+            fixed_width_integer_max(primitive)
+        };
+        if let Some(maximum) = maximum
+            && !decimal_literal_fits(magnitude, maximum)
         {
             let poison = self.type_error(
                 source,
@@ -457,9 +477,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
 
         if matches!(primitive, PrimitiveType::Nat | PrimitiveType::PositiveNat) {
-            let in_range = decimal_literal_fits(literal.spelling(), "9223372036854775807")
-                && (primitive == PrimitiveType::Nat
-                    || !decimal_literal_is_zero(literal.spelling()));
+            let in_range = (!negative || zero)
+                && decimal_literal_fits(magnitude, "9223372036854775807")
+                && (primitive == PrimitiveType::Nat || !zero);
             if !in_range {
                 let poison = self.type_error(
                     source,

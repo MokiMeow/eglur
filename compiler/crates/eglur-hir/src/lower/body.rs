@@ -26,6 +26,26 @@ impl Builder {
         }
 
         let written_origin = self.written(node.span());
+        if node.kind() == SyntaxKind::UnaryExpr
+            && let Some(sign) = direct_token(&node, SyntaxKind::Minus)
+            && let Some(operand) = expression_children(&node).into_iter().next()
+            && operand.kind() == SyntaxKind::LiteralExpr
+            && let Some(token) = direct_token(&operand, SyntaxKind::Integer)
+        {
+            // Keep the sign with the magnitude so signed minima need no out-of-range operand.
+            let range = eglur_source::ByteRange::new(
+                sign.span().range().start(),
+                token.span().range().end(),
+            )
+            .expect("signed literal tokens are source ordered");
+            let origin = self.written(eglur_source::FileSpan::new(node.span().file(), range));
+            let literal = Literal::new(
+                LiteralKind::Integer,
+                format!("-{}", token.text()).into_boxed_str(),
+                origin,
+            );
+            return self.alloc_expr(body, Expr::new(written_origin, ExprKind::Literal(literal)));
+        }
         let kind = match node.kind() {
             SyntaxKind::BlockExpr => ExprKind::Block {
                 statements: direct_nodes(&node)
