@@ -1,0 +1,432 @@
+# Suite: core/network.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - std::net failures are value-channel `Res::Err` outcomes in baseline paths.
+
+tests:
+- id: NET-parse-net-addr-accepts-canonical-ipv4-host-port-text
+  category: network
+  title: parse_net_addr accepts canonical IPv4 host port text
+  code: |
+    import std::net::parse_net_addr
+
+    fn main!() -> Res[Str, Str] {
+      let a = parse_net_addr("127.0.0.1:0")
+      let b = parse_net_addr("192.168.1.10:65535")
+      yield Ok(to_str(a.is_ok() && b.is_ok()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: NET-parse-net-addr-rejects-malformed-or-out-of-range-text
+  category: network
+  title: parse_net_addr rejects malformed or out of range text
+  code: |
+    import std::net::{parse_net_addr, NetAddr, NetError}
+
+    fn main!() -> Res[NetAddr, NetError] = parse_net_addr("127.0.0.1")
+  expect:
+    value:
+      kind: Err
+      repr: NetError
+
+- id: NET-parse-net-addr-rejects-out-of-range-octet-text
+  category: network
+  title: parse_net_addr rejects out-of-range octet text
+  code: |
+    import std::net::{parse_net_addr, NetAddr, NetError}
+
+    fn main!() -> Res[NetAddr, NetError] = parse_net_addr("999.0.0.1:80")
+  expect:
+    value:
+      kind: Err
+      repr: NetError
+
+- id: NET-parse-net-addr-rejects-out-of-range-port-text
+  category: network
+  title: parse_net_addr rejects out-of-range port text
+  code: |
+    import std::net::{parse_net_addr, NetAddr, NetError}
+
+    fn main!() -> Res[NetAddr, NetError] = parse_net_addr("127.0.0.1:70000")
+  expect:
+    value:
+      kind: Err
+      repr: NetError
+
+- id: NET-error-kind-and-display-cover-portable-categories
+  category: network
+  title: NetError kind and Display cover every portable category
+  code: |
+    import std::net::{NetErrorKind, parse_net_addr}
+
+    fn main!() -> Res[Str, Str] {
+      let labels = concat([
+        NetErrorKind::InvalidAddress.to_str(), "|",
+        NetErrorKind::AddressInUse.to_str(), "|",
+        NetErrorKind::AddressUnavailable.to_str(), "|",
+        NetErrorKind::PermissionDenied.to_str(), "|",
+        NetErrorKind::ConnectionRefused.to_str(), "|",
+        NetErrorKind::ConnectionReset.to_str(), "|",
+        NetErrorKind::ConnectionAborted.to_str(), "|",
+        NetErrorKind::NotConnected.to_str(), "|",
+        NetErrorKind::Unreachable.to_str(), "|",
+        NetErrorKind::BrokenPipe.to_str(), "|",
+        NetErrorKind::Interrupted.to_str(), "|",
+        NetErrorKind::TimedOut.to_str(), "|",
+        NetErrorKind::ResourceExhausted.to_str(), "|",
+        NetErrorKind::Unsupported.to_str(), "|",
+        NetErrorKind::Other.to_str()
+      ])
+      let labels_ok = labels == "invalid address|address in use|address unavailable|permission denied|connection refused|connection reset|connection aborted|not connected|unreachable|broken pipe|interrupted|timed out|resource exhausted|unsupported|other"
+      let error_ok = match parse_net_addr("not-an-address") {
+        Err(error) => (error.kind() == NetErrorKind::InvalidAddress) &&
+          (error.kind().to_str() == "invalid address") &&
+          (error.to_str() == "network error: invalid address")
+        Ok(_) => false
+      }
+      yield Ok(to_str(labels_ok && error_ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: NET-non-bang-function-cannot-call-tcp-connect
+  category: network
+  title: non-bang function cannot call tcp_connect!
+  code: |
+    import std::net::{NetAddr, NetError, TcpStream, tcp_connect!}
+
+    fn f(addr: NetAddr) -> Res[Own[TcpStream], NetError] = tcp_connect!(addr)
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+
+- id: NET-tcp-bind-supports-loopback-port-zero-and-consuming-close
+  category: network
+  title: tcp_bind! supports loopback port zero and consuming close
+  code: |
+    import std::net::{parse_net_addr, tcp_bind!}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let addr = parse_net_addr("127.0.0.1:0").map_err { |_| "addr" }?
+        let listener = tcp_bind!(addr).map_err { |_| "bind" }?
+        _ = listener.local_addr()
+        _ = (move listener).close!().map_err { |_| "close" }?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: NET-with-tcp-stream-connect-failure-is-value-channel-err-without-callback
+  category: network
+  title: with_tcp_stream! maps connect failure to Primary without callback
+  code: |
+    import std::net::{parse_net_addr, with_tcp_stream!, NetError}
+    import std::test::emit!
+
+    fn main!() -> Res[Str, NetError] =
+      result {
+        let addr = parse_net_addr("127.0.0.1:0")?
+        let outcome = with_tcp_stream!(addr) { |_stream|
+          result {
+            emit!("unexpected-callback")
+            yield Ok("unexpected")
+          }
+        }
+        let observed = match outcome {
+          Err(ScopedFailure::Primary(_)) => true,
+          Err(ScopedFailure::PrimaryAndClose { .. }) => false,
+          Ok(_) => false,
+        }
+        yield Ok(to_str(observed))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+    side_effects: []
+
+- id: NET-direct-tcp-connect-failure-discharges-conditional-root-by-match
+  category: network
+  title: direct tcp_connect! failure discharges conditional root by match
+  code: |
+    import std::net::{parse_net_addr, tcp_connect!, NetError}
+
+    fn main!() -> Res[Str, NetError] =
+      result {
+        let addr = parse_net_addr("127.0.0.1:0")?
+        let attempt = tcp_connect!(addr)
+        yield match move attempt {
+          Ok(stream) => {
+            _ = (move stream).close!()?
+            yield Ok("unexpected")
+          }
+          Err(error) => Err(error)
+        }
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NetError
+
+- id: NET-tcplistener-repeated-consuming-close-is-ownership-double-move
+  category: network
+  title: TcpListener repeated consuming close is ownership double move
+  code: |
+    import std::net::{TcpListener, NetError}
+
+    fn repeat_close!(listener: Own[TcpListener]) -> Res[Unit, NetError] =
+      result {
+        _ = (move listener).close!()?
+        yield (move listener).close!()
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DOUBLE_MOVE
+      message_contains:
+      - ownership
+      - move
+      - already consumed
+      data_keys: []
+
+- id: NET-tcpstream-repeated-consuming-close-is-ownership-double-move
+  category: network
+  title: TcpStream repeated consuming close is ownership double move
+  code: |
+    import std::net::{TcpStream, NetError}
+
+    fn repeat_close!(stream: Own[TcpStream]) -> Res[Unit, NetError] =
+      result {
+        _ = (move stream).close!()?
+        yield (move stream).close!()
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DOUBLE_MOVE
+      message_contains:
+      - ownership
+      - move
+      - already consumed
+      data_keys: []
+
+- id: NET-scoped-tcp-streams-accumulate-fragmented-bytes-and-close-on-callback-exit
+  category: network
+  title: scoped TCP streams accumulate fragmented bytes and close on callback exit
+  code: |
+    import std::concurrency::spawn!
+    import std::net::{parse_net_addr, with_tcp_listener!, with_tcp_stream!, NetError}
+    import std::test::abort!
+
+    fn main!() -> Res[Str, Union[NetError, ScopedFailure[NetError]]] =
+      result {
+        let addr = parse_net_addr("127.0.0.1:0")?
+        let observed = with_tcp_listener!(addr) { |listener|
+          result {
+            let bound = listener.local_addr()
+            _ = spawn! {
+              let sender_result = with_tcp_stream!(bound) { |client|
+                result {
+                  let a: u8 = 65
+                  let b: u8 = 66
+                  _ = client.write_all!(Vec[u8].new().push(a).push(b))?
+                  yield Ok(())
+                }
+              }
+              match sender_result {
+                Ok(_) => ()
+                Err(_) => {
+                  abort!("RUNTIME_ABORT", "loopback sender failed")
+                  ()
+                }
+              }
+            }
+            let receive_result = listener.accept_with! { |server|
+              result {
+                let first = server.read_chunk!(1)?
+                let second = server.read_chunk!(1)?
+                let eof = server.read_chunk!(1)?
+                let repeated_eof = server.read_chunk!(1)?
+                let first_bytes = first.unwrap_or(Vec[u8].new())
+                let second_bytes = second.unwrap_or(Vec[u8].new())
+                let first_len = first_bytes.len()
+                let second_len = second_bytes.len()
+                let accumulated = first_bytes.concat(second_bytes)
+                let expected = Vec[u8].new().push(65).push(66)
+                yield Ok(first_len == 1 && second_len == 1 && accumulated == expected && eof.is_none() && repeated_eof.is_none())
+              }
+            }
+            let received = match receive_result {
+              Ok(value) => value,
+              Err(_) => {
+                abort!("RUNTIME_ABORT", "loopback accept failed")
+                false
+              }
+            }
+            yield Ok(received)
+          }
+        }?
+        yield Ok(to_str(observed))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: NET-tcpstream-read-chunk-returns-none-after-scoped-peer-closes
+  category: network
+  title: TcpStream read_chunk! returns None after scoped peer closes
+  code: |
+    import std::concurrency::spawn!
+    import std::net::{parse_net_addr, with_tcp_listener!, with_tcp_stream!, NetError}
+    import std::test::abort!
+
+    fn main!() -> Res[Str, Union[NetError, ScopedFailure[NetError]]] =
+      result {
+        let addr = parse_net_addr("127.0.0.1:0")?
+        let observed = with_tcp_listener!(addr) { |listener|
+          result {
+            let bound = listener.local_addr()
+            _ = spawn! {
+              let sender_result = with_tcp_stream!(bound) { |client|
+                result {
+                  let x: u8 = 1
+                  _ = client.write_all!(Vec[u8].new().push(x))?
+                  yield Ok(())
+                }
+              }
+              match sender_result {
+                Ok(_) => ()
+                Err(_) => {
+                  abort!("RUNTIME_ABORT", "EOF sender failed")
+                  ()
+                }
+              }
+            }
+            let receive_result = listener.accept_with! { |server|
+              result {
+                let first = server.read_chunk!(1)?
+                let final = server.read_chunk!(1)?
+                let repeated = server.read_chunk!(1)?
+                let first_len = first.unwrap_or(Vec[u8].new()).len()
+                yield Ok(first_len == 1 && final.is_none() && repeated.is_none())
+              }
+            }
+            let eof = match receive_result {
+              Ok(value) => value,
+              Err(_) => {
+                abort!("RUNTIME_ABORT", "EOF accept failed")
+                false
+              }
+            }
+            yield Ok(eof)
+          }
+        }?
+        yield Ok(to_str(observed))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: NET-tcplistener-accept-returns-owned-stream-that-can-be-consumed
+  category: network
+  title: TcpListener accept! returns owned stream that can be consumed
+  code: |
+    import std::net::{TcpListener, NetError}
+
+    fn accept_and_close!(listener: &mut Own[TcpListener]) -> Res[Unit, NetError] =
+      result {
+        let stream = listener.accept!()?
+        yield (move stream).close!()
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("ok") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: NET-tcpstream-read-chunk-zero-max-bytes-is-domain-invalid-value
+  category: network
+  title: TcpStream read_chunk! zero max_bytes is DOMAIN_INVALID_VALUE
+  code: |
+    import std::net::TcpStream
+
+    fn bad!(stream: &mut Own[TcpStream]) -> Unit {
+      _ = stream.read_chunk!(0)
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+
+- id: NET-tcpstream-io-after-consuming-close-is-ownership-use-after-discharge
+  category: network
+  title: TcpStream IO after consuming close is ownership use after discharge
+  code: |
+    import std::net::{TcpStream, NetError}
+
+    fn write_after_close!(stream: Own[TcpStream]) -> Res[Unit, NetError] =
+      result {
+        _ = (move stream).close!()?
+        yield stream.write_all!(Vec[u8].new())
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+
+- id: NET-network-metadata-after-consuming-close-is-ownership-use-after-discharge
+  category: network
+  title: network metadata after consuming close is ownership use after discharge
+  code: |
+    import std::net::{TcpListener, NetAddr, NetError}
+
+    fn metadata_after_close!(listener: Own[TcpListener]) -> Res[NetAddr, NetError] =
+      result {
+        _ = (move listener).close!()?
+        yield Ok(listener.local_addr())
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []

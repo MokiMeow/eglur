@@ -1,0 +1,1023 @@
+# Suite: core/traverse.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Structured diagnostics use code/message/data assertions.
+
+tests:
+- id: TRV-traverse-res-success-collects-ok-values
+  category: traverse
+  title: traverse_res success collects Ok values
+  code: |
+    fn f(x: i64) -> Res[i64, Str] = Ok(wrapping_mul(x, 2))
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let xs = [1,2,3].traverse_res { f(_) }?
+        yield Ok(to_str(xs))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,4,6]"'
+- id: TRV-traverse-res-is-left-to-right-and-fail-fast
+  category: traverse
+  title: traverse_res! is left-to-right and fail-fast
+  code: |
+    import std::test::emit!
+
+    fn f!(x: i64) -> Res[i64, Str] {
+      emit!(f"f({x})")
+      yield if x == 2 { yield Err("bad") } else { yield Ok(x) }
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = [1,2,3].traverse_res! { f!(_) }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"bad"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 1
+      data_keys:
+      - index
+    side_effects:
+    - f(1)
+    - f(2)
+- id: TRV-sequence-res-collects-ok-values
+  category: traverse
+  title: sequence_res collects Ok values
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        let xs = [Ok(1), Ok(2), Ok(3)].sequence_res()?
+        yield Ok(to_str(xs))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[1,2,3]"'
+- id: TRV-sequence-res-stops-at-first-err-and-reports-index
+  category: traverse
+  title: sequence_res stops at first Err and reports index
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = [Ok(1), Err("e"), Ok(3)].sequence_res()?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"e"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 1
+      data_keys:
+      - index
+- id: TRV-traverse-opt-stops-at-first-none-and-does-not-evaluate-later
+  category: traverse
+  title: traverse_opt! stops at first None and does not evaluate later
+  code: |
+    import std::test::emit!
+
+    fn g!(x: i64) -> Opt[i64] {
+      emit!(f"g({x})")
+      yield if x == 2 { yield None } else { yield Some(x) }
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let r = [1,2,3].traverse_opt! { g!(_) }
+        _ = r.ok_or("none")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"none"'
+    side_effects:
+    - g(1)
+    - g(2)
+- id: TRV-traverse-res-failure-at-index-0-emits-only-first
+  category: traverse
+  title: traverse_res! failure at index 0 emits only first
+  code: |
+    import std::test::emit!
+
+    fn f!(x: i64) -> Res[i64, Str] {
+      emit!(f"call {x}")
+      yield if x == 0 { yield Err("stop") } else { yield Ok(x) }
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = [0,1].traverse_res! { f!(_) }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"stop"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 0
+      data_keys:
+      - index
+    side_effects:
+    - call 0
+- id: TRV-diagnostics-include-0-based-index
+  category: traverse
+  title: Diagnostics include 0-based index
+  code: |
+    fn f(x: i64) -> Res[i64, Str] = Err("boom")
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = [9].traverse_res { f(_) }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"boom"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 0
+      data_keys:
+      - index
+- id: TRV-sequence-opt-collects-when-no-none
+  category: traverse
+  title: sequence_opt collects when no None
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        let r = [Some(1), Some(2)].sequence_opt().ok_or("none")?
+        yield Ok(to_str(r))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[1,2]"'
+- id: TRV-sequence-opt-stops-at-first-none
+  category: traverse
+  title: sequence_opt stops at first None
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = [Some(1), None, Some(3)].sequence_opt().ok_or("none")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"none"'
+- id: TRV-fold-over-empty-sequence-returns-init
+  category: traverse
+  title: fold over empty sequence returns init
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [].fold(7) { |acc, _x| wrapping_add(acc, 1) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: TRV-fold-evaluates-left-to-right
+  category: traverse
+  title: fold evaluates left-to-right
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3].fold(0) { |acc, x| wrapping_add(wrapping_mul(acc, 10), x) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"123"'
+- id: TRV-fold-res-fail-fast-returns-first-err-and-reports-index
+  category: traverse
+  title: fold_res fail-fast returns first Err and reports index
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = [1,2,3].fold_res(0) { |acc, x|
+          if x == 2 { yield Err("bad") } else { yield Ok(wrapping_add(acc, x)) }
+        }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"bad"'
+    value_diagnostics:
+    - code: FOLD_RES_FAIL
+      message_contains:
+      - index 1
+      data_keys:
+      - index
+- id: TRV-scan-excludes-init-from-output
+  category: traverse
+  title: scan excludes init from output
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3].scan(0) { |acc, x| wrapping_add(acc, x) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[1,3,6]"'
+- id: TRV-scan0-includes-init-as-first-output
+  category: traverse
+  title: scan0 includes init as first output
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3].scan0(0) { |acc, x| wrapping_add(acc, x) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[0,1,3,6]"'
+- id: TRV-scan-over-empty-sequence-returns-empty-sequence
+  category: traverse
+  title: scan over empty sequence returns empty sequence
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [].scan(9) { |acc, x| wrapping_add(acc, x) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[]"'
+- id: TRV-scan0-over-empty-sequence-returns-singleton-seed-sequence
+  category: traverse
+  title: scan0 over empty sequence returns singleton seed sequence
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [].scan0(9) { |acc, x| wrapping_add(acc, x) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[9]"'
+- id: TRV-fold-executes-callback-effects-left-to-right
+  category: traverse
+  title: fold! executes callback effects left-to-right
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3].fold!(0) { |acc, x|
+        emit!(to_str(x))
+        wrapping_add(acc, x)
+      }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"6"'
+    side_effects:
+    - "1"
+    - "2"
+    - "3"
+- id: TRV-fold-res-is-fail-fast-and-stops-effects-after-first-err
+  category: traverse
+  title: fold_res! is fail-fast and stops effects after first Err
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = [1,2,3].fold_res!(0) { |acc, x|
+          emit!(to_str(x))
+          if x == 2 { yield Err("bad") } else { yield Ok(wrapping_add(acc, x)) }
+        }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"bad"'
+    value_diagnostics:
+    - code: FOLD_RES_FAIL
+      message_contains:
+      - index 1
+      data_keys:
+      - index
+    side_effects:
+    - "1"
+    - "2"
+- id: TRV-scan-callback-effects-are-not-replayed-by-iterating-output-sequence
+  category: traverse
+  title: scan! callback effects are not replayed by iterating output sequence
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3].scan!(0) { |acc, x|
+        emit!(f"s({x})")
+        wrapping_add(acc, x)
+      }
+      r.for_each! { |v| emit!(f"a({v})") }
+      r.for_each! { |v| emit!(f"b({v})") }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[1,3,6]"'
+    side_effects:
+    - s(1)
+    - s(2)
+    - s(3)
+    - a(1)
+    - a(3)
+    - a(6)
+    - b(1)
+    - b(3)
+    - b(6)
+- id: TRV-pure-scan-rejects-effectful-callback
+  category: traverse
+  title: pure scan rejects effectful callback
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      _ = [1,2].scan(0) { |acc, x|
+        emit!(to_str(x))
+        wrapping_add(acc, x)
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: TRV-filter-map-keeps-some-values-in-order
+  category: traverse
+  title: filter_map keeps Some values in order
+  code: |
+    fn keep_even(x: i64) -> Opt[i64] {
+      yield if (x % 2) == 0 { yield Some(wrapping_mul(x, 10)) } else { yield None }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3,4].filter_map { keep_even(_) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[20,40]"'
+- id: TRV-flat-map-drop-drop-while-and-to-set-cover-sequence-shaping
+  category: traverse
+  title: flat_map drop drop_while and to_set cover sequence shaping
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let flat = [1,2,3].flat_map { |x| [x, wrapping_add(x, 10)] }
+      let dropped = [1,2,3,4].drop(2)
+      let kept = [1,2,3,1].drop_while { _ < 3 }
+      let set_items = [2,1,2].to_set().items().to_vec()
+      yield Ok(to_str([flat, dropped, kept, set_items]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[1,11,2,12,3,13],[3,4],[3,1],[2,1]]"'
+- id: TRV-find-map-returns-first-some-and-short-circuits
+  category: traverse
+  title: find_map returns first Some and short-circuits
+  code: |
+    fn first_hit(x: i64) -> Opt[i64] {
+      yield if x > 2 { yield Some(wrapping_mul(x, 2)) } else { yield None }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3,4].find_map { first_hit(_) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"Some(6)"'
+- id: TRV-any-short-circuits-effects-at-first-true
+  category: traverse
+  title: any! short-circuits effects at first true
+  code: |
+    import std::test::emit!
+
+    fn p!(x: i64) -> Bool {
+      emit!(f"p({x})")
+      yield x == 3
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3,4].any! { p!(_) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+    side_effects:
+    - p(1)
+    - p(2)
+    - p(3)
+- id: TRV-all-short-circuits-effects-at-first-false
+  category: traverse
+  title: all! short-circuits effects at first false
+  code: |
+    import std::test::emit!
+
+    fn p!(x: i64) -> Bool {
+      emit!(f"a({x})")
+      yield x < 3
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3,4].all! { p!(_) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"false"'
+    side_effects:
+    - a(1)
+    - a(2)
+    - a(3)
+- id: TRV-partition-preserves-encounter-order-in-both-outputs
+  category: traverse
+  title: partition preserves encounter order in both outputs
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let (left, right) = [3,1,4,2,5].partition { (_ % 2) == 0 }
+      yield Ok(to_str([left, right]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[4,2],[3,1,5]]"'
+- id: TRV-zip-pairs-elements-left-to-right-with-tuple-projection
+  category: traverse
+  title: zip pairs elements left-to-right with tuple projection
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3].zip(["a","b"]).map { |p| concat([to_str(p.0), ":", p.1]) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[\"1:a\",\"2:b\"]"'
+- id: TRV-enumerate-emits-zero-based-indices-with-tuple-projection
+  category: traverse
+  title: enumerate emits zero-based indices with tuple projection
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = ["x","y"].enumerate().map { |p| concat([to_str(p.0), "=", p.1]) }
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[\"0=x\",\"1=y\"]"'
+- id: TRV-flatten-concatenates-nested-sequences-in-left-to-right-order
+  category: traverse
+  title: flatten concatenates nested sequences in left-to-right order
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [[1,2], [], [3], [4,5]].flatten()
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[1,2,3,4,5]"'
+- id: TRV-chunk-partitions-into-non-overlapping-groups-with-remainder
+  category: traverse
+  title: chunk partitions into non-overlapping groups with remainder
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3,4,5].chunk(2)
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[1,2],[3,4],[5]]"'
+- id: TRV-window-emits-overlapping-windows-and-drops-incomplete-tail
+  category: traverse
+  title: window emits overlapping windows and drops incomplete tail
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = [1,2,3,4,5].window(3)
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[1,2,3],[2,3,4],[3,4,5]]"'
+- id: TRV-chunk-and-window-with-zero-size-return-empty-sequence
+  category: traverse
+  title: chunk and window with zero size return empty sequence
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let a = [1,2,3].chunk(0)
+      let b = [1,2,3].window(0)
+      yield Ok(to_str([a, b]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[],[]]"'
+
+- id: TRV-window-negative-size-is-domain-invalid-value
+  category: traverse
+  title: window negative size is DOMAIN_INVALID_VALUE
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = [1,2,3].window(-1)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+- id: TRV-group-by-preserves-key-encounter-order-and-group-encounter-order
+  category: traverse
+  title: group_by preserves key encounter order and group encounter order
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        let g = [3,1,4,2,5].group_by { _ % 2 }
+        let keys = g.keys().to_vec()
+        let odds = g.get(&1).ok_or("missing odds")?
+        let evens = g.get(&0).ok_or("missing evens")?
+        yield Ok(to_str([keys, odds, evens]))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[1,0],[3,1,5],[4,2]]"'
+- id: TRV-bang-filter-map-find-map-and-group-by-evaluate-left-to-right
+  category: traverse
+  title: bang filter_map find_map and group_by evaluate left-to-right
+  code: |
+    import std::test::emit!
+
+    fn keep_even!(x: i64) -> Opt[i64] {
+      emit!(f"f({x})")
+      if (x % 2) == 0 {
+        return Some(wrapping_mul(x, 10))
+      }
+      return None
+    }
+
+    fn first_hit!(x: i64) -> Opt[i64] {
+      emit!(f"m({x})")
+      if x == 3 {
+        return Some(x)
+      }
+      return None
+    }
+
+    fn parity_key!(x: i64) -> i64 {
+      emit!(f"g({x})")
+      return x % 2
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let kept = [1,2,3,4].filter_map! { keep_even!(_) }
+        let hit = [1,2,3,4].find_map! { first_hit!(_) }
+        let grouped = [3,1,4,2].group_by! { parity_key!(_) }
+        let odds = grouped.get(&1).ok_or("missing odds")?
+        let evens = grouped.get(&0).ok_or("missing evens")?
+        yield Ok(to_str([kept, [hit.unwrap_or(0)], odds, evens]))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[20,40],[3],[3,1],[4,2]]"'
+    side_effects:
+    - f(1)
+    - f(2)
+    - f(3)
+    - f(4)
+    - m(1)
+    - m(2)
+    - m(3)
+    - g(3)
+    - g(1)
+    - g(4)
+    - g(2)
+- id: TRV-bang-map-effects-finish-before-return-and-never-replay
+  category: traverse
+  title: map! effects finish before return and never replay
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let mapped = [1,2].map! { |x|
+        emit!(f"map({x})")
+        wrapping_mul(x, 10)
+      }
+      emit!("map-returned")
+      mapped.for_each! { |x| emit!(f"first({x})") }
+      mapped.for_each! { |x| emit!(f"second({x})") }
+      yield Ok(to_str(mapped))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[10,20]"'
+    side_effects:
+    - map(1)
+    - map(2)
+    - map-returned
+    - first(10)
+    - first(20)
+    - second(10)
+    - second(20)
+- id: TRV-bang-find-effects-finish-before-return-and-stop-at-first-match
+  category: traverse
+  title: find! effects finish before return and stop at first match
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let found = [1,2,3,4].find! { |x|
+        emit!(f"find({x})")
+        x == 3
+      }
+      emit!("find-returned")
+      yield Ok(to_str(found))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"Some(3)"'
+    side_effects:
+    - find(1)
+    - find(2)
+    - find(3)
+    - find-returned
+- id: TRV-bang-partition-effects-finish-before-return-and-never-replay
+  category: traverse
+  title: partition! effects finish before return and never replay
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let (evens, odds) = [3,1,4,2].partition! { |x|
+        emit!(f"partition({x})")
+        (x % 2) == 0
+      }
+      emit!("partition-returned")
+      evens.for_each! { |x| emit!(f"even({x})") }
+      odds.for_each! { |x| emit!(f"odd({x})") }
+      yield Ok(to_str([evens, odds]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[4,2],[3,1]]"'
+    side_effects:
+    - partition(3)
+    - partition(1)
+    - partition(4)
+    - partition(2)
+    - partition-returned
+    - even(4)
+    - even(2)
+    - odd(3)
+    - odd(1)
+- id: TRV-bang-scan0-effects-finish-before-return-and-never-replay
+  category: traverse
+  title: scan0! effects finish before return and never replay
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let scanned = [1,2].scan0!(0) { |acc, x|
+        emit!(f"scan0({x})")
+        wrapping_add(acc, x)
+      }
+      emit!("scan0-returned")
+      scanned.for_each! { |x| emit!(f"first({x})") }
+      scanned.for_each! { |x| emit!(f"second({x})") }
+      yield Ok(to_str(scanned))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[0,1,3]"'
+    side_effects:
+    - scan0(1)
+    - scan0(2)
+    - scan0-returned
+    - first(0)
+    - first(1)
+    - first(3)
+    - second(0)
+    - second(1)
+    - second(3)
+- id: TRV-pure-any-rejects-effectful-callback
+  category: traverse
+  title: pure any rejects effectful callback
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      _ = [1,2,3].any { |x|
+        emit!(to_str(x))
+        x > 0
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: TRV-pure-filter-map-rejects-effectful-callback
+  category: traverse
+  title: pure filter_map rejects effectful callback
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      _ = [1,2,3].filter_map { |x|
+        emit!(to_str(x))
+        Some(x)
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: TRV-pure-group-by-rejects-effectful-callback
+  category: traverse
+  title: pure group_by rejects effectful callback
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      _ = [1,2,3].group_by { |x|
+        emit!(to_str(x))
+        x % 2
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: TRV-find-res-fail-fast-returns-first-err-and-reports-index
+  category: traverse
+  title: find_res fail-fast returns first Err and reports index
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = [1,2,3].find_res { |x|
+          if x == 2 { yield Err("bad") } else { yield Ok(x > 10) }
+        }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"bad"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 1
+      data_keys:
+      - index
+- id: TRV-find-map-res-short-circuits-at-first-ok-some-and-stops-effects
+  category: traverse
+  title: find_map_res! short-circuits at first Ok(Some) and stops effects
+  code: |
+    import std::test::emit!
+
+    fn f!(x: i64) -> Res[Opt[i64], Str] {
+      emit!(f"fm({x})")
+      yield if x == 3 { yield Ok(Some(wrapping_mul(x, 10))) } else { yield Ok(None) }
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let r = [1,2,3,4].find_map_res! { f!(_) }?
+        yield Ok(to_str(r))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"Some(30)"'
+    side_effects:
+    - fm(1)
+    - fm(2)
+    - fm(3)
+- id: TRV-find-map-res-pure-short-circuits-at-first-ok-some
+  category: traverse
+  title: find_map_res pure short-circuits at first Ok(Some)
+  code: |
+    fn fm(x: i64) -> Res[Opt[i64], Str] = match x {
+      3 => Ok(Some(30)),
+      _ => Ok(None),
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let r = [1,2,3,4].find_map_res { fm(_) }?
+        yield Ok(to_str(r))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"Some(30)"'
+- id: TRV-filter-map-res-and-partition-res-evaluate-left-to-right-and-preserve-behavior
+  category: traverse
+  title: filter_map_res and partition_res evaluate left-to-right and preserve behavior
+  code: |
+    fn fm(x: i64) -> Res[Opt[i64], Str] {
+      yield if x == 4 {
+        yield Err("stop")
+      } else if (x % 2) == 0 {
+        yield Ok(Some(x))
+      } else {
+        yield Ok(None)
+      }
+    }
+
+    fn pp(x: i64) -> Res[Bool, Str] = Ok((x % 2) == 0)
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let (left, right) = [3,1,4,2,5].partition_res { pp(_) }?
+        _ = [1,2,3,4,5].filter_map_res { fm(_) }?
+        yield Ok(concat([to_str(left), "|", to_str(right)]))
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"stop"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 3
+      data_keys:
+      - index
+- id: TRV-partition-res-success-preserves-encounter-order-in-both-partitions
+  category: traverse
+  title: partition_res success preserves encounter order in both partitions
+  code: |
+    fn p(x: i64) -> Res[Bool, Str] = Ok((x % 2) == 0)
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let (left, right) = [3,1,4,2,5].partition_res { p(_) }?
+        yield Ok(to_str([left, right]))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[4,2],[3,1,5]]"'
+- id: TRV-find-res-bang-short-circuits-at-first-ok-true
+  category: traverse
+  title: find_res! short-circuits at first Ok(true)
+  code: |
+    import std::test::emit!
+
+    fn p!(x: i64) -> Res[Bool, Str] {
+      emit!(f"r({x})")
+      return Ok(x == 3)
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let r = [1,2,3,4].find_res! { p!(_) }?
+        yield Ok(to_str(r))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"Some(3)"'
+    side_effects:
+    - r(1)
+    - r(2)
+    - r(3)
+- id: TRV-filter-map-res-bang-fail-fast-stops-effects-after-first-err
+  category: traverse
+  title: filter_map_res! fail-fast stops effects after first Err
+  code: |
+    import std::test::emit!
+
+    fn fm!(x: i64) -> Res[Opt[i64], Str] {
+      emit!(f"fr({x})")
+      if x == 3 {
+        return Err("bad")
+      }
+      if (x % 2) == 0 {
+        return Ok(Some(x))
+      }
+      return Ok(None)
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let _r = [1,2,3,4].filter_map_res! { fm!(_) }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"bad"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 2
+      data_keys:
+      - index
+    side_effects:
+    - fr(1)
+    - fr(2)
+    - fr(3)
+- id: TRV-pure-find-res-rejects-effectful-callback
+  category: traverse
+  title: pure find_res rejects effectful callback
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      _ = [1,2].find_res { |x|
+        emit!(to_str(x))
+        Ok(x > 0)
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: TRV-partition-res-fail-fast-is-left-to-right-and-stops-later-effects
+  category: traverse
+  title: partition_res! fail-fast is left-to-right and stops later effects
+  code: |
+    import std::test::emit!
+
+    fn p!(x: i64) -> Res[Bool, Str] {
+      emit!(to_str(x))
+      yield if x == 4 { yield Err("stop") } else { yield Ok((x % 2) == 0) }
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = [3,1,4,2,5].partition_res! { p!(_) }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"stop"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 2
+      data_keys:
+      - index
+    side_effects:
+    - "3"
+    - "1"
+    - "4"

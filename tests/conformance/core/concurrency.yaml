@@ -1,0 +1,617 @@
+tests:
+- id: CON-spawn-is-effect-non-bang-cannot-call
+  category: concurrency
+  title: spawn! is effect; non-bang cannot call
+  code: |
+    import std::concurrency::spawn!
+
+    fn f() -> Task[i64] = spawn! { 1 }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: CON-par-map-preserves-input-order-even-when-callback-completion-order-differs
+  category: concurrency
+  title: par_map! preserves input order even when callback completion order differs
+  code: |
+    import std::time::{sleep!, Duration}
+
+    fn work!(x: i64) -> i64 {
+      let d = if x == 3 {
+        yield Duration.millis(1).unwrap_or(Duration.zero())
+      } else if x == 2 {
+        yield Duration.millis(3).unwrap_or(Duration.zero())
+      } else {
+        yield Duration.millis(5).unwrap_or(Duration.zero())
+      }
+      sleep!(d)
+      yield x
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let xs = [1,2,3].par_map!({ work!(_) }, workers=3).to_vec()
+      yield Ok(to_str(xs))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[1,2,3]"'
+- id: CON-par-traverse-res-returns-err-from-earliest-failing-index-not-first-completed-failure
+  category: concurrency
+  title: par_traverse_res! returns Err from earliest failing index, not first completed failure
+  code: |
+    import std::time::{sleep!, Duration}
+
+    fn f!(x: i64) -> Res[i64, Str] {
+      let d = if x == 1 {
+        yield Duration.millis(5).unwrap_or(Duration.zero())
+      } else if x == 2 {
+        yield Duration.millis(1).unwrap_or(Duration.zero())
+      } else {
+        yield Duration.zero()
+      }
+      sleep!(d)
+      yield if x == 1 { yield Err("e1") } else if x == 2 { yield Err("e2") } else { yield Ok(x) }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let r = [0,1,2].par_traverse_res!({ f!(_) }, workers=3)
+      let ok = r.is_err() && (r.err().unwrap_or("x") == "e1")
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 1
+      data_keys:
+      - index
+- id: CON-par-traverse-opt-returns-none-path-through-value-channel
+  category: concurrency
+  title: par_traverse_opt! returns None path through value channel
+  code: |
+    fn f!(x: i64) -> Opt[i64] = if x == 1 { yield None } else { yield Some(x) }
+
+    fn main!() -> Res[Str, Str] {
+      _ = [0,1,2].par_traverse_opt!({ f!(_) }, workers=3).ok_or("none")?
+      yield Ok("unreachable")
+    }
+  expect:
+    value:
+      kind: Err
+      repr: '"none"'
+- id: CON-par-map-zero-workers-is-domain-invalid-value
+  category: concurrency
+  title: par_map! zero workers is DOMAIN_INVALID_VALUE
+  code: |
+    fn f!(x: i64) -> i64 = x
+
+    fn main!() -> Res[Str, Str] {
+      let _xs = [1,2].par_map!({ f!(_) }, workers=0)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+- id: CON-par-traverse-res-negative-workers-is-domain-invalid-value
+  category: concurrency
+  title: par_traverse_res! negative workers is DOMAIN_INVALID_VALUE
+  code: |
+    fn f!(x: i64) -> Res[i64, Str] = Ok(x)
+
+    fn main!() -> Res[Str, Str] {
+      let _r = [1,2].par_traverse_res!({ f!(_) }, workers=-1)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+- id: CON-par-traverse-opt-negative-workers-is-domain-invalid-value
+  category: concurrency
+  title: par_traverse_opt! negative workers is DOMAIN_INVALID_VALUE
+  code: |
+    fn f!(x: i64) -> Opt[i64] = Some(x)
+
+    fn main!() -> Res[Str, Str] {
+      let _r = [1,2].par_traverse_opt!({ f!(_) }, workers=-1)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+- id: CON-scope-exit-waits-for-child-tasks-before-return
+  category: concurrency
+  title: scope-exit waits for child tasks before return
+  code: |
+    import std::concurrency::spawn!
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      _ = spawn! {
+        emit!("child-complete")
+        1
+      }
+      yield Ok("done")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"done"'
+    side_effects:
+    - child-complete
+
+- id: CON-direct-spawn-call-accepts-zero-argument-task-thunk
+  category: concurrency
+  title: direct spawn call accepts zero argument task thunk
+  code: |
+    import std::concurrency::{spawn!, join!, JoinError}
+    import std::test::emit!
+
+    fn join_err(_e: JoinError) -> Str = "join_error"
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let t = spawn!({ ||
+          emit!("direct-child")
+          42
+        })
+        let v = join!(&t).map_err { join_err(_) }?
+        yield Ok(to_str(v))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"42"'
+    side_effects:
+    - direct-child
+
+- id: CON-spawn-accepts-preconstructed-pure-fn-with-existing-environment
+  category: concurrency
+  title: spawn accepts preconstructed pure Fn with existing environment
+  code: |
+    import std::concurrency::{spawn!, join!, JoinError}
+
+    fn join_err(_e: JoinError) -> Str = "join_error"
+
+    fn make_thunk(base: i64) -> Fn() -> i64 {
+      let captured = wrapping_add(base, 1)
+      yield { || captured }
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let thunk = make_thunk(2)
+        let copied = thunk
+        let task = spawn!(copied)
+        let value = join!(&task).map_err { join_err(_) }?
+        yield Ok(to_str(value))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+
+- id: CON-spawn-rejects-preconstructed-fn-with-nonzero-arity
+  category: concurrency
+  title: spawn rejects preconstructed Fn with nonzero arity
+  code: |
+    import std::concurrency::spawn!
+
+    fn main!() -> Res[Str, Str] {
+      let thunk: Fn(i64) -> i64 = { |value: i64| value }
+      _ = spawn!(thunk)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - parameter
+      - expected_type
+      data_equals:
+        reason: parameter_type
+
+- id: CON-task-thunk-snapshots-immutable-capture-before-scheduling
+  category: concurrency
+  title: task thunk snapshots immutable capture before scheduling
+  code: |
+    import std::concurrency::{spawn!, join!, JoinError}
+
+    fn join_err(_e: JoinError) -> Str = "join_error"
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let mut source = 2
+        let captured_source = source
+        let task = spawn! { captured_source }
+        source = 9
+        let value = join!(&task).map_err { join_err(_) }?
+        yield Ok(to_str(value))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+
+- id: CON-task-thunk-cannot-capture-mutable-binding
+  category: concurrency
+  title: task thunk cannot capture mutable binding
+  code: |
+    import std::concurrency::spawn!
+
+    fn main!() -> Res[Str, Str] {
+      let mut source = 2
+      _ = spawn! { source } // @primary mutable-task-capture
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: MUTABLE_CAPTURE_FORBIDDEN
+      message_contains:
+      - mutable
+      - capture
+      - forbidden
+      data_keys: []
+      primary_span:
+        marker: mutable-task-capture
+
+- id: CON-task-thunk-cannot-capture-explicit-reference
+  category: concurrency
+  title: task thunk cannot capture explicit reference
+  code: |
+    import std::concurrency::spawn!
+
+    fn main!() -> Res[Str, Str] {
+      let source = 2
+      let reference: &i64 = &source
+      _ = spawn! { *reference }
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: REF_ESCAPE_FORBIDDEN
+      message_contains:
+      - reference
+      - escape
+      - forbidden
+      data_keys: []
+
+- id: CON-explicit-join-success-returns-child-value-through-res
+  category: concurrency
+  title: explicit join! success returns child value through Res
+  code: |
+    import std::concurrency::{spawn!, join!, JoinError}
+
+    fn join_err(_e: JoinError) -> Str = "join_error"
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let t = spawn! { 42 }
+        let v = join!(&t).map_err { join_err(_) }?
+        yield Ok(to_str(v))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"42"'
+
+- id: CON-repeated-join-through-task-copy-returns-one-completion-without-respawn
+  category: concurrency
+  title: repeated join through task copy returns one completion without respawn
+  code: |
+    import std::concurrency::{spawn!, join!, JoinError}
+    import std::test::emit!
+
+    fn join_err(_e: JoinError) -> Str = "join_error"
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let t = spawn! {
+          emit!("child-run")
+          7
+        }
+        let copied = t
+        let a = join!(&t).map_err { join_err(_) }?
+        let b = join!(&copied).map_err { join_err(_) }?
+        emit!("after-joins")
+        yield Ok(to_str((a == 7) && (b == 7)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+    side_effects:
+    - child-run
+    - after-joins
+
+- id: CON-task-values-are-not-equality-comparable
+  category: concurrency
+  title: Task values are not equality-comparable
+  code: |
+    import std::concurrency::spawn!
+
+    fn main!() -> Res[Str, Str] {
+      let task = spawn! { 7 }
+      let copied = task
+      let same = task == copied
+      yield Ok(to_str(same))
+    }
+  expect:
+    compile_error:
+      code: COMPARISON_TYPE_MISMATCH
+      message_contains:
+      - comparison
+      - type
+      data_keys:
+      - operation
+      - left_type
+      - right_type
+
+- id: CON-task-value-may-escape-after-spawning-scope-waits-for-completion
+  category: concurrency
+  title: task value may escape after spawning scope waits for completion
+  code: |
+    import std::concurrency::{spawn!, join!, Task, JoinError}
+    import std::test::emit!
+
+    fn join_err(_e: JoinError) -> Str = "join_error"
+
+    fn launch!() -> Task[i64] {
+      return spawn! {
+        emit!("child-complete")
+        9
+      }
+    }
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let t = launch!()
+        emit!("after-launch")
+        let v = join!(&t).map_err { join_err(_) }?
+        yield Ok(to_str(v))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"9"'
+    side_effects:
+    - child-complete
+    - after-launch
+
+- id: CON-join-is-effectful-and-forbidden-in-non-bang-function
+  category: concurrency
+  title: join! is effectful and forbidden in non-bang function
+  code: |
+    import std::concurrency::{spawn!, join!, Task, JoinError}
+
+    fn f(t: &Task[i64]) -> Res[i64, JoinError] = join!(t)
+
+    fn main!() -> Res[Str, Str] {
+      let t = spawn! { 1 }
+      _ = f(&t)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+
+- id: CON-scope-exit-child-wait-occurs-at-lexical-bang-body-exit-not-only-at-program-end
+  category: concurrency
+  title: scope-exit child wait occurs at lexical bang-body exit, not only at program end
+  code: |
+    import std::concurrency::spawn!
+    import std::test::emit!
+
+    fn inner!() -> Unit {
+      _ = spawn! {
+        emit!("child-complete")
+        1
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      inner!()
+      emit!("after-inner")
+      yield Ok("done")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"done"'
+    side_effects:
+    - child-complete
+    - after-inner
+
+- id: CON-scope-exit-waits-for-all-still-running-child-tasks-before-returning
+  category: concurrency
+  title: scope-exit waits for all still-running child tasks before returning
+  code: |
+    import std::concurrency::spawn!
+    import std::test::emit!
+
+    fn inner!() -> Unit {
+      _ = spawn! {
+        emit!("child-complete")
+        1
+      }
+      _ = spawn! {
+        emit!("child-complete")
+        2
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      inner!()
+      emit!("after-inner")
+      yield Ok("done")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"done"'
+    side_effects:
+    - child-complete
+    - child-complete
+    - after-inner
+
+- id: CON-nonterminating-child-controls-are-compile-checked-and-skipped
+  category: concurrency
+  title: nonterminating child controls are compile checked and skipped
+  runner: test
+  files:
+    concurrency_progress_controls.eglur: |
+      module concurrency_progress_controls
+
+      import std::concurrency::{join!, spawn!}
+
+      #[ignore]
+      #[test]
+      fn blocked_child_control!() -> Unit {
+        let leaf = spawn! {
+          while true {
+            _ = 0
+          }
+        }
+        let blocked = spawn! {
+          _ = join!(&leaf)
+        }
+        _ = join!(&blocked)
+      }
+
+      #[ignore]
+      #[test]
+      fn divergent_child_control!() -> Unit {
+        _ = spawn! {
+          while true {
+            _ = 0
+          }
+        }
+      }
+  entry: concurrency_progress_controls.eglur
+  expect:
+    test_run:
+      order:
+      - module: concurrency_progress_controls
+        name: blocked_child_control!
+      - module: concurrency_progress_controls
+        name: divergent_child_control!
+      passed: []
+      skipped:
+      - module: concurrency_progress_controls
+        name: blocked_child_control!
+      - module: concurrency_progress_controls
+        name: divergent_child_control!
+      failed: []
+
+- id: CON-explicit-join-surfaces-child-runtime-abort-as-joinerror-in-value-channel
+  category: concurrency
+  title: explicit join! surfaces child runtime-abort as JoinError in value channel
+  code: |
+    import std::concurrency::{spawn!, join!, JoinError}
+    import std::test::abort!
+
+    fn join_err(_e: JoinError) -> Str = "join_error"
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let t = spawn! {
+          abort!("RUNTIME_ABORT", "child failed")
+          0
+        }
+        let copied = t
+        _ = join!(&copied).map_err { join_err(_) }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"join_error"'
+
+- id: CON-unobserved-child-failure-at-scope-exit-terminates-with-fixed-source-tag
+  category: concurrency
+  title: unobserved child failure at scope exit terminates with fixed source tag
+  code: |
+    import std::concurrency::spawn!
+    import std::test::abort!
+
+    fn main!() -> Res[Str, Str] {
+      _ = spawn! {
+        abort!("RUNTIME_ABORT", "child failed")
+        0
+      }
+      yield Ok("unreachable")
+    }
+  expect:
+    runtime_error:
+      code: RUNTIME_ABORT
+      message_contains:
+      - abort
+      data_keys:
+      - source
+      data_equals:
+        source: std::concurrency::scope_exit_join
+- id: CON-opt-task-does-not-gain-conditional-eq
+  category: concurrency
+  title: Opt Task does not gain conditional Eq
+  code: |
+    import std::concurrency::{spawn!, Task}
+
+    fn main!() -> Res[Str, Str] {
+      let a: Opt[Task[i64]] = Some(spawn! { 7 })
+      let b: Opt[Task[i64]] = Some(spawn! { 7 })
+      yield Ok(to_str(a == b))
+    }
+  expect:
+    compile_error:
+      code: COMPARISON_TYPE_MISMATCH
+      message_contains:
+      - comparison
+      - type
+      data_keys:
+      - operation
+      - left_type
+      - right_type

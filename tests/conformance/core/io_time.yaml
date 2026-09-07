@@ -1,0 +1,2555 @@
+# Suite: core/io_time.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Tests may create files in current working directory with reserved
+#   `__eglur_conformance_*` prefixes.
+
+tests:
+- id: IOT-path-from-str-path-to-str-roundtrip-is-pure-and-total
+  category: io_time
+  title: Path.from_str + Path.to_str roundtrip is pure and total
+  code: |
+    import std::io::Path
+
+    fn main!() -> Res[Str, Str] {
+      let p = Path.from_str("data/input.txt")
+      yield Ok(p.to_str())
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"data/input.txt"'
+
+- id: IOT-path-parse-strict-accepts-non-empty-input-in-value-channel
+  category: io_time
+  title: Path.parse_strict accepts non-empty input in value channel
+  code: |
+    import std::io::{Path, PathError}
+
+    fn main!() -> Res[Str, PathError] =
+      result {
+        let p = Path.parse_strict("data/input.txt")?
+        yield Ok(p.to_str())
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"data/input.txt"'
+
+- id: IOT-path-parse-strict-rejects-empty-input-in-value-channel
+  category: io_time
+  title: Path.parse_strict rejects empty input in value channel
+  code: |
+    import std::io::{Path, PathError}
+
+    fn main!() -> Res[Str, PathError] =
+      result {
+        _ = Path.parse_strict("")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: PathError
+
+- id: IOT-path-error-kind-and-display-cover-closed-parse-failures
+  category: io_time
+  title: PathError kind and Display cover every baseline strict parse failure
+  code: |
+    import std::io::{Path, PathErrorKind}
+
+    fn main!() -> Res[Str, Str] {
+      let empty_ok = match Path.parse_strict("") {
+        Err(error) => (error.kind() == PathErrorKind::Empty) &&
+          (error.kind().to_str() == "empty") &&
+          (error.to_str() == "path error: empty")
+        Ok(_) => false
+      }
+      let nul_ok = match Path.parse_strict("bad\u{0000}path") {
+        Err(error) => (error.kind() == PathErrorKind::ContainsNul) &&
+          (error.kind().to_str() == "contains NUL") &&
+          (error.to_str() == "path error: contains NUL")
+        Ok(_) => false
+      }
+      yield Ok(to_str(empty_ok && nul_ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-io-error-kind-display-covers-portable-categories
+  category: io_time
+  title: IoErrorKind Display covers every portable category
+  code: |
+    import std::io::IoErrorKind
+
+    fn main!() -> Res[Str, Str] {
+      let observed = concat([
+        IoErrorKind::NotFound.to_str(), "|",
+        IoErrorKind::AlreadyExists.to_str(), "|",
+        IoErrorKind::PermissionDenied.to_str(), "|",
+        IoErrorKind::ReadOnly.to_str(), "|",
+        IoErrorKind::InvalidPath.to_str(), "|",
+        IoErrorKind::InvalidData.to_str(), "|",
+        IoErrorKind::WrongKind.to_str(), "|",
+        IoErrorKind::DirectoryNotEmpty.to_str(), "|",
+        IoErrorKind::PolicyRejected.to_str(), "|",
+        IoErrorKind::CrossDevice.to_str(), "|",
+        IoErrorKind::ResourceBusy.to_str(), "|",
+        IoErrorKind::BrokenPipe.to_str(), "|",
+        IoErrorKind::Interrupted.to_str(), "|",
+        IoErrorKind::TimedOut.to_str(), "|",
+        IoErrorKind::StorageFull.to_str(), "|",
+        IoErrorKind::ResourceExhausted.to_str(), "|",
+        IoErrorKind::Unsupported.to_str(), "|",
+        IoErrorKind::Other.to_str()
+      ])
+      yield Ok(observed)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"not found|already exists|permission denied|read only|invalid path|invalid data|wrong entry kind|directory not empty|policy rejected|cross-device operation|resource busy|broken pipe|interrupted|timed out|storage full|resource exhausted|unsupported|other"'
+
+- id: IOT-io-error-kind-and-display-agree-for-missing-file
+  category: io_time
+  title: IoError kind and Display agree for a missing required file
+  code: |
+    import std::io::{IoError, IoErrorKind, LinkMode, Path, TextError, entry_exists!, read_bytes!, remove_entry!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let path = Path.from_str("__eglur_conformance_missing_error_kind.bin")
+        if entry_exists!(path)? { _ = remove_entry!(path)? } else {}
+        let observed = match read_bytes!(
+          path,
+          LinkMode::Follow,
+        ) {
+          Err(error) => {
+            let direct = error.to_str()
+            let kind_ok = (error.kind() == IoErrorKind::NotFound) &&
+              (error.kind().to_str() == "not found")
+            let wrapped = TextError::Io(error)
+            kind_ok && (direct == "I/O error: not found") &&
+              (wrapped.to_str() == direct)
+          }
+          Ok(_) => false
+        }
+        yield Ok(to_str(observed))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-text-error-invalid-utf8-has-stable-display
+  category: io_time
+  title: TextError InvalidUtf8 has stable Display
+  code: |
+    import std::io::TextError
+
+    fn main!() -> Res[Str, Str] {
+      let error = TextError::InvalidUtf8
+      yield Ok(error.to_str())
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"text error: invalid UTF-8"'
+
+- id: IOT-write-text-then-read-text-roundtrip-on-reserved-conformance-file
+  category: io_time
+  title: write_text! then read_text! roundtrip on reserved conformance file
+  code: |
+    import std::io::{LinkMode, Path, read_text!, write_text!, TextError}
+
+    fn main!() -> Res[Str, TextError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_text_roundtrip.txt")
+        _ = write_text!(p, "stale-longer-content", LinkMode::Follow)?
+        _ = write_text!(p, "alpha", LinkMode::Follow)?
+        let s = read_text!(p, LinkMode::Follow)?
+        yield Ok(s)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"alpha"'
+
+- id: IOT-write-bytes-then-read-bytes-roundtrip-on-reserved-conformance-file
+  category: io_time
+  title: write_bytes! then read_bytes! roundtrip on reserved conformance file
+  code: |
+    import std::io::{LinkMode, Path, read_bytes!, write_bytes!, IoError}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_bytes_roundtrip.bin")
+        _ = write_bytes!(p, [9, 9, 9, 9, 9], LinkMode::Follow)?
+        _ = write_bytes!(p, [0, 255, 65], LinkMode::Follow)?
+        let xs = read_bytes!(p, LinkMode::Follow)?
+        yield Ok(to_str(xs))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[0,255,65]"'
+
+- id: IOT-link-mode-reject-allows-direct-regular-file-access
+  category: io_time
+  title: LinkMode Reject allows direct regular-file creation and reading
+  code: |
+    import std::io::{IoError, LinkMode, Path, read_bytes!, remove_entry!, write_bytes!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_link_mode_reject.bin")
+        _ = write_bytes!(p, [1, 2, 3], LinkMode::Reject)?
+        let xs = read_bytes!(p, LinkMode::Reject)?
+        _ = remove_entry!(p)?
+        yield Ok(to_str(xs))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[1,2,3]"'
+
+- id: IOT-file-access-requires-explicit-link-mode
+  category: io_time
+  title: path-based file access requires an explicit LinkMode
+  code: |
+    import std::io::{IoError, Path, read_bytes!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        _ = read_bytes!(Path.from_str("__eglur_conformance_missing_link_mode.bin"))
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: CALL_MISSING_ARG
+      message_contains:
+      - call
+      - argument
+      - missing
+      - parameter
+      data_keys: []
+
+- id: IOT-write-lines-then-read-lines-preserves-line-order
+  category: io_time
+  title: write_lines! truncates old contents and appends LF to every line
+  code: |
+    import std::io::{LinkMode, Path, read_lines!, read_text!, write_lines!, TextError}
+
+    fn main!() -> Res[Str, TextError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_lines_roundtrip.txt")
+        _ = write_lines!(p, ["stale","tail"], LinkMode::Follow)?
+        _ = write_lines!(p, ["a","b","c"], LinkMode::Follow)?
+        let xs = read_lines!(p, LinkMode::Follow)?
+        let text = read_text!(p, LinkMode::Follow)?
+        let ok = (xs == ["a","b","c"]) && (text == "a\nb\nc\n")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-read-lines-uses-crlf-aware-text-line-semantics
+  category: io_time
+  title: read_lines! uses CRLF-aware text-line semantics
+  code: |
+    import std::io::{LinkMode, Path, read_lines!, write_text!, TextError}
+
+    fn main!() -> Res[Str, TextError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_lines_crlf.txt")
+        _ = write_text!(p, "alpha\r\nbeta\n", LinkMode::Follow)?
+        let xs = read_lines!(p, LinkMode::Follow)?
+        yield Ok(to_str(xs))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[\"alpha\",\"beta\"]"'
+
+- id: IOT-list-files-succeeds-on-current-directory-path
+  category: io_time
+  title: list_files! succeeds on current directory path
+  code: |
+    import std::io::{Path, list_files!, IoError}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let xs = list_files!(Path.from_str("."))?
+        yield Ok(to_str(xs.len() >= 0))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-read-text-missing-file-path-returns-err-in-value-channel
+  category: io_time
+  title: read_text! missing file path returns Err in value channel
+  code: |
+    import std::io::{LinkMode, Path, TextError, read_text!}
+
+    fn main!() -> Res[Str, TextError] =
+      result {
+        _ = read_text!(Path.from_str("__eglur_conformance_missing_io_file.txt"), LinkMode::Follow)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TextError
+      error_variant: TextError::Io
+
+- id: IOT-read-text-invalid-utf-8-decode-path-returns-err-in-value-channel
+  category: io_time
+  title: read_text! invalid UTF-8 decode path returns Err in value channel
+  code: |
+    import std::io::{LinkMode, Path, TextError, write_bytes!, read_text!}
+
+    fn main!() -> Res[Str, TextError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_read_text_invalid_utf8.bin")
+        let bad: u8 = 255
+        _ = write_bytes!(p, Vec[u8].new().push(bad), LinkMode::Follow)?
+        _ = read_text!(p, LinkMode::Follow)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TextError
+      error_variant: TextError::InvalidUtf8
+
+- id: IOT-read-bytes-missing-file-path-returns-err-in-value-channel
+  category: io_time
+  title: read_bytes! missing file path returns Err in value channel
+  code: |
+    import std::io::{LinkMode, IoError, Path, read_bytes!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        _ = read_bytes!(Path.from_str("__eglur_conformance_missing_io_bytes.bin"), LinkMode::Follow)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: IoError
+
+- id: IOT-duration-nanos-negative-literal-is-domain-invalid-value
+  category: io_time
+  title: Duration.nanos negative literal is DOMAIN_INVALID_VALUE
+  code: |
+    import std::time::Duration
+
+    fn bad() -> Unit {
+      _ = Duration.nanos(-1)
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+
+- id: IOT-duration-millis-negative-literal-is-domain-invalid-value
+  category: io_time
+  title: Duration.millis negative literal is DOMAIN_INVALID_VALUE
+  code: |
+    import std::time::Duration
+
+    fn bad() -> Unit {
+      _ = Duration.millis(-1)
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+
+- id: IOT-duration-seconds-negative-literal-is-domain-invalid-value
+  category: io_time
+  title: Duration.seconds negative literal is DOMAIN_INVALID_VALUE
+  code: |
+    import std::time::Duration
+
+    fn bad() -> Unit {
+      _ = Duration.seconds(-1)
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+
+- id: IOT-duration-sub-invalid-path-returns-err-in-value-channel
+  category: io_time
+  title: Duration.sub invalid path returns Err in value channel
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let d0 = Duration.millis(1)?
+        let d1 = Duration.millis(2)?
+        _ = d0.sub(d1)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TimeError
+
+- id: IOT-duration-div-by-zero-returns-err-in-value-channel
+  category: io_time
+  title: Duration.div by zero returns Err in value channel
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let base = Duration.seconds(2)?
+        _ = base.div(0)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TimeError
+
+- id: IOT-duration-mul-negative-factor-returns-err-in-value-channel
+  category: io_time
+  title: Duration.mul negative factor returns Err in value channel
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let base = Duration.seconds(2)?
+        _ = base.mul(-1)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TimeError
+
+- id: IOT-duration-scale-negative-factor-returns-err-in-value-channel
+  category: io_time
+  title: Duration.scale negative factor returns Err in value channel
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let base = Duration.seconds(2)?
+        _ = base.scale(-1.0)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TimeError
+
+- id: IOT-duration-arithmetic-success-path-is-deterministic-in-value-channel
+  category: io_time
+  title: Duration arithmetic success path is deterministic in value channel
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let d0 = Duration.seconds(1)?
+        let d1 = d0.add(Duration.millis(250)?)?
+        let d2 = d1.mul(2)?
+        let d3 = d2.div(2)?
+        let d4 = d3.scale(1.0)?
+        yield Ok(to_str(d4.as_millis()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1250"'
+
+- id: IOT-time-error-kind-display-covers-closed-categories
+  category: io_time
+  title: TimeErrorKind Display covers every baseline time failure category
+  code: |
+    import std::time::TimeErrorKind
+
+    fn main!() -> Res[Str, Str] {
+      let observed = concat([
+        TimeErrorKind::InvalidSyntax.to_str(), "|",
+        TimeErrorKind::UnsupportedUnit.to_str(), "|",
+        TimeErrorKind::Overflow.to_str(), "|",
+        TimeErrorKind::NegativeResult.to_str(), "|",
+        TimeErrorKind::InvalidFactor.to_str(), "|",
+        TimeErrorKind::ReversedInstant.to_str()
+      ])
+      yield Ok(observed)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"invalid syntax|unsupported unit|overflow|negative result|invalid factor|reversed instant"'
+
+- id: IOT-time-error-kind-and-display-map-baseline-failures
+  category: io_time
+  title: TimeError kind and Display map every baseline failure family
+  code: |
+    import std::time::{Duration, TimeError, TimeErrorKind}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let syntax_ok = match Duration.parse(" 1s") {
+          Err(error) => (error.kind() == TimeErrorKind::InvalidSyntax) &&
+            (error.to_str() == "time error: invalid syntax")
+          Ok(_) => false
+        }
+        let unit_ok = match Duration.parse("1m") {
+          Err(error) => (error.kind() == TimeErrorKind::UnsupportedUnit) &&
+            (error.to_str() == "time error: unsupported unit")
+          Ok(_) => false
+        }
+        let small = Duration.millis(1)?
+        let large = Duration.millis(2)?
+        let negative_ok = match small.sub(large) {
+          Err(error) => (error.kind() == TimeErrorKind::NegativeResult) &&
+            (error.to_str() == "time error: negative result")
+          Ok(_) => false
+        }
+        let base = Duration.seconds(2)?
+        let factor_ok = match base.div(0) {
+          Err(error) => (error.kind() == TimeErrorKind::InvalidFactor) &&
+            (error.to_str() == "time error: invalid factor")
+          Ok(_) => false
+        }
+        let finite = Duration.seconds(9_223_372_036)?
+        let overflow_ok = match finite.scale(1_000_000_000.0) {
+          Err(error) => (error.kind() == TimeErrorKind::Overflow) &&
+            (error.to_str() == "time error: overflow")
+          Ok(_) => false
+        }
+        yield Ok(to_str(syntax_ok && unit_ok && negative_ok && factor_ok &&
+          overflow_ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-duration-as-seconds-f64-reports-fractional-seconds
+  category: io_time
+  title: Duration.as_seconds_f64 reports fractional seconds
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let d = Duration.millis(1500)?
+        yield Ok(to_str(d.as_seconds_f64() == 1.5))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-duration-scale-finite-overflow-returns-err-in-value-channel
+  category: io_time
+  title: Duration.scale finite overflow returns Err in value channel
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let d = Duration.seconds(9_223_372_036)?
+        _ = d.scale(1_000_000_000.0)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TimeError
+
+- id: IOT-sleep-with-duration-zero-is-valid-bang-no-op-path
+  category: io_time
+  title: sleep! with Duration.zero is valid bang no-op path
+  code: |
+    import std::time::{sleep!, Duration}
+
+    fn main!() -> Res[Str, Str] {
+      sleep!(Duration.zero())
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: IOT-now-is-valid-in-bang-context
+  category: io_time
+  title: now! is valid in bang context
+  code: |
+    import std::time::now!
+
+    fn main!() -> Res[Str, Str] {
+      _ = now!()
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: IOT-instant-duration-since-is-pure-for-ordered-snapshots
+  category: io_time
+  title: Instant.duration_since is pure for ordered monotonic snapshots
+  code: |
+    import std::time::{now!, Duration, Instant, TimeError}
+
+    fn delta(start: &Instant, end: &Instant) -> Res[Duration, TimeError] =
+      end.duration_since(start)
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let start = now!()
+        let end = now!()
+        let elapsed = delta(&start, &end)?
+        yield Ok(to_str(elapsed.as_nanos() >= 0))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-instant-duration-since-reversed-order-reports-error-kind
+  category: io_time
+  title: Instant.duration_since reports ReversedInstant for reversed snapshot order
+  code: |
+    import std::time::{now!, sleep!, Duration, TimeError, TimeErrorKind}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let earlier = now!()
+        sleep!(Duration.millis(1)?)
+        let later = now!()
+        let observed = match earlier.duration_since(&later) {
+          Err(error) => (error.kind() == TimeErrorKind::ReversedInstant) &&
+            (error.to_str() == "time error: reversed instant")
+          Ok(_) => false
+        }
+        yield Ok(to_str(observed))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-sleep-positive-duration-respects-monotonic-minimum
+  category: io_time
+  title: positive sleep! does not return before its monotonic minimum
+  code: |
+    import std::time::{now!, sleep!, Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let requested = Duration.millis(1)?
+        let start = now!()
+        sleep!(requested)
+        let end = now!()
+        let elapsed = end.duration_since(&start)?
+        yield Ok(to_str(elapsed.as_nanos() >= requested.as_nanos()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-exists-returns-ok-false-for-missing-target
+  category: io_time
+  title: exists! returns Ok(false) for missing target
+  code: |
+    import std::io::{Path, exists!, IoError}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let missing = Path.from_str("__eglur_conformance_missing_exists_probe.txt")
+        let b = exists!(missing)?
+        yield Ok(to_str(b))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"false"'
+
+- id: IOT-entry-exists-returns-ok-false-for-missing-entry
+  category: io_time
+  title: entry_exists! returns Ok(false) for missing entry
+  code: |
+    import std::io::{Path, entry_exists!, IoError}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let missing = Path.from_str("__eglur_conformance_missing_entry_exists_probe.txt")
+        let b = entry_exists!(missing)?
+        yield Ok(to_str(b))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"false"'
+
+- id: IOT-entry-observation-reports-regular-file
+  category: io_time
+  title: entry observation reports regular file existence kind and size
+  code: |
+    import std::io::{LinkMode, Path, IoError, FileKind, write_bytes!, entry_exists!, entry_stat!, remove_entry!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_entry_stat_probe.txt")
+        _ = write_bytes!(p, [104,101,108,108,111], LinkMode::Follow)?
+        let present = entry_exists!(p)?
+        let st = entry_stat!(p)?
+        _ = remove_entry!(p)?
+        let ok = present && (st.kind() == FileKind::File) && (st.size_bytes() >= 5)
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-stat-reports-file-kind-and-positive-size-for-regular-file
+  category: io_time
+  title: stat! reports file kind and positive size for regular file
+  code: |
+    import std::io::{LinkMode, Path, IoError, FileKind, write_bytes!, stat!, remove_entry!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_stat_probe.txt")
+        _ = write_bytes!(p, [104,101,108,108,111], LinkMode::Follow)?
+        let st = stat!(p)?
+        _ = remove_entry!(p)?
+        let ok = (st.kind() == FileKind::File) && (st.size_bytes() >= 5)
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-stat-reports-canonical-zero-size-for-non-file-kinds
+  category: io_time
+  title: stat! reports canonical zero size for non-file kinds
+  code: |
+    import std::io::{DirTraversal, Path, IoError, FileKind, create_dir_all!, stat!, remove_dir_all!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_stat_dir_probe")
+        _ = remove_dir_all!(p)?
+        _ = create_dir_all!(p, DirTraversal::FollowLinks)?
+        let st = stat!(p)?
+        _ = remove_dir_all!(p)?
+        let ok = (st.kind() == FileKind::Dir) && (st.size_bytes() == 0)
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-create-dir-all-create-dir-remove-dir-remove-dir-all-success-path
+  category: io_time
+  title: create_dir_all! create_dir! remove_dir! remove_dir_all! success path
+  code: |
+    import std::io::{DirTraversal, Path, IoError, create_dir!, create_dir_all!, remove_dir!, remove_dir_all!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_dir_ops")
+        let leaf = Path.from_str("__eglur_conformance_io_dir_ops/a/b")
+        let child = Path.from_str("__eglur_conformance_io_dir_ops/a/b/c")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(leaf, DirTraversal::FollowLinks)?
+        _ = create_dir_all!(leaf, DirTraversal::FollowLinks)?
+        _ = create_dir!(child, DirTraversal::FollowLinks)?
+        _ = remove_dir!(child)?
+        _ = remove_dir_all!(root)?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: IOT-directory-creation-rejection-preserves-observed-namespace
+  category: io_time
+  title: directory creation rejections preserve observed entries and retry uses current namespace
+  code: |
+    import std::io::{DirTraversal, LinkMode, Path, IoError, FileKind, create_dir!, create_dir_all!, entry_exists!, entry_stat!, read_bytes!, remove_entry!, remove_dir_all!, write_bytes!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_dir_creation_rejection")
+        let existing = Path.from_str("__eglur_conformance_io_dir_creation_rejection/existing")
+        let existing_marker = Path.from_str("__eglur_conformance_io_dir_creation_rejection/existing/marker.bin")
+        let missing_parent = Path.from_str("__eglur_conformance_io_dir_creation_rejection/missing")
+        let missing_child = Path.from_str("__eglur_conformance_io_dir_creation_rejection/missing/child")
+        let blocker = Path.from_str("__eglur_conformance_io_dir_creation_rejection/blocker")
+        let blocked_child = Path.from_str("__eglur_conformance_io_dir_creation_rejection/blocker/child")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(root, DirTraversal::FollowLinks)?
+        _ = create_dir!(existing, DirTraversal::FollowLinks)?
+        _ = write_bytes!(existing_marker, [7], LinkMode::Reject)?
+
+        let existing_rejected = create_dir!(existing, DirTraversal::FollowLinks).is_err()
+        let existing_preserved = (entry_stat!(existing)?.kind() == FileKind::Dir) &&
+          (read_bytes!(existing_marker, LinkMode::Reject)? == [7])
+        let missing_parent_rejected = create_dir!(missing_child, DirTraversal::FollowLinks).is_err()
+        let missing_parent_absent = !(entry_exists!(missing_parent)?)
+
+        _ = write_bytes!(blocker, [1], LinkMode::Reject)?
+        let file_rejected = create_dir!(blocker, DirTraversal::FollowLinks).is_err()
+        let blocker_rejected = create_dir_all!(blocked_child, DirTraversal::FollowLinks).is_err()
+        let blocker_preserved = (entry_stat!(blocker)?.kind() == FileKind::File) &&
+          (read_bytes!(blocker, LinkMode::Reject)? == [1])
+
+        _ = remove_entry!(blocker)?
+        let retry_succeeds = create_dir_all!(blocked_child, DirTraversal::FollowLinks).is_ok()
+        let retry_created_target = (entry_stat!(blocked_child)?.kind() == FileKind::Dir)
+        _ = remove_dir_all!(root)?
+
+        let ok = existing_rejected && existing_preserved && missing_parent_rejected &&
+          missing_parent_absent && file_rejected && blocker_rejected &&
+          blocker_preserved && retry_succeeds && retry_created_target
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-removal-direct-kind-and-missing-matrix
+  category: io_time
+  title: removal operations preserve definite rejections and keep strict retry semantics
+  code: |
+    import std::io::{DirTraversal, LinkMode, Path, IoError, create_dir!, create_dir_all!, entry_exists!, read_bytes!, remove_entry!, remove_dir!, remove_dir_all!, write_bytes!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_removal_matrix")
+        let nested = Path.from_str("__eglur_conformance_io_removal_matrix/nested")
+        let empty = Path.from_str("__eglur_conformance_io_removal_matrix/empty")
+        let file = Path.from_str("__eglur_conformance_io_removal_matrix/file.bin")
+        let nested_file = Path.from_str("__eglur_conformance_io_removal_matrix/nested/file.bin")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(nested, DirTraversal::FollowLinks)?
+        _ = write_bytes!(nested_file, [1], LinkMode::Reject)?
+        _ = remove_dir_all!(root)?
+        let recursive_removed = !(entry_exists!(root)?)
+
+        _ = create_dir_all!(root, DirTraversal::FollowLinks)?
+        _ = create_dir!(empty, DirTraversal::FollowLinks)?
+        _ = write_bytes!(file, [2], LinkMode::Reject)?
+
+        let entry_rejects_dir = remove_entry!(empty).is_err()
+        let dir_rejects_file = remove_dir!(file).is_err()
+        let dir_rejects_nonempty = remove_dir!(root).is_err()
+        let tree_rejects_file = remove_dir_all!(file).is_err()
+        let rejected_entries_preserved = entry_exists!(root)? &&
+          entry_exists!(empty)? && entry_exists!(file)? &&
+          (read_bytes!(file, LinkMode::Reject)? == [2])
+
+        _ = remove_entry!(file)?
+        _ = remove_dir!(empty)?
+        let direct_removals_complete = !(entry_exists!(file)?) &&
+          !(entry_exists!(empty)?) && entry_exists!(root)?
+        _ = remove_dir!(root)?
+
+        let entry_missing_errors = remove_entry!(file).is_err()
+        let dir_missing_errors = remove_dir!(root).is_err()
+        let missing_rejections_preserve_absence = !(entry_exists!(file)?) &&
+          !(entry_exists!(root)?)
+        let tree_missing_is_ok = remove_dir_all!(root).is_ok() && remove_dir_all!(root).is_ok()
+        let ok = recursive_removed && entry_rejects_dir && dir_rejects_file &&
+          dir_rejects_nonempty && tree_rejects_file && rejected_entries_preserved &&
+          direct_removals_complete && entry_missing_errors && dir_missing_errors &&
+          missing_rejections_preserve_absence && tree_missing_is_ok
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-dir-traversal-reject-links-allows-direct-directory-creation
+  category: io_time
+  title: DirTraversal RejectLinks allows direct recursive and single-directory creation
+  code: |
+    import std::io::{DirTraversal, Path, IoError, create_dir!, create_dir_all!, remove_dir!, remove_dir_all!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_dir_reject_links")
+        let leaf = Path.from_str("__eglur_conformance_io_dir_reject_links/a/b")
+        let child = Path.from_str("__eglur_conformance_io_dir_reject_links/a/b/c")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(leaf, DirTraversal::RejectLinks)?
+        _ = create_dir_all!(leaf, DirTraversal::RejectLinks)?
+        _ = create_dir!(child, DirTraversal::RejectLinks)?
+        _ = remove_dir!(child)?
+        _ = remove_dir_all!(root)?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: IOT-create-dir-all-requires-explicit-dir-traversal
+  category: io_time
+  title: create_dir_all! requires an explicit DirTraversal
+  code: |
+    import std::io::{Path, IoError, create_dir_all!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        _ = create_dir_all!(Path.from_str("__eglur_conformance_missing_dir_traversal"))
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: CALL_MISSING_ARG
+      message_contains:
+      - call
+      - argument
+      - missing
+      - parameter
+      data_keys: []
+
+- id: IOT-create-dir-requires-explicit-dir-traversal
+  category: io_time
+  title: create_dir! requires an explicit DirTraversal
+  code: |
+    import std::io::{Path, IoError, create_dir!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        _ = create_dir!(Path.from_str("__eglur_conformance_missing_dir_traversal"))
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: CALL_MISSING_ARG
+      message_contains:
+      - call
+      - argument
+      - missing
+      - parameter
+      data_keys: []
+
+- id: IOT-copy-rename-remove-entry-and-exists-compose-predictably
+  category: io_time
+  title: copy! rename! remove_entry! and exists! compose predictably
+  code: |
+    import std::io::{LinkMode, Path, IoError, write_bytes!, copy!, rename!, remove_entry!, exists!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let src = Path.from_str("__eglur_conformance_io_copy_src.txt")
+        let tmp = Path.from_str("__eglur_conformance_io_copy_tmp.txt")
+        let dst = Path.from_str("__eglur_conformance_io_copy_dst.txt")
+
+        if exists!(src)? { _ = remove_entry!(src)? } else {}
+        if exists!(tmp)? { _ = remove_entry!(tmp)? } else {}
+        if exists!(dst)? { _ = remove_entry!(dst)? } else {}
+
+        _ = write_bytes!(src, [97,108,112,104,97], LinkMode::Follow)?
+        let n = copy!(src, tmp, source_links=LinkMode::Follow)?
+        _ = rename!(tmp, dst)?
+        let b_src = exists!(src)?
+        let b_tmp = exists!(tmp)?
+        let b_dst = exists!(dst)?
+        _ = remove_entry!(src)?
+        _ = remove_entry!(dst)?
+        let ok = (n == 5) && b_src && (!b_tmp) && b_dst
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-copy-requires-explicit-source-link-mode
+  category: io_time
+  title: copy! requires an explicit source LinkMode
+  code: |
+    import std::io::{Path, IoError, copy!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let src = Path.from_str("__eglur_conformance_copy_missing_source_mode_src")
+        let dst = Path.from_str("__eglur_conformance_copy_missing_source_mode_dst")
+        _ = copy!(src, dst)
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: CALL_MISSING_ARG
+      message_contains:
+      - call
+      - argument
+      - missing
+      - parameter
+      data_keys: []
+
+- id: IOT-copy-source-link-mode-controls-regular-file-acquisition
+  category: io_time
+  title: copy! accepts regular files and rejects missing or directory sources under both LinkModes
+  code: |
+    import std::io::{DirTraversal, LinkMode, Path, IoError, copy!, create_dir_all!, entry_exists!, read_bytes!, remove_dir_all!, write_bytes!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_copy_source_mode")
+        let src = Path.from_str("__eglur_conformance_io_copy_source_mode/src.bin")
+        let follow_dst = Path.from_str("__eglur_conformance_io_copy_source_mode/follow.bin")
+        let reject_dst = Path.from_str("__eglur_conformance_io_copy_source_mode/reject.bin")
+        let missing = Path.from_str("__eglur_conformance_io_copy_source_mode/missing.bin")
+        let missing_follow_dst = Path.from_str("__eglur_conformance_io_copy_source_mode/missing-follow.bin")
+        let missing_reject_dst = Path.from_str("__eglur_conformance_io_copy_source_mode/missing-reject.bin")
+        let dir = Path.from_str("__eglur_conformance_io_copy_source_mode/dir")
+        let dir_follow_dst = Path.from_str("__eglur_conformance_io_copy_source_mode/dir-follow.bin")
+        let dir_reject_dst = Path.from_str("__eglur_conformance_io_copy_source_mode/dir-reject.bin")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(root, DirTraversal::FollowLinks)?
+        _ = write_bytes!(src, [6, 7, 8], LinkMode::Reject)?
+        _ = create_dir_all!(dir, DirTraversal::FollowLinks)?
+
+        let follow_n = copy!(src, follow_dst, source_links=LinkMode::Follow)?
+        let reject_n = copy!(src, reject_dst, source_links=LinkMode::Reject)?
+        let regular_ok = (follow_n == 3) && (reject_n == 3) &&
+          (read_bytes!(follow_dst, LinkMode::Reject)? == [6, 7, 8]) &&
+          (read_bytes!(reject_dst, LinkMode::Reject)? == [6, 7, 8])
+
+        let missing_follow_rejected = copy!(
+          missing,
+          missing_follow_dst,
+          source_links=LinkMode::Follow,
+        ).is_err()
+        let missing_reject_rejected = copy!(
+          missing,
+          missing_reject_dst,
+          source_links=LinkMode::Reject,
+        ).is_err()
+        let dir_follow_rejected = copy!(
+          dir,
+          dir_follow_dst,
+          source_links=LinkMode::Follow,
+        ).is_err()
+        let dir_reject_rejected = copy!(
+          dir,
+          dir_reject_dst,
+          source_links=LinkMode::Reject,
+        ).is_err()
+        let rejected_destinations_absent = !(entry_exists!(missing_follow_dst)?) &&
+          !(entry_exists!(missing_reject_dst)?) &&
+          !(entry_exists!(dir_follow_dst)?) &&
+          !(entry_exists!(dir_reject_dst)?)
+
+        _ = remove_dir_all!(root)?
+        let ok = regular_ok && missing_follow_rejected &&
+          missing_reject_rejected && dir_follow_rejected && dir_reject_rejected &&
+          rejected_destinations_absent
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-destination-policy-controls-rename-file-collisions
+  category: io_time
+  title: rename defaults to collision rejection and explicitly replaces files
+  code: |
+    import std::io::{DestinationPolicy, DirTraversal, IoError, IoErrorKind, LinkMode, Path, create_dir_all!, entry_exists!, read_bytes!, remove_dir_all!, rename!, write_bytes!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_rename_file_policy")
+        let src = Path.from_str("__eglur_conformance_io_rename_file_policy/src.bin")
+        let dst = Path.from_str("__eglur_conformance_io_rename_file_policy/dst.bin")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(root, DirTraversal::FollowLinks)?
+        _ = write_bytes!(src, [1, 2], LinkMode::Reject)?
+        _ = write_bytes!(dst, [9], LinkMode::Reject)?
+
+        let default_rejected = match rename!(src, dst) {
+          Err(error) => error.kind() == IoErrorKind::AlreadyExists
+          Ok(_) => false
+        }
+        let default_preserved = entry_exists!(src)? &&
+          (read_bytes!(src, LinkMode::Reject)? == [1, 2]) &&
+          (read_bytes!(dst, LinkMode::Reject)? == [9])
+
+        _ = rename!(
+          src,
+          dst,
+          destination=DestinationPolicy::ReplaceCompatible,
+        )?
+        let replaced = !(entry_exists!(src)?) &&
+          (read_bytes!(dst, LinkMode::Reject)? == [1, 2])
+        let same_identity_ok = rename!(dst, dst).is_ok()
+        let same_identity_preserved = read_bytes!(dst, LinkMode::Reject)? == [1, 2]
+
+        _ = remove_dir_all!(root)?
+        let ok = default_rejected && default_preserved && replaced &&
+          same_identity_ok && same_identity_preserved
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-rename-replace-compatible-enforces-directory-kind-matrix
+  category: io_time
+  title: rename compatible replacement distinguishes directory entry kinds
+  code: |
+    import std::io::{DestinationPolicy, DirTraversal, LinkMode, Path, IoError, create_dir_all!, entry_exists!, remove_dir_all!, rename!, write_bytes!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_rename_dir_policy")
+        let src = Path.from_str("__eglur_conformance_io_rename_dir_policy/src")
+        let src_child = Path.from_str("__eglur_conformance_io_rename_dir_policy/src/child.bin")
+        let dst = Path.from_str("__eglur_conformance_io_rename_dir_policy/dst")
+        let dst_child = Path.from_str("__eglur_conformance_io_rename_dir_policy/dst/child.bin")
+        let file_src = Path.from_str("__eglur_conformance_io_rename_dir_policy/file-src.bin")
+        let dir_dst = Path.from_str("__eglur_conformance_io_rename_dir_policy/dir-dst")
+        let dir_src = Path.from_str("__eglur_conformance_io_rename_dir_policy/dir-src")
+        let file_dst = Path.from_str("__eglur_conformance_io_rename_dir_policy/file-dst.bin")
+        let full_src = Path.from_str("__eglur_conformance_io_rename_dir_policy/full-src")
+        let full_dst = Path.from_str("__eglur_conformance_io_rename_dir_policy/full-dst")
+        let full_child = Path.from_str("__eglur_conformance_io_rename_dir_policy/full-dst/child.bin")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(src, DirTraversal::FollowLinks)?
+        _ = write_bytes!(src_child, [1], LinkMode::Reject)?
+        _ = create_dir_all!(dst, DirTraversal::FollowLinks)?
+        _ = rename!(src, dst, destination=DestinationPolicy::ReplaceCompatible)?
+        let empty_dir_replaced = !(entry_exists!(src)?) && entry_exists!(dst_child)?
+
+        _ = write_bytes!(file_src, [2], LinkMode::Reject)?
+        _ = create_dir_all!(dir_dst, DirTraversal::FollowLinks)?
+        let file_to_dir_rejected = rename!(
+          file_src,
+          dir_dst,
+          destination=DestinationPolicy::ReplaceCompatible,
+        ).is_err()
+
+        _ = create_dir_all!(dir_src, DirTraversal::FollowLinks)?
+        _ = write_bytes!(file_dst, [3], LinkMode::Reject)?
+        let dir_to_file_rejected = rename!(
+          dir_src,
+          file_dst,
+          destination=DestinationPolicy::ReplaceCompatible,
+        ).is_err()
+
+        _ = create_dir_all!(full_src, DirTraversal::FollowLinks)?
+        _ = create_dir_all!(full_dst, DirTraversal::FollowLinks)?
+        _ = write_bytes!(full_child, [4], LinkMode::Reject)?
+        let nonempty_dir_rejected = rename!(
+          full_src,
+          full_dst,
+          destination=DestinationPolicy::ReplaceCompatible,
+        ).is_err()
+
+        _ = remove_dir_all!(root)?
+        let ok = empty_dir_replaced && file_to_dir_rejected &&
+          dir_to_file_rejected && nonempty_dir_rejected
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-destination-policy-controls-copy-file-collisions
+  category: io_time
+  title: copy defaults to collision rejection and explicitly replaces files
+  code: |
+    import std::io::{DestinationPolicy, DirTraversal, FileKind, IoError, IoErrorKind, LinkMode, Path, copy!, create_dir_all!, entry_exists!, entry_stat!, read_bytes!, remove_dir_all!, write_bytes!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_copy_policy")
+        let src = Path.from_str("__eglur_conformance_io_copy_policy/src.bin")
+        let dst = Path.from_str("__eglur_conformance_io_copy_policy/dst.bin")
+        let dir = Path.from_str("__eglur_conformance_io_copy_policy/dir")
+        let dir_copy = Path.from_str("__eglur_conformance_io_copy_policy/dir-copy")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(root, DirTraversal::FollowLinks)?
+        _ = write_bytes!(src, [4, 5], LinkMode::Reject)?
+        _ = write_bytes!(dst, [9], LinkMode::Reject)?
+
+        let default_rejected = copy!(
+          src,
+          dst,
+          source_links=LinkMode::Reject,
+        ).is_err()
+        let default_preserved = (read_bytes!(src, LinkMode::Reject)? == [4, 5]) &&
+          (read_bytes!(dst, LinkMode::Reject)? == [9])
+        let copied = copy!(
+          src,
+          dst,
+          source_links=LinkMode::Reject,
+          destination=DestinationPolicy::ReplaceCompatible,
+        )?
+        let replacement_ok = (copied == 2) &&
+          (read_bytes!(dst, LinkMode::Reject)? == [4, 5])
+        let same_identity_rejected = match copy!(
+          src,
+          src,
+          source_links=LinkMode::Reject,
+          destination=DestinationPolicy::ReplaceCompatible,
+        ) {
+          Err(error) => error.kind() == IoErrorKind::PolicyRejected
+          Ok(_) => false
+        }
+        let same_identity_preserved = read_bytes!(src, LinkMode::Reject)? == [4, 5]
+
+        _ = create_dir_all!(dir, DirTraversal::FollowLinks)?
+        let destination_dir_rejected = match copy!(
+          src,
+          dir,
+          source_links=LinkMode::Reject,
+          destination=DestinationPolicy::ReplaceCompatible,
+        ) {
+          Err(error) => error.kind() == IoErrorKind::WrongKind
+          Ok(_) => false
+        }
+        let source_dir_rejected = match copy!(
+          dir,
+          dir_copy,
+          source_links=LinkMode::Reject,
+          destination=DestinationPolicy::ReplaceCompatible,
+        ) {
+          Err(error) => error.kind() == IoErrorKind::WrongKind
+          Ok(_) => false
+        }
+        let rejected_paths_preserved = (entry_stat!(dir)?.kind() == FileKind::Dir) &&
+          !(entry_exists!(dir_copy)?)
+
+        _ = remove_dir_all!(root)?
+        let ok = default_rejected && default_preserved && replacement_ok &&
+          same_identity_rejected && same_identity_preserved &&
+          destination_dir_rejected && source_dir_rejected &&
+          rejected_paths_preserved
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-list-files-is-non-recursive-and-lexicographically-sorted
+  category: io_time
+  title: list_files! sorts joined mixed-case and Unicode child paths
+  code: |
+    import std::io::{DirTraversal, LinkMode, Path, IoError, create_dir_all!, remove_dir_all!, write_bytes!, list_files!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_list_root")
+        let dir = Path.from_str("__eglur_conformance_io_list_root/nested")
+        let upper = Path.from_str("__eglur_conformance_io_list_root/nested/A-upper.txt")
+        let lower = Path.from_str("__eglur_conformance_io_list_root/nested/a-lower.txt")
+        let nfd = Path.from_str("__eglur_conformance_io_list_root/nested/e\u{301}-a-nfd.txt")
+        let nfc = Path.from_str("__eglur_conformance_io_list_root/nested/\u{e9}-z-nfc.txt")
+        let non_ascii = Path.from_str("__eglur_conformance_io_list_root/nested/\u{3bb}-nonascii.txt")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(dir, DirTraversal::FollowLinks)?
+        _ = write_bytes!(non_ascii, [5], LinkMode::Follow)?
+        _ = write_bytes!(nfc, [4], LinkMode::Follow)?
+        _ = write_bytes!(nfd, [3], LinkMode::Follow)?
+        _ = write_bytes!(lower, [2], LinkMode::Follow)?
+        _ = write_bytes!(upper, [1], LinkMode::Follow)?
+
+        let paths = list_files!(dir)?.map { _.to_str() }.to_vec()
+        _ = remove_dir_all!(root)?
+
+        let p0 = paths.get(0).unwrap_or("")
+        let p1 = paths.get(1).unwrap_or("")
+        let p2 = paths.get(2).unwrap_or("")
+        let p3 = paths.get(3).unwrap_or("")
+        let p4 = paths.get(4).unwrap_or("")
+
+        let nfd_spelling = (p2 == "__eglur_conformance_io_list_root/nested/e\u{301}-a-nfd.txt") ||
+          (p2 == "__eglur_conformance_io_list_root/nested/\u{e9}-a-nfd.txt")
+        let nfc_spelling = (p3 == "__eglur_conformance_io_list_root/nested/\u{e9}-z-nfc.txt") ||
+          (p3 == "__eglur_conformance_io_list_root/nested/e\u{301}-z-nfc.txt")
+
+        let ok = (paths.len() == 5) &&
+          (p0 == "__eglur_conformance_io_list_root/nested/A-upper.txt") &&
+          (p1 == "__eglur_conformance_io_list_root/nested/a-lower.txt") &&
+          nfd_spelling && nfc_spelling &&
+          (p4 == "__eglur_conformance_io_list_root/nested/\u{3bb}-nonascii.txt")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-listing-family-partitions-direct-child-kinds
+  category: io_time
+  title: listing family partitions direct child kinds without recursion
+  code: |
+    import std::io::{DirTraversal, LinkMode, Path, IoError, create_dir_all!, remove_dir_all!, write_bytes!, list_paths!, list_files!, list_dirs!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let root = Path.from_str("__eglur_conformance_io_listing_kinds")
+        let file = Path.from_str("__eglur_conformance_io_listing_kinds/A-file.txt")
+        let dir = Path.from_str("__eglur_conformance_io_listing_kinds/b-dir")
+        let nested = Path.from_str("__eglur_conformance_io_listing_kinds/b-dir/c-nested.txt")
+
+        _ = remove_dir_all!(root)?
+        _ = create_dir_all!(dir, DirTraversal::FollowLinks)?
+        _ = write_bytes!(file, [1], LinkMode::Follow)?
+        _ = write_bytes!(nested, [2], LinkMode::Follow)?
+
+        let paths = list_paths!(root)?.map { _.to_str() }.to_vec()
+        let files = list_files!(root)?.map { _.to_str() }.to_vec()
+        let dirs = list_dirs!(root)?.map { _.to_str() }.to_vec()
+        _ = remove_dir_all!(root)?
+
+        let ok = (paths.len() == 2) &&
+          (paths.get(0).unwrap_or("") == "__eglur_conformance_io_listing_kinds/A-file.txt") &&
+          (paths.get(1).unwrap_or("") == "__eglur_conformance_io_listing_kinds/b-dir") &&
+          (files.len() == 1) &&
+          (files.get(0).unwrap_or("") == "__eglur_conformance_io_listing_kinds/A-file.txt") &&
+          (dirs.len() == 1) &&
+          (dirs.get(0).unwrap_or("") == "__eglur_conformance_io_listing_kinds/b-dir")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-list-files-empty-directory-returns-empty-sequence
+  category: io_time
+  title: list_files! returns an empty sequence for an empty directory
+  code: |
+    import std::io::{DirTraversal, Path, IoError, create_dir_all!, remove_dir_all!, list_paths!, list_files!, list_dirs!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let dir = Path.from_str("__eglur_conformance_io_empty_list_dir")
+        _ = remove_dir_all!(dir)?
+        _ = create_dir_all!(dir, DirTraversal::FollowLinks)?
+        let paths = list_paths!(dir)?
+        let files = list_files!(dir)?
+        let dirs = list_dirs!(dir)?
+        _ = remove_dir_all!(dir)?
+        yield Ok(to_str((paths.len() == 0) && (files.len() == 0) && (dirs.len() == 0)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-stat-missing-path-returns-err-in-value-channel
+  category: io_time
+  title: stat! missing path returns Err in value channel
+  code: |
+    import std::io::{IoError, Path, stat!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        _ = stat!(Path.from_str("__eglur_conformance_missing_stat_probe.txt"))?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: IoError
+
+- id: IOT-entry-stat-missing-path-returns-err-in-value-channel
+  category: io_time
+  title: entry_stat! missing path returns Err in value channel
+  code: |
+    import std::io::{IoError, Path, entry_stat!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        _ = entry_stat!(Path.from_str("__eglur_conformance_missing_entry_stat_probe.txt"))?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: IoError
+
+- id: IOT-path-join-composes-relative-child-and-replaces-with-absolute-child
+  category: io_time
+  title: Path.join composes relative child and replaces with absolute child
+  code: |
+    import std::io::Path
+
+    fn main!() -> Res[Str, Str] {
+      let base = Path.from_str("/a/b")
+      let rel = Path.from_str("c")
+      let abs = Path.from_str("/x")
+      let j1 = base.join(&rel).to_str()
+      let j2 = base.join(&abs).to_str()
+      yield Ok(concat([j1, "|", j2]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"/a/b/c|/x"'
+
+- id: IOT-path-join-preserves-empty-and-lexical-edge-cases
+  category: io_time
+  title: Path.join preserves empty and lexical edge cases
+  code: |
+    import std::io::Path
+
+    fn main!() -> Res[Str, Str] {
+      let empty = Path.from_str("")
+      let empty_child = Path.from_str("")
+      let base = Path.from_str("base")
+      let trailing = Path.from_str("base/")
+      let root = Path.from_str("/")
+      let child = Path.from_str("child")
+      let repeated = Path.from_str("x//y")
+      let dotted = Path.from_str("./x/../y")
+      let backslash = Path.from_str("x\\y")
+
+      yield Ok(concat([
+        empty.join(&child).to_str(), "|",
+        empty.join(&empty_child).to_str(), "|",
+        base.join(&empty_child).to_str(), "|",
+        root.join(&empty_child).to_str(), "|",
+        trailing.join(&child).to_str(), "|",
+        base.join(&repeated).to_str(), "|",
+        base.join(&dotted).to_str(), "|",
+        base.join(&backslash).to_str()
+      ]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"child||base/|/|base/child|base/x//y|base/./x/../y|base/x\\y"'
+
+- id: IOT-path-parent-follows-lexical-separator-only-rules
+  category: io_time
+  title: Path.parent follows lexical separator-only rules
+  code: |
+    import std::io::Path
+
+    fn main!() -> Res[Str, Str] {
+      let p1 = Path.from_str("/a/b/")
+      let p2 = Path.from_str("file.txt")
+      let p3 = Path.from_str("/")
+
+      let s1 = p1.parent().map { _.to_str() }.unwrap_or("none")
+      let s2 = p2.parent().map { _.to_str() }.unwrap_or("none")
+      let s3 = p3.parent().map { _.to_str() }.unwrap_or("none")
+      yield Ok(concat([s1, "|", s2, "|", s3]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"/a|none|none"'
+
+- id: IOT-path-file-name-and-path-extension-are-derived-lexically
+  category: io_time
+  title: Path.file_name and Path.extension are derived lexically
+  code: |
+    import std::io::Path
+
+    fn main!() -> Res[Str, Str] {
+      let a = Path.from_str("/tmp/archive.tar.gz")
+      let b = Path.from_str("/tmp/.env")
+      let c = Path.from_str("/tmp/a.")
+
+      let fa = a.file_name().unwrap_or("none")
+      let ea = a.extension().unwrap_or("none")
+      let eb = b.extension().unwrap_or("none")
+      let ec = c.extension().unwrap_or("none")
+      yield Ok(concat([fa, "|", ea, "|", eb, "|", ec]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"archive.tar.gz|gz|none|none"'
+
+- id: IOT-backslash-is-ordinary-character-in-lexical-path-helpers
+  category: io_time
+  title: backslash is ordinary character in lexical Path helpers
+  code: |
+    import std::io::Path
+
+    fn main!() -> Res[Str, Str] {
+      let p = Path.from_str("a\\b")
+      let ok = ((p.file_name().unwrap_or("none") == "a\\b")
+        && (p.parent().is_none())
+        && (!p.is_absolute()))
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-path-parse-strict-rejects-nul-containing-input-in-value-channel
+  category: io_time
+  title: Path.parse_strict rejects NUL-containing input in value channel
+  code: |
+    import std::io::{Path, PathError}
+
+    fn main!() -> Res[Str, PathError] =
+      result {
+        _ = Path.parse_strict("bad\u{0000}path")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: PathError
+
+- id: IOT-path-parse-strict-accepts-lexical-dot-segments-unchanged
+  category: io_time
+  title: Path.parse_strict accepts lexical dot segments unchanged
+  code: |
+    import std::io::{Path, PathError}
+
+    fn main!() -> Res[Str, PathError] =
+      result {
+        let p = Path.parse_strict("./a/../b")?
+        yield Ok(p.to_str())
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"./a/../b"'
+
+- id: IOT-path-parse-strict-accepts-repeated-separators-unchanged
+  category: io_time
+  title: Path.parse_strict accepts repeated separators unchanged
+  code: |
+    import std::io::{Path, PathError}
+
+    fn main!() -> Res[Str, PathError] =
+      result {
+        let p = Path.parse_strict("a//b///c")?
+        yield Ok(p.to_str())
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"a//b///c"'
+
+- id: IOT-path-parse-strict-accepts-backslash-and-non-ascii-text-unchanged
+  category: io_time
+  title: Path.parse_strict accepts backslash and non-ASCII text unchanged
+  code: |
+    import std::io::{Path, PathError}
+
+    fn main!() -> Res[Str, PathError] =
+      result {
+        let p = Path.parse_strict("한글\\경로/€")?
+        yield Ok(p.to_str())
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"한글\\경로/€"'
+
+- id: IOT-lexical-path-helpers-do-not-normalize-dot-segments
+  category: io_time
+  title: lexical Path helpers do not normalize dot segments
+  code: |
+    import std::io::Path
+
+    fn main!() -> Res[Str, Str] {
+      let p = Path.from_str("a/./b/../c")
+      let joined = Path.from_str("root").join(&p).to_str()
+      let parent = p.parent().map { _.to_str() }.unwrap_or("none")
+      let name = p.file_name().unwrap_or("none")
+      yield Ok(concat([joined, "|", parent, "|", name]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"root/a/./b/../c|a/./b/..|c"'
+
+- id: IOT-process-snapshot-invocation-arg-view-is-stable-within-one-capture
+  category: io_time
+  title: process_snapshot! invocation argument view is stable within one capture
+  code: |
+    import std::io::{IoError, process_snapshot!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let ps = process_snapshot!()
+        let i0 = ps.invocation_arg()?
+        let i1 = ps.invocation_arg()?
+        yield Ok(to_str(i0 == i1))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-process-snapshot-args-view-is-stable-within-one-capture
+  category: io_time
+  title: process_snapshot! args view is stable within one capture
+  code: |
+    import std::io::{IoError, process_snapshot!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let ps = process_snapshot!()
+        let a0 = ps.args()?
+        let a1 = ps.args()?
+        yield Ok(to_str(a0 == a1))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-process-snapshot-env-view-is-stable-within-one-capture
+  category: io_time
+  title: process snapshot env view is stable within one capture
+  code: |
+    import std::io::{IoError, process_snapshot!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let ps = process_snapshot!()
+        let v0 = ps.env_get(&"__EGLUR_CONFORMANCE_ENV_PROBE__")?
+        let v1 = ps.env_get(&"__EGLUR_CONFORMANCE_ENV_PROBE__")?
+        yield Ok(to_str(v0 == v1))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-process-snapshot-cwd-view-is-stable-within-one-capture
+  category: io_time
+  title: process snapshot cwd view is stable within one capture
+  code: |
+    import std::io::{IoError, process_snapshot!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let ps = process_snapshot!()
+        let p0 = ps.cwd()?
+        let p1 = ps.cwd()?
+        let ok = p0.to_str() != "" && p0.to_str() == p1.to_str()
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-direct-args-and-env-helpers-return-declared-value-shapes
+  category: io_time
+  title: direct args and env helpers return their declared value shapes
+  code: |
+    import std::io::{IoError, args!, env_get!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let args = args!()?
+        let env = env_get!("__EGLUR_CONFORMANCE_ENV_PROBE__")?
+        let env_shape = match env {
+          Some(_) => true
+          None => true
+        }
+        yield Ok(to_str((args.len() == args.to_vec().len()) && env_shape))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-direct-invocation-arg-helper-returns-declared-value-shape
+  category: io_time
+  title: direct invocation argument helper returns its declared value shape
+  code: |
+    import std::io::{IoError, invocation_arg!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let invocation = invocation_arg!()?
+        let shape = match invocation {
+          Some(_) => true
+          None => true
+        }
+        yield Ok(to_str(shape))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-cwd-provides-non-empty-path-string-in-value-channel
+  category: io_time
+  title: cwd! provides non-empty path string in value channel
+  code: |
+    import std::io::{IoError, cwd!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let p = cwd!()?
+        yield Ok(to_str(p.to_str() != ""))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-with-writer-write-all-and-flush-supports-empty-byte-write-path
+  category: io_time
+  title: with_writer! write_all! and flush! supports empty-byte write path
+  code: |
+    import std::io::{LinkMode, IoError, Path, with_writer!, read_bytes!, remove_entry!, exists!}
+
+    fn main!() -> Res[Str, Union[IoError, ScopedFailure[IoError]]] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_stream_empty.txt")
+        if exists!(p)? { _ = remove_entry!(p)? } else {}
+        _ = with_writer!(p, LinkMode::Follow) { |writer|
+          result {
+            _ = writer.write_all!(Vec[u8].new())?
+            _ = writer.flush!()?
+            yield Ok(())
+          }
+        }?
+        let xs = read_bytes!(p, LinkMode::Follow)?
+        _ = remove_entry!(p)?
+        yield Ok(to_str(xs.len() == 0))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-scoped-body-failure-and-successful-close-use-primary-carrier
+  category: io_time
+  title: Scoped callback failure and successful close use Primary
+  code: |
+    import std::io::{IoError, IoErrorKind, LinkMode, Path, read_bytes!, with_writer!}
+
+    fn main!() -> Res[Str, ScopedFailure[IoError]] {
+      let target = Path.from_str("__eglur_conformance_scoped_body_failure.bin")
+      let missing = Path.from_str("__eglur_conformance_scoped_body_failure_missing.bin")
+      let outcome = with_writer!(target, LinkMode::Reject) { |writer|
+        result {
+          _ = writer.write_all!([1, 2, 3])?
+          _ = read_bytes!(missing, LinkMode::Reject)?
+          yield Ok(())
+        }
+      }
+      let observed = match outcome {
+        Err(ScopedFailure::Primary(error)) =>
+          (error.kind() == IoErrorKind::NotFound) &&
+            (error.to_str() == "I/O error: not found"),
+        Err(ScopedFailure::PrimaryAndClose { .. }) => false,
+        Ok(_) => false,
+      }
+      yield Ok(to_str(observed))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-direct-byte-stream-acquisitions-close-each-resource-root
+  category: io_time
+  title: direct byte stream acquisitions close each resource root
+  code: |
+    import std::io::{LinkMode, IoError, Path, open_reader!, open_writer!, open_appender!, write_bytes!, remove_entry!, exists!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_direct_byte_roots.bin")
+        if exists!(p)? { _ = remove_entry!(p)? } else {}
+        _ = write_bytes!(p, [1], LinkMode::Follow)?
+
+        let reader = open_reader!(p, LinkMode::Follow)?
+        _ = (move reader).close!()?
+        let writer = open_writer!(p, LinkMode::Follow)?
+        _ = (move writer).close!()?
+        let appender = open_appender!(p, LinkMode::Follow)?
+        _ = (move appender).close!()?
+
+        _ = remove_entry!(p)?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: IOT-write-bytes-supports-empty-byte-payload-path
+  category: io_time
+  title: write_bytes! supports empty-byte payload path
+  code: |
+    import std::io::{LinkMode, IoError, Path, write_bytes!, read_bytes!, remove_entry!, exists!}
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_write_bytes_empty.bin")
+        if exists!(p)? { _ = remove_entry!(p)? } else {}
+        _ = write_bytes!(p, [1, 2, 3], LinkMode::Follow)?
+        _ = write_bytes!(p, Vec[u8].new(), LinkMode::Follow)?
+        let xs = read_bytes!(p, LinkMode::Follow)?
+        _ = remove_entry!(p)?
+        yield Ok(to_str(xs.len() == 0))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-with-reader-read-chunk-returns-some-then-eof-none
+  category: io_time
+  title: with_reader! read_chunk! returns Some then EOF None
+  code: |
+    import std::io::{LinkMode, IoError, Path, write_bytes!, with_reader!, remove_entry!, exists!}
+
+    fn main!() -> Res[Str, Union[IoError, ScopedFailure[IoError]]] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_stream_read.txt")
+        if exists!(p)? { _ = remove_entry!(p)? } else {}
+        _ = write_bytes!(p, [97,98,99], LinkMode::Follow)?
+
+        let ok = with_reader!(p, LinkMode::Follow) { |reader|
+          result {
+            let c1 = reader.read_chunk!(8)?
+            let c2 = reader.read_chunk!(8)?
+            let c3 = reader.read_chunk!(8)?
+            yield Ok(c1.is_some() && c2.is_none() && c3.is_none())
+          }
+        }?
+        _ = remove_entry!(p)?
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-read-chunk-zero-max-bytes-is-domain-invalid-value
+  category: io_time
+  title: read_chunk! zero max_bytes is DOMAIN_INVALID_VALUE
+  code: |
+    import std::io::ByteReader
+
+    fn bad!(reader: &mut Own[ByteReader]) -> Unit {
+      _ = reader.read_chunk!(0)
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+
+- id: IOT-read-chunk-after-consuming-close-is-ownership-use-after-discharge
+  category: io_time
+  title: read_chunk! after consuming close is ownership use after discharge
+  code: |
+    import std::io::{ByteReader, IoError}
+
+    fn read_after_close!(reader: Own[ByteReader]) -> Res[Unit, IoError] =
+      result {
+        _ = (move reader).close!()?
+        _ = reader.read_chunk!(1)?
+        yield Ok(())
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+
+- id: IOT-bytereader-repeated-consuming-close-is-ownership-double-move
+  category: io_time
+  title: ByteReader repeated consuming close is ownership double move
+  code: |
+    import std::io::{ByteReader, IoError}
+
+    fn repeat_close!(reader: Own[ByteReader]) -> Res[Unit, IoError] =
+      result {
+        _ = (move reader).close!()?
+        yield (move reader).close!()
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DOUBLE_MOVE
+      message_contains:
+      - ownership
+      - move
+      - already consumed
+      data_keys: []
+
+- id: IOT-bytewriter-repeated-consuming-close-is-ownership-double-move
+  category: io_time
+  title: ByteWriter repeated consuming close is ownership double move
+  code: |
+    import std::io::{ByteWriter, IoError}
+
+    fn repeat_close!(writer: Own[ByteWriter]) -> Res[Unit, IoError] =
+      result {
+        _ = (move writer).close!()?
+        yield (move writer).close!()
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DOUBLE_MOVE
+      message_contains:
+      - ownership
+      - move
+      - already consumed
+      data_keys: []
+
+- id: IOT-bytewriter-write-all-after-consuming-close-is-ownership-use-after-discharge
+  category: io_time
+  title: ByteWriter write_all! after consuming close is ownership use after discharge
+  code: |
+    import std::io::{ByteWriter, IoError}
+
+    fn write_after_close!(writer: Own[ByteWriter]) -> Res[Unit, IoError] =
+      result {
+        _ = (move writer).close!()?
+        yield writer.write_all!(Vec[u8].new())
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+
+- id: IOT-bytewriter-flush-after-consuming-close-is-ownership-use-after-discharge
+  category: io_time
+  title: ByteWriter flush! after consuming close is ownership use after discharge
+  code: |
+    import std::io::{ByteWriter, IoError}
+
+    fn flush_after_close!(writer: Own[ByteWriter]) -> Res[Unit, IoError] =
+      result {
+        _ = (move writer).close!()?
+        yield writer.flush!()
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+
+- id: IOT-duration-parse-accepts-canonical-integer-unit-forms
+  category: io_time
+  title: Duration.parse accepts canonical integer-unit forms
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let d1 = Duration.parse("1500ms")?
+        let d2 = Duration.parse("2s")?
+        let d3 = Duration.parse("3_000_000ns")?
+        let ok = (d1.as_millis() == 1500) && (d2.as_millis() == 2000) && (d3.as_millis() == 3)
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-duration-parse-rejects-fractional-unit-forms
+  category: io_time
+  title: Duration.parse rejects fractional unit forms
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        _ = Duration.parse("1.5s")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TimeError
+
+- id: IOT-duration-parse-rejects-unsupported-units
+  category: io_time
+  title: Duration.parse rejects unsupported units
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        _ = Duration.parse("10m")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TimeError
+
+- id: IOT-duration-parse-rejects-leading-whitespace
+  category: io_time
+  title: Duration.parse rejects leading whitespace
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        _ = Duration.parse(" 2s")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TimeError
+
+- id: IOT-duration-parse-rejects-negative-literals
+  category: io_time
+  title: Duration.parse rejects negative literals
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        _ = Duration.parse("-2s")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TimeError
+
+- id: IOT-scoped-text-writer-and-reader-preserve-utf-8-line-stream-order
+  category: io_time
+  title: scoped text writer and reader preserve UTF-8 line stream order
+  code: |
+    import std::io::{LinkMode, Path, TextError, with_text_writer!, with_text_reader!}
+
+    fn main!() -> Res[Str, ScopedFailure[TextError]] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_text_stream_lines.txt")
+        _ = with_text_writer!(p, LinkMode::Follow) { |writer|
+          result {
+            _ = writer.write_line!("alpha")?
+            _ = writer.write_line!("beta")?
+            yield Ok(())
+          }
+        }?
+        let ok = with_text_reader!(p, LinkMode::Follow) { |reader|
+          result {
+            let l1 = reader.read_line!()?.unwrap_or("none")
+            let l2 = reader.read_line!()?.unwrap_or("none")
+            let eof = reader.read_line!()?.is_none()
+            yield Ok((l1 == "alpha") && (l2 == "beta") && eof)
+          }
+        }?
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-scoped-textwriter-flush-succeeds-on-file-backed-text-writer
+  category: io_time
+  title: scoped TextWriter flush! succeeds on file-backed text writer
+  code: |
+    import std::io::{LinkMode, Path, TextError, with_text_writer!, with_text_reader!}
+
+    fn main!() -> Res[Str, ScopedFailure[TextError]] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_text_flush.txt")
+        _ = with_text_writer!(p, LinkMode::Follow) { |writer|
+          result {
+            _ = writer.write_str!("alpha")?
+            _ = writer.flush!()?
+            yield Ok(())
+          }
+        }?
+        let s = with_text_reader!(p, LinkMode::Follow) { |reader|
+          result { yield Ok(reader.read_line!()?.unwrap_or("none")) }
+        }?
+        yield Ok(s)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"alpha"'
+
+- id: IOT-direct-text-stream-acquisitions-close-each-resource-root
+  category: io_time
+  title: direct text stream acquisitions close each resource root
+  code: |
+    import std::io::{LinkMode, Path, TextError, open_text_reader!, open_text_writer!, open_text_appender!}
+
+    fn main!() -> Res[Str, TextError] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_direct_text_roots.txt")
+
+        let writer = open_text_writer!(p, LinkMode::Follow)?
+        _ = (move writer).close!()?
+        let reader = open_text_reader!(p, LinkMode::Follow)?
+        _ = (move reader).close!()?
+        let appender = open_text_appender!(p, LinkMode::Follow)?
+        _ = (move appender).close!()?
+
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: IOT-with-text-reader-missing-path-returns-err-before-callback
+  category: io_time
+  title: with_text_reader! maps acquisition failure to Primary before callback
+  code: |
+    import std::io::{LinkMode, Path, TextError, with_text_reader!}
+    import std::test::emit!
+
+    fn main!() -> Res[Str, ScopedFailure[TextError]] {
+      let outcome = with_text_reader!(Path.from_str("__eglur_conformance_missing_text_stream.txt"), LinkMode::Follow) { |_reader|
+        result {
+          emit!("unexpected-callback")
+          yield Ok("unexpected")
+        }
+      }
+      let observed = match outcome {
+        Err(ScopedFailure::Primary(TextError::Io(_))) => true,
+        Err(ScopedFailure::Primary(_)) => false,
+        Err(ScopedFailure::PrimaryAndClose { .. }) => false,
+        Ok(_) => false,
+      }
+      yield Ok(to_str(observed))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+    side_effects: []
+
+- id: IOT-text-reader-invalid-utf-8-decode-path-returns-err-in-value-channel
+  category: io_time
+  title: text reader invalid UTF-8 decode error is sticky in value channel
+  code: |
+    import std::io::{LinkMode, Path, IoError, TextError, with_writer!, with_text_reader!}
+
+    fn main!() -> Res[Str, Union[ScopedFailure[IoError], ScopedFailure[TextError]]] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_text_invalid_utf8.bin")
+
+        _ = with_writer!(p, LinkMode::Follow) { |writer|
+          result {
+            let bad: u8 = 255
+            let newline: u8 = 10
+            let o: u8 = 111
+            let k: u8 = 107
+            _ = writer.write_all!(
+              Vec[u8].new().push(bad).push(newline).push(o).push(k).push(newline)
+            )?
+            yield Ok(())
+          }
+        }?
+        yield with_text_reader!(p, LinkMode::Follow) { |reader|
+          result {
+            yield match reader.read_line!() {
+              Err(TextError::InvalidUtf8) => {
+                _ = reader.read_line!()?
+                yield Ok("unexpected recovery")
+              }
+              Err(error) => Err(error)
+              Ok(_) => Ok("unexpected decode success")
+            }
+          }
+        }
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TextError
+      error_variant: TextError::InvalidUtf8
+
+- id: IOT-textwriter-write-str-after-consuming-close-is-ownership-use-after-discharge
+  category: io_time
+  title: TextWriter write_str! after consuming close is ownership use after discharge
+  code: |
+    import std::io::{TextWriter, TextError}
+
+    fn write_after_close!(writer: Own[TextWriter]) -> Res[Unit, TextError] =
+      result {
+        _ = (move writer).close!()?
+        yield writer.write_str!("x")
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+
+- id: IOT-textwriter-flush-after-consuming-close-is-ownership-use-after-discharge
+  category: io_time
+  title: TextWriter flush! after consuming close is ownership use after discharge
+  code: |
+    import std::io::{TextWriter, TextError}
+
+    fn flush_after_close!(writer: Own[TextWriter]) -> Res[Unit, TextError] =
+      result {
+        _ = (move writer).close!()?
+        yield writer.flush!()
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+
+- id: IOT-textreader-read-line-after-consuming-close-is-ownership-use-after-discharge
+  category: io_time
+  title: TextReader read_line! after consuming close is ownership use after discharge
+  code: |
+    import std::io::{TextReader, TextError}
+
+    fn read_after_close!(reader: Own[TextReader]) -> Res[Unit, TextError] =
+      result {
+        _ = (move reader).close!()?
+        _ = reader.read_line!()?
+        yield Ok(())
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+
+- id: IOT-textwriter-repeated-consuming-close-is-ownership-double-move
+  category: io_time
+  title: TextWriter repeated consuming close is ownership double move
+  code: |
+    import std::io::{TextWriter, TextError}
+
+    fn repeat_close!(writer: Own[TextWriter]) -> Res[Unit, TextError] =
+      result {
+        _ = (move writer).close!()?
+        yield (move writer).close!()
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DOUBLE_MOVE
+      message_contains:
+      - ownership
+      - move
+      - already consumed
+      data_keys: []
+
+- id: IOT-textreader-repeated-consuming-close-is-ownership-double-move
+  category: io_time
+  title: TextReader repeated consuming close is ownership double move
+  code: |
+    import std::io::{TextReader, TextError}
+
+    fn repeat_close!(reader: Own[TextReader]) -> Res[Unit, TextError] =
+      result {
+        _ = (move reader).close!()?
+        yield (move reader).close!()
+      }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DOUBLE_MOVE
+      message_contains:
+      - ownership
+      - move
+      - already consumed
+      data_keys: []
+
+- id: IOT-text-writer-write-line-matches-write-str-with-trailing-newline
+  category: io_time
+  title: text writer write_line! matches write_str! with trailing newline
+  code: |
+    import std::io::{LinkMode, Path, TextError, with_text_writer!, with_text_reader!}
+
+    fn main!() -> Res[Str, ScopedFailure[TextError]] =
+      result {
+        let p0 = Path.from_str("__eglur_conformance_io_text_write_line_probe_a.txt")
+        let p1 = Path.from_str("__eglur_conformance_io_text_write_line_probe_b.txt")
+
+        _ = with_text_writer!(p0, LinkMode::Follow) { |writer|
+          result {
+            _ = writer.write_line!("alpha")?
+            yield Ok(())
+          }
+        }?
+        _ = with_text_writer!(p1, LinkMode::Follow) { |writer|
+          result {
+            _ = writer.write_str!("alpha\n")?
+            yield Ok(())
+          }
+        }?
+        let left = with_text_reader!(p0, LinkMode::Follow) { |reader|
+          result {
+            let line = reader.read_line!()?.unwrap_or("none")
+            let eof = reader.read_line!()?.is_none()
+            yield Ok((line, eof))
+          }
+        }?
+        let right = with_text_reader!(p1, LinkMode::Follow) { |reader|
+          result {
+            let line = reader.read_line!()?.unwrap_or("none")
+            let eof = reader.read_line!()?.is_none()
+            yield Ok((line, eof))
+          }
+        }?
+        let same = (left.0 == right.0) && left.1 && right.1
+        yield Ok(to_str(same))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-scoped-standard-text-stream-wrappers-can-be-reacquired-after-close
+  category: io_time
+  title: scoped standard text stream wrappers can be reacquired after close
+  code: |
+    import std::io::{TextError, stdin!, stdout!, stderr!, with_stdin!, with_stdout!, with_stderr!}
+
+    fn main!() -> Res[Str, Union[TextError, ScopedFailure[TextError]]] =
+      result {
+        let input = stdin!()?
+        _ = (move input).close!()?
+        let output = stdout!()?
+        _ = (move output).close!()?
+        let error_output = stderr!()?
+        _ = (move error_output).close!()?
+
+        _ = with_stdin! { |_input| result { yield Ok(()) } }?
+        _ = with_stdin! { |_input| result { yield Ok(()) } }?
+        _ = with_stdout! { |output|
+          result {
+            _ = output.write_str!("")?
+            _ = output.flush!()?
+            yield Ok(())
+          }
+        }?
+        _ = with_stdout! { |_output| result { yield Ok(()) } }?
+        _ = with_stderr! { |output|
+          result {
+            _ = output.write_str!("")?
+            _ = output.flush!()?
+            yield Ok(())
+          }
+        }?
+        _ = with_stderr! { |_output| result { yield Ok(()) } }?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: IOT-scoped-callback-runtime-abort-remains-runtime-error
+  category: io_time
+  title: Scoped callback runtime abort remains outside the typed failure carrier
+  code: |
+    import std::io::{TextError, with_stdout!}
+    import std::test::abort!
+
+    fn main!() -> Res[Str, ScopedFailure[TextError]] =
+      with_stdout! { |_output|
+        result {
+          abort!("RUNTIME_ABORT", "abort inside scoped callback")
+          yield Ok("unreachable")
+        }
+      }
+  expect:
+    runtime_error:
+      code: RUNTIME_ABORT
+      message_contains:
+      - abort
+      data_keys:
+      - source
+      data_equals:
+        source: std::test::abort!
+
+- id: IOT-with-appender-appends-bytes-after-existing-file-contents
+  category: io_time
+  title: with_appender! appends bytes after existing file contents
+  code: |
+    import std::io::{LinkMode, IoError, Path, write_bytes!, read_bytes!, with_appender!, remove_entry!, exists!}
+
+    fn main!() -> Res[Str, Union[IoError, ScopedFailure[IoError]]] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_append_bytes.bin")
+        if exists!(p)? { _ = remove_entry!(p)? } else {}
+        _ = write_bytes!(p, [1, 2], LinkMode::Follow)?
+        _ = with_appender!(p, LinkMode::Follow) { |writer|
+          result {
+            _ = writer.write_all!([3, 4])?
+            yield Ok(())
+          }
+        }?
+        let xs = read_bytes!(p, LinkMode::Follow)?
+        _ = remove_entry!(p)?
+        yield Ok(to_str(xs))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[1,2,3,4]"'
+
+- id: IOT-with-text-appender-creates-missing-file-and-appends-text-lines
+  category: io_time
+  title: with_text_appender! creates missing file and appends text lines
+  code: |
+    import std::io::{LinkMode, Path, TextError, with_text_appender!, with_text_reader!}
+
+    fn main!() -> Res[Str, ScopedFailure[TextError]] =
+      result {
+        let p = Path.from_str("__eglur_conformance_io_append_text.txt")
+
+        _ = with_text_appender!(p, LinkMode::Follow) { |writer|
+          result {
+            _ = writer.write_line!("alpha")?
+            yield Ok(())
+          }
+        }?
+        _ = with_text_appender!(p, LinkMode::Follow) { |writer|
+          result {
+            _ = writer.write_line!("beta")?
+            yield Ok(())
+          }
+        }?
+        let ok = with_text_reader!(p, LinkMode::Follow) { |reader|
+          result {
+            let l0 = reader.read_line!()?.unwrap_or("none")
+            let l1 = reader.read_line!()?.unwrap_or("none")
+            let eof = reader.read_line!()?.is_none()
+            yield Ok((l0 == "alpha") && (l1 == "beta") && eof)
+          }
+        }?
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: IOT-duration-equality-compares-nanosecond-value
+  category: io_time
+  title: Duration equality compares nanosecond value
+  code: |
+    import std::time::{Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let millis = Duration.millis(1)?
+        let nanos = Duration.nanos(1_000_000)?
+        yield Ok(to_str(millis == nanos))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

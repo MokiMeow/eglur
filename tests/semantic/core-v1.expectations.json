@@ -1,0 +1,838 @@
+{
+  "fixtures": [
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Ok",
+            "representation": "\"1\""
+          }
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-conditionals",
+        "test_id": "CFL-if-evaluates-only-selected-branch-at-runtime"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "import std::test::abort!\n\nfn main!() -> Res[Str, Str] {\n  let x = if true { yield 1 } else {\n    abort!(\"RUNTIME_ABORT\", \"dead else\")\n    yield 0\n  }\n  yield Ok(to_str(x))\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Ok",
+            "representation": "\"3\""
+          }
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-conditionals",
+        "test_id": "CFL-match-expression-over-opt-is-exhaustive"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn main!() -> Res[Str, Str] {\n  let x = Some(3)\n  let y = match x {\n    Some(v) => v,\n    None => 0,\n  }\n  yield Ok(to_str(y))\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "MATCH_NON_EXHAUSTIVE",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [
+              "match",
+              "non-exhaustive"
+            ],
+            "message_any_of": [],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-conditionals",
+        "test_id": "CFL-match-non-exhaustive-arms-are-rejected"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn main!() -> Res[Str, Str] {\n  let x = Some(1)\n  let y = match x {\n    Some(v) => v,\n  }\n  yield Ok(to_str(y))\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "EFFECT_VIOLATION",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [],
+            "message_any_of": [
+              [
+                "non-bang",
+                "Fn",
+                "pure"
+              ]
+            ],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-effects",
+        "test_id": "EFF-bounded-generic-bang-trait-call-has-unknown-summary"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "trait Step {\n  fn step!(self: &mut Self) -> Unit\n}\n\nstruct Counter {\n  field mut n: i64\n}\n\nimpl Step for Counter {\n  fn step!(self: &mut Self) -> Unit {\n    self.n = wrapping_add(self.n, 1)\n  }\n}\n\nfn step_once![T: Step](value: &mut T) -> Unit {\n  value.step!()\n}\n\nfn run() -> i64 {\n  let mut counter = Counter{ n: 0 }\n  step_once!::[Counter](&mut counter)\n  yield counter.n\n}\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(to_str(run()))\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Ok",
+            "representation": "\"1\""
+          }
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-effects",
+        "test_id": "EFF-imported-localizable-state-summary-allows-non-bang-local-call"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "entry": "app/main.eglur",
+          "file_set_root": ".",
+          "files": {
+            "app/main.eglur": "module app::main\nimport app::state::{counter, increment!, read}\n\nfn run() -> i64 {\n  let mut value = counter()\n  increment!(&mut value)\n  yield read(&value)\n}\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(to_str(run()))\n}\n",
+            "app/state.eglur": "module app::state\n\npub struct Counter {\n  field mut n: i64\n}\n\npub fn counter() -> Counter = Counter{ n: 0 }\n\npub fn increment!(counter: &mut Counter) -> Unit {\n  counter.n = wrapping_add(counter.n, 1)\n}\n\npub fn read(counter: &Counter) -> i64 = counter.n\n"
+          },
+          "kind": "files",
+          "symlinks": {}
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "EFFECT_VIOLATION",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [],
+            "message_any_of": [
+              [
+                "non-bang",
+                "Fn",
+                "pure"
+              ]
+            ],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-effects",
+        "test_id": "EFF-imported-transitive-io-summary-rejects-non-bang-local-call"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "entry": "app/main.eglur",
+          "file_set_root": ".",
+          "files": {
+            "app/main.eglur": "module app::main\nimport app::state::{counter, increment!}\n\nfn run() -> i64 {\n  let mut value = counter()\n  increment!(&mut value)\n  yield 1\n}\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(to_str(run()))\n}\n",
+            "app/state.eglur": "module app::state\nimport std::test::emit!\n\npub struct Counter {\n  field mut n: i64\n}\n\npub fn counter() -> Counter = Counter{ n: 0 }\n\nfn record!(counter: &mut Counter) -> Unit {\n  emit!(\"increment\")\n  counter.n = wrapping_add(counter.n, 1)\n}\n\npub fn increment!(counter: &mut Counter) -> Unit {\n  record!(counter)\n}\n"
+          },
+          "kind": "files",
+          "symlinks": {}
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "EFFECT_VIOLATION",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [],
+            "message_any_of": [
+              [
+                "non-bang",
+                "Fn",
+                "pure"
+              ]
+            ],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-effects",
+        "test_id": "EFF-non-bang-dead-if-branch-cannot-hide-effectful-call"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "import std::io::print!\n\nfn f() -> i64 {\n  if false {\n    print!(\"dead\")\n  } else {\n    _ = 0\n  }\n  yield 0\n}\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(to_str(f()))\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Err",
+            "representation": "NumericError"
+          }
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": [
+          {
+            "code": "INT_OVERFLOW",
+            "data_equals": {},
+            "data_keys": [
+              "operation",
+              "dtype"
+            ],
+            "help_contains": null,
+            "message_all_of": [
+              "int",
+              "overflow"
+            ],
+            "message_any_of": [],
+            "primary_span": null,
+            "related_contains": null
+          }
+        ]
+      },
+      "identity": {
+        "suite_id": "core-numeric",
+        "test_id": "NUM-checked-dynamic-overflow-returns-numericerror"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn double(x: i8) -> Res[i8, NumericError] =\n  checked {\n    yield x + x\n  }\n\nfn main!() -> Res[Str, NumericError] =\n  result {\n    _ = double(64)?\n    yield Ok(\"unreachable\")\n  }\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Ok",
+            "representation": "\"ok\""
+          }
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-ownership",
+        "test_id": "OWN-balanced-ownership-discharge-across-return-paths-is-accepted"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn good_paths(x: Own[i64], keep: Bool) -> i64 {\n  if keep {\n    drop_own move x\n    return 1\n  } else {\n    drop_own move x\n    return 0\n  }\n}\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"ok\")\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "OWNERSHIP_USE_AFTER_DISCHARGE",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [
+              "ownership",
+              "use",
+              "discharged"
+            ],
+            "message_any_of": [],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-ownership",
+        "test_id": "OWN-path-sensitive-merge-rejects-maybe-consumed-ownership-use"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn peek(_x: &Own[i64]) -> i64 {\n  return 1\n}\n\nfn bad_maybe_consumed(x: Own[i64], b: Bool) -> i64 {\n  if b {\n    drop_own move x\n  } else {\n  }\n\n  let n = peek(&x)\n\n  if b {\n    return n\n  } else {\n    drop_own move x\n    return n\n  }\n}\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "OWNERSHIP_DOUBLE_MOVE",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [
+              "ownership",
+              "move",
+              "already consumed"
+            ],
+            "message_any_of": [],
+            "primary_span": {
+              "kind": "marker",
+              "line": 4,
+              "marker": "repeated-move",
+              "source": "code"
+            },
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-ownership",
+        "test_id": "OWN-repeated-consuming-move-on-same-root-reports-ownership-double-move"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn bad_double_move(x: Own[i64]) -> i64 {\n  let y = move x\n  drop_own move y\n  let z = move x // @primary repeated-move\n  drop_own move z\n  return 0\n}\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Ok",
+            "representation": "\"ok\""
+          }
+        },
+        "process_exit": 0,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-program",
+        "test_id": "PRG-ok-entry-maps-to-zero-and-preserves-value"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn main!() -> Res[Str, Str] = Ok(\"ok\")\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "PARSE_EXPECTED_EXPRESSION",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [
+              "parse",
+              "expected",
+              "expression"
+            ],
+            "message_any_of": [],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-program",
+        "test_id": "PRG-source-error-precedes-entry-missing"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn helper() -> i64 {\n  let value =\n  yield value\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Err",
+            "representation": "\"boom\""
+          }
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-result",
+        "test_id": "RES-res-propagates-err"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn f() -> Res[i64, Str] = Err(\"boom\")\n\nfn main!() -> Res[Str, Str] =\n  result {\n    _ = f()?\n    yield Ok(\"unreachable\")\n  }\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Ok",
+            "representation": "\"15\""
+          }
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-traits",
+        "test_id": "TRT-explicit-bounds-and-associated-types-preserve-carrier-and-result-types"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "closed trait Readable {\n  type Elem\n  fn read(self: &Self) -> Self::Elem\n}\n\nstruct Count {\n  field value: i64\n}\n\nimpl Readable for Count {\n  type Elem = i64\n  fn read(self: &Self) -> i64 = self.value\n}\n\nfn project[C: Readable](x: C) -> C::Elem = x.read()\nfn identity[C: Readable](x: C) -> C = x\nfn closed(x: i64) -> i64 = x\n\nfn main!() -> Res[Str, Str] {\n  let same = identity(Count { value: 7 })\n  let inferred = project(same)\n  let explicit = project::[Count](Count { value: 8 })\n  yield Ok(to_str(closed(wrapping_add(inferred, explicit))))\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "TRAIT_BOUND_NOT_SATISFIED",
+            "data_equals": {},
+            "data_keys": [
+              "trait",
+              "type"
+            ],
+            "help_contains": null,
+            "message_all_of": [
+              "trait",
+              "bound",
+              "not satisfied"
+            ],
+            "message_any_of": [],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-traits",
+        "test_id": "TRT-inferred-type-argument-must-satisfy-declared-bound"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "trait Mark {}\nstruct Plain {}\n\nfn bounded[T: Mark](x: T) -> T = x\n\nfn main!() -> Res[Str, Str] {\n  _ = bounded(Plain{})\n  yield Ok(\"x\")\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Ok",
+            "representation": "\"ok\""
+          }
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-traits",
+        "test_id": "TRT-trait-method-call-works-when-trait-is-imported-at-call-site"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "entry": "app/main.eglur",
+          "file_set_root": ".",
+          "files": {
+            "app/main.eglur": "module app::main\nimport app::render::Doc\nimport app::render::Render\n\nfn main!() -> Res[Str, Str] {\n  let d = Doc{}\n  yield Ok(d.render())\n}\n",
+            "app/render.eglur": "module app::render\n\npub trait Render { fn render(self: &Self) -> Str }\npub struct Doc {}\n\nimpl Render for Doc {\n  fn render(self: &Self) -> Str = \"ok\"\n}\n"
+          },
+          "kind": "files",
+          "symlinks": {}
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "CALL_ARG_TYPE_MISMATCH",
+            "data_equals": {
+              "actual_type": "Str",
+              "expected_type": "i64",
+              "parameter": "x",
+              "reason": "parameter_type"
+            },
+            "data_keys": [
+              "reason",
+              "actual_type",
+              "parameter",
+              "expected_type"
+            ],
+            "help_contains": null,
+            "message_all_of": [
+              "call",
+              "argument",
+              "type",
+              "mismatch"
+            ],
+            "message_any_of": [],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-call-argument-type-mismatch-is-rejected"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn need_i64(x: i64) -> i64 {\n  yield x\n}\n\nfn main!() -> Res[Str, Str] {\n  let x = need_i64(\"not an int\")\n  yield Ok(\"x\")\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "RETURN_TYPE_MISMATCH",
+            "data_equals": {},
+            "data_keys": [
+              "expected_type",
+              "actual_type"
+            ],
+            "help_contains": null,
+            "message_all_of": [
+              "return",
+              "type",
+              "mismatch"
+            ],
+            "message_any_of": [],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-expression-body-result-must-match-declared-return-type"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn bad() -> i64 = true\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "kind": "value",
+          "value": {
+            "error_variant": null,
+            "kind": "Ok",
+            "representation": "\"7\""
+          }
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-generic-type-argument-infers-from-call-argument"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn id[T](x: T) -> T = x\n\nfn main!() -> Res[Str, Str] {\n  let y = id(7)\n  yield Ok(to_str(y))\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "NAME_NOT_FOUND",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [
+              "name",
+              "not found"
+            ],
+            "message_any_of": [],
+            "primary_span": {
+              "kind": "marker",
+              "line": 2,
+              "marker": "use-before-local-declaration",
+              "source": "code"
+            },
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-later-local-declaration-is-not-hoisted"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn main!() -> Res[Str, Str] {\n  _ = value // @primary use-before-local-declaration\n  let value = 1\n  yield Ok(to_str(value))\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "LOCAL_BINDING_REDECLARATION",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [
+              "local",
+              "binding",
+              "redeclared"
+            ],
+            "message_any_of": [],
+            "primary_span": {
+              "kind": "marker",
+              "line": 3,
+              "marker": "redeclaration-before-initializer",
+              "source": "code"
+            },
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-redeclaration-precedes-invalid-initializer"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn main!() -> Res[Str, Str] {\n  let value = 1\n  let value = missing // @primary redeclaration-before-initializer\n  yield Ok(to_str(value))\n}\n"
+        }
+      }
+    },
+    {
+      "expectation": {
+        "diagnostic_contains": null,
+        "outcome": {
+          "diagnostic": {
+            "code": "TYPE_ARG_INFERENCE_FAILED",
+            "data_equals": {},
+            "data_keys": [],
+            "help_contains": null,
+            "message_all_of": [
+              "type argument",
+              "inference",
+              "failed"
+            ],
+            "message_any_of": [],
+            "primary_span": null,
+            "related_contains": null
+          },
+          "kind": "compile_error"
+        },
+        "process_exit": null,
+        "side_effects": [],
+        "value_diagnostics": []
+      },
+      "identity": {
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-underconstrained-generic-call-fails-inference"
+      },
+      "invocation": {
+        "mode": "auto",
+        "runner": "main",
+        "source": {
+          "kind": "utf8",
+          "text": "fn none_of[T]() -> Opt[T] = None\n\nfn main!() -> Res[Str, Str] {\n  let x = none_of()\n  yield Ok(to_str(x))\n}\n"
+        }
+      }
+    }
+  ],
+  "input_digest": "sha256:43430f3f82085e9f1f9b9873385bf423a9314572d853be3cb745340995820e44",
+  "schema_version": "0.1"
+}

@@ -1,0 +1,402 @@
+# Suite: tensor/elementwise.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: AX-elementwise-add-uses-shape-first-left-biased-overlay-policy
+  category: axes
+  title: elementwise add uses shape-first left-biased overlay policy
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError, Str]] =
+      result {
+        let a = ones[f32](2,3).with_names([#0:'batch, #1:'feature])?
+        let b = ones[f32](2,3).with_names([#0:'x, #1:'y])?
+        let c = add(a, b)?
+        _ = c.axis_of('batch)?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: ELW-exp-and-tanh-preserve-shape-and-dtype
+  category: tensor_elementwise
+  title: exp and tanh preserve tensor shape and dtype
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::{exp, tanh}
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError, Str]] =
+      result {
+        let x = ones[f32](2,3)
+        let e = exp(x)?
+        let y = tanh(e)?
+        let ok = (to_str(y.shape()) == "[2,3]") && (to_str(y.dtype()) == "f32")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: ELW-neg-abs-and-log-preserve-shape-and-dtype
+  category: tensor_elementwise
+  title: neg abs and log preserve tensor shape and dtype
+  code: |
+    import std::tensor::{DTypeError, ones}
+    import std::tensor::prim::{neg, abs, log}
+
+    fn main!() -> Res[Str, Union[DTypeError, Str]] =
+      result {
+        let x = ones[f32](2,3)
+        let n = neg(x)?
+        let a = abs(n)?
+        let y = log(a)?
+        let ok = (to_str(y.shape()) == "[2,3]") && (to_str(y.dtype()) == "f32")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: ELW-min-and-where-follow-promotion-and-shape-rules
+  category: tensor_elementwise
+  title: min and where follow promotion and shape rules
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, ones, zeros}
+    import std::tensor::prim::{min, where}
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError, Str]] =
+      result {
+        let a = ones[i8](2,3)
+        let b = ones[u8](2,3)
+        let m = min(a, b)?
+        let cond = zeros[bool](2,3)
+        let x = ones[f16](2,3)
+        let y = ones[bf16](2,3)
+        let w = where(cond, x, y)?
+        let ok = (to_str(m.dtype()) == "i8") && (to_str(w.dtype()) == "bf16") && (to_str(w.shape()) == "[2,3]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: ELW-wrapping-mul-preserves-integer-dtype-and-shape
+  category: tensor_elementwise
+  title: wrapping_mul preserves integer dtype and shape
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::wrapping_mul
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError, Str]] =
+      result {
+        let x = ones[i8](2,3)
+        let y = ones[i8](2,3)
+        let z = wrapping_mul(x, y)?
+        let ok = (to_str(z.shape()) == "[2,3]") && (to_str(z.dtype()) == "i8")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: ELW-readable-tensorview-operands-materialize-elementwise-results
+  category: tensor_elementwise
+  title: TensorView operands are read directly and elementwise results materialize
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::prim::{add, exp, permute, where, wrapping_add}
+
+    fn is_tensor(_x: Tensor[f32]) -> Bool = true
+    fn is_i32_tensor(_x: Tensor[i32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      result {
+        let x = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let cond = permute(zeros[bool](2,3), [#1, #0].to_vec())?
+        let unary = exp(x)?
+        let added = add(unary, ones[f32](3,2))?
+        let selected = where(cond, x, added)?
+        let int_view = permute(ones[i32](2,3), [#1, #0].to_vec())?
+        let wrapped = wrapping_add(int_view, ones[i32](3,2))?
+        let ok = (is_tensor(added)
+          && is_tensor(selected)
+          && is_i32_tensor(wrapped)
+          && (to_str(selected.shape()) == "[3,2]")
+          && (to_str(selected.dtype()) == "f32"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: ELW-trailing-axis-broadcasting-prepends-logical-size-one-axes
+  category: tensor_elementwise
+  title: trailing axis broadcasting prepends logical size one axes
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[DTypeError, NumericError, ShapeError, Str]] =
+      result {
+        let matrix = ones[f32](2,3)
+        let bias = ones[f32](3)
+        let out = add(matrix, bias)?
+        yield Ok(to_str(out.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,3]"'
+
+- id: ELW-rank-zero-tensor-broadcasts-without-scalar-unwrapping
+  category: tensor_elementwise
+  title: rank zero tensor broadcasts without scalar unwrapping
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[DTypeError, NumericError, ShapeError, Str]] =
+      result {
+        let scalar_tensor = ones[f32]()
+        let matrix = ones[f32](2,3)
+        let out = add(scalar_tensor, matrix)?
+        let ok = (to_str(out.shape()) == "[2,3]") && (to_str(out.dtype()) == "f32")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: ELW-zero-sized-axis-broadcasts-with-singleton-axis
+  category: tensor_elementwise
+  title: zero sized axis broadcasts with singleton axis
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones, zeros}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[DTypeError, NumericError, ShapeError, Str]] =
+      result {
+        let empty = add(zeros[f32](0,3), ones[f32](1,3))?
+        yield Ok(to_str(empty.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[0,3]"'
+
+- id: ELW-static-incompatible-trailing-dimensions-use-broadcast-shape-mismatch
+  category: tensor_elementwise
+  title: static incompatible trailing dimensions use BROADCAST_SHAPE_MISMATCH
+  code: |
+    import std::tensor::ones
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = add(ones[f32](2,3), ones[f32](2))?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: BROADCAST_SHAPE_MISMATCH
+      message_contains:
+      - broadcast
+      - shape
+      - mismatch
+      data_keys:
+      - operation
+
+- id: ELW-static-zero-sized-axis-rejects-larger-axis
+  category: tensor_elementwise
+  title: static zero sized axis rejects larger axis
+  code: |
+    import std::tensor::{ones, zeros}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = add(zeros[f32](0,3), ones[f32](2,3))?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: BROADCAST_SHAPE_MISMATCH
+      message_contains:
+      - broadcast
+      - shape
+      - mismatch
+      data_keys:
+      - operation
+
+- id: ELW-runtime-incompatible-trailing-dimensions-return-shapeerror
+  category: tensor_elementwise
+  title: runtime incompatible trailing dimensions return ShapeError
+  code: |
+    import std::io::{IoError, args!}
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[DTypeError, DomainError, IoError, NumericError, ShapeError]] =
+      result {
+        let argc = args!()?.len().to_i64()
+        let two = Nat.from_i64(wrapping_add(wrapping_sub(argc, argc), 2))?
+        let three = Nat.from_i64(wrapping_add(wrapping_sub(argc, argc), 3))?
+        _ = add(ones[f32](two, three), ones[f32](two))?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ShapeError
+    value_diagnostics:
+    - code: BROADCAST_SHAPE_MISMATCH
+      message_contains:
+      - broadcast
+      - shape
+      - mismatch
+      data_keys:
+      - operation
+- id: ELW-where-computes-one-nary-broadcast-shape
+  category: tensor_elementwise
+  title: where computes one nary broadcast shape
+  code: |
+    import std::tensor::{DTypeError, ShapeError, ones, zeros}
+    import std::tensor::prim::where
+
+    fn main!() -> Res[Str, Union[DTypeError, ShapeError, Str]] =
+      result {
+        let cond = zeros[bool](5,1)
+        let x = ones[f32](1,6)
+        let y = zeros[f32](6)
+        let out = where(cond, x, y)?
+        yield Ok(to_str(out.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[5,6]"'
+
+- id: ELW-independent-readable-operands-and-results-preserve-carrier-contract
+  category: tensor_elementwise
+  title: elementwise families accept TensorView in each readable position and return owning Tensor
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::prim::{add, exp, permute, where, wrapping_add}
+
+    fn is_f32_tensor(_x: Tensor[f32]) -> Bool = true
+    fn is_i32_tensor(_x: Tensor[i32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      result {
+        let float_view = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let condition_view = permute(zeros[bool](2,3), [#1, #0].to_vec())?
+        let unary = exp(float_view)?
+        let binary_left = add(float_view, ones[f32](3,2))?
+        let binary_right = add(ones[f32](3,2), float_view)?
+        let conditional = where(condition_view, ones[f32](3,2), float_view)?
+        let integer_view = permute(ones[i32](2,3), [#1, #0].to_vec())?
+        let wrapping_left = wrapping_add(integer_view, ones[i32](3,2))?
+        let wrapping_right = wrapping_add(ones[i32](3,2), integer_view)?
+        let ok = (is_f32_tensor(unary)
+          && is_f32_tensor(binary_left)
+          && is_f32_tensor(binary_right)
+          && is_f32_tensor(conditional)
+          && is_i32_tensor(wrapping_left)
+          && is_i32_tensor(wrapping_right))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: ELW-unary-transcendentals-preserve-every-inexact-dtype
+  category: tensor_elementwise
+  title: unary transcendentals preserve every inexact dtype
+  code: |
+    import std::tensor::{DTypeError, Tensor, ones}
+    import std::tensor::prim::{exp, log, sqrt, tanh}
+
+    fn is_f16(_x: Tensor[f16]) -> Bool = true
+    fn is_bf16(_x: Tensor[bf16]) -> Bool = true
+    fn is_f32(_x: Tensor[f32]) -> Bool = true
+    fn is_f64(_x: Tensor[f64]) -> Bool = true
+    fn is_complex64(_x: Tensor[complex64]) -> Bool = true
+    fn is_complex128(_x: Tensor[complex128]) -> Bool = true
+
+    fn main!() -> Res[Str, DTypeError] =
+      result {
+        let ok = (is_f16(exp(ones[f16](1))?)
+          && is_bf16(exp(ones[bf16](1))?)
+          && is_f32(exp(ones[f32](1))?)
+          && is_f64(exp(ones[f64](1))?)
+          && is_complex64(exp(ones[complex64](1))?)
+          && is_complex128(exp(ones[complex128](1))?)
+          && is_f16(log(ones[f16](1))?)
+          && is_bf16(log(ones[bf16](1))?)
+          && is_f32(log(ones[f32](1))?)
+          && is_f64(log(ones[f64](1))?)
+          && is_complex64(log(ones[complex64](1))?)
+          && is_complex128(log(ones[complex128](1))?)
+          && is_f16(sqrt(ones[f16](1))?)
+          && is_bf16(sqrt(ones[bf16](1))?)
+          && is_f32(sqrt(ones[f32](1))?)
+          && is_f64(sqrt(ones[f64](1))?)
+          && is_complex64(sqrt(ones[complex64](1))?)
+          && is_complex128(sqrt(ones[complex128](1))?)
+          && is_f16(tanh(ones[f16](1))?)
+          && is_bf16(tanh(ones[bf16](1))?)
+          && is_f32(tanh(ones[f32](1))?)
+          && is_f64(tanh(ones[f64](1))?)
+          && is_complex64(tanh(ones[complex64](1))?)
+          && is_complex128(tanh(ones[complex128](1))?))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: ELW-unary-transcendentals-reject-bool-and-integer-dtypes
+  category: tensor_elementwise
+  title: unary transcendentals reject Bool and integer dtypes
+  code: |
+    import std::tensor::{DTypeError, Tensor, ones}
+    import std::tensor::prim::{exp, log, sqrt, tanh}
+
+    fn rejects_bool(outcome: Res[Tensor[Bool], DTypeError]) -> Bool = outcome.is_err()
+    fn rejects_i32(outcome: Res[Tensor[i32], DTypeError]) -> Bool = outcome.is_err()
+    fn rejects_u32(outcome: Res[Tensor[u32], DTypeError]) -> Bool = outcome.is_err()
+
+    fn main!() -> Res[Str, Str] {
+      let ok = (rejects_bool(exp(ones[bool](1)))
+        && rejects_i32(exp(ones[i32](1)))
+        && rejects_u32(exp(ones[u32](1)))
+        && rejects_bool(log(ones[bool](1)))
+        && rejects_i32(log(ones[i32](1)))
+        && rejects_u32(log(ones[u32](1)))
+        && rejects_bool(sqrt(ones[bool](1)))
+        && rejects_i32(sqrt(ones[i32](1)))
+        && rejects_u32(sqrt(ones[u32](1)))
+        && rejects_bool(tanh(ones[bool](1)))
+        && rejects_i32(tanh(ones[i32](1)))
+        && rejects_u32(tanh(ones[u32](1))))
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

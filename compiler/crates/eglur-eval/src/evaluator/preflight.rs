@@ -1,0 +1,764 @@
+use super::*;
+use eglur_sema::{CanonicalTypeStore, TypeStoreError};
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct PlannedCall {
+    declaration: DefId,
+    witnesses: Box<[(WitnessSlotId, WitnessValue)]>,
+}
+
+pub(super) struct Planner<'a> {
+    view: ProgramView<'a>,
+    support: &'a dyn ExecutionSupport,
+    catalog: &'a dyn RuntimeCatalog,
+    limits: EvaluationLimits,
+    call_depth: u32,
+    limit: Option<ToolLimit>,
+    planned: BTreeSet<PlannedCall>,
+}
+
+impl<'a> Planner<'a> {
+    pub(super) fn new(
+        view: ProgramView<'a>,
+        support: &'a dyn ExecutionSupport,
+        catalog: &'a dyn RuntimeCatalog,
+        limits: EvaluationLimits,
+    ) -> Self {
+        Self {
+            view,
+            support,
+            catalog,
+            limits,
+            call_depth: 0,
+            limit: None,
+            planned: BTreeSet::new(),
+        }
+    }
+
+    pub(super) const fn limit(&self) -> Option<ToolLimit> {
+        self.limit
+    }
+
+    fn require(&self, capability: ExecutionCapability) -> Result<(), SupportReason> {
+        self.support
+            .supports_execution(capability)
+            .then_some(())
+            .ok_or(SupportReason::MissingCapability(capability))
+    }
+
+    pub(super) fn plan_callable(
+        &mut self,
+        declaration: DefId,
+        witnesses: &Witnesses,
+    ) -> Result<(), SupportReason> {
+        self.require(ExecutionCapability::Calls)?;
+        let key = PlannedCall {
+            declaration,
+            witnesses: witnesses
+                .iter()
+                .map(|(slot, value)| (*slot, value.clone()))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        };
+        if !self.planned.insert(key) {
+            return Ok(());
+        }
+        if self.call_depth >= self.limits.max_call_depth() {
+            self.limit = Some(ToolLimit::CallDepth {
+                limit: self.limits.max_call_depth(),
+            });
+            return Ok(());
+        }
+        self.call_depth += 1;
+        let result = (|| {
+            let (_, signature, form) =
+                self.view
+                    .callable(declaration)
+                    .ok_or(SupportReason::Feature(
+                        UnsupportedFeature::InvalidCheckedProgram,
+                    ))?;
+            for parameter in signature.parameters() {
+                if let Some(pattern) = parameter.source_pattern() {
+                    self.plan_pattern(
+                        declaration.module(),
+                        signature.body().ok_or(SupportReason::Feature(
+                            UnsupportedFeature::InvalidCheckedProgram,
+                        ))?,
+                        pattern,
+                    )?;
+                }
+            }
+            match form {
+                FunctionBody::Expression(expression) | FunctionBody::Block(expression) => {
+                    self.plan_expr(declaration.module(), expression, witnesses)
+                }
+                FunctionBody::Absent => Err(SupportReason::Feature(
+                    UnsupportedFeature::InvalidCheckedProgram,
+                )),
+            }
+        })();
+        self.call_depth -= 1;
+        result
+    }
+
+    fn plan_expr(
+        &mut self,
+        module: ModuleId,
+        expression: ExprId,
+        witnesses: &Witnesses,
+    ) -> Result<(), SupportReason> {
+        self.require(ExecutionCapability::CoreValues)?;
+        let body = self
+            .view
+            .body(module, expression.body())
+            .ok_or(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ))?;
+        let kind = body
+            .expression(expression)
+            .ok_or(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ))?
+            .kind()
+            .clone();
+        match kind {
+            ExprKind::Block { statements } => {
+                for statement in statements {
+                    self.plan_stmt(module, statement, witnesses)?;
+                }
+                Ok(())
+            }
+            ExprKind::Binary { left, right, .. } => {
+                self.plan_checked_numeric(module, expression)?;
+                self.plan_expr(module, left, witnesses)?;
+                self.plan_expr(module, right, witnesses)
+            }
+            ExprKind::Unary { operator, operand } => {
+                match operator {
+                    UnaryOperator::Dereference => {
+                        self.require(ExecutionCapability::ReferencesAndMutation)?;
+                    }
+                    UnaryOperator::Not => {}
+                    UnaryOperator::Negate => {
+                        self.plan_checked_numeric(module, expression)?;
+                    }
+                }
+                self.plan_expr(module, operand, witnesses)
+            }
+            ExprKind::Reference { value, .. } => {
+                self.require(ExecutionCapability::ReferencesAndMutation)?;
+                self.plan_expr(module, value, witnesses)
+            }
+            ExprKind::Call(_) | ExprKind::CatalogCall(_) => {
+                self.plan_invocation(module, expression, witnesses)
+            }
+            ExprKind::Member { receiver, .. } => {
+                let key = ExpressionKey::new(module, expression);
+                let FactState::Known(member) =
+                    self.view.program.resolution().body_types().member(key)
+                else {
+                    return Err(SupportReason::Feature(
+                        UnsupportedFeature::InvalidCheckedProgram,
+                    ));
+                };
+                if matches!(member.kind(), MemberKind::Property) {
+                    return Err(SupportReason::Feature(UnsupportedFeature::PropertyRead));
+                }
+                self.require(ExecutionCapability::Aggregates)?;
+                self.plan_expr(module, receiver, witnesses)
+            }
+            ExprKind::TupleProjection { receiver, .. } => {
+                self.require(ExecutionCapability::Aggregates)?;
+                self.plan_expr(module, receiver, witnesses)
+            }
+            ExprKind::Try(value) => {
+                self.require(ExecutionCapability::FailureFlow)?;
+                self.plan_expr(module, value, witnesses)
+            }
+            ExprKind::Literal(literal) => match literal.kind() {
+                LiteralKind::Float | LiteralKind::AxisIndex | LiteralKind::AxisName => Err(
+                    SupportReason::Feature(UnsupportedFeature::FloatOrComplexValue),
+                ),
+                LiteralKind::FormatString => {
+                    Err(SupportReason::Feature(UnsupportedFeature::FormatString))
+                }
+                LiteralKind::Integer | LiteralKind::String | LiteralKind::Bool => Ok(()),
+                LiteralKind::Invalid => Err(SupportReason::Feature(
+                    UnsupportedFeature::InvalidCheckedProgram,
+                )),
+            },
+            ExprKind::Name(_) => {
+                let key = ResolutionKey::Expression { module, expression };
+                match self.view.program.resolution().names().fact(key) {
+                    FactState::Known(ResolvedName::Local(_)) => Ok(()),
+                    FactState::Known(ResolvedName::Declarations(_)) => {
+                        let key = ExpressionKey::new(module, expression);
+                        let FactState::Known(typed) =
+                            self.view.program.resolution().body_types().expression(key)
+                        else {
+                            return Err(SupportReason::Feature(
+                                UnsupportedFeature::InvalidCheckedProgram,
+                            ));
+                        };
+                        let feature = match self
+                            .view
+                            .program
+                            .resolution()
+                            .signatures()
+                            .types()
+                            .kind(typed.ty())
+                        {
+                            Ok(TypeKind::Callable { .. }) => UnsupportedFeature::FunctionValue,
+                            Ok(_) => UnsupportedFeature::NonlocalValue,
+                            Err(_) => UnsupportedFeature::InvalidCheckedProgram,
+                        };
+                        Err(SupportReason::Feature(feature))
+                    }
+                    FactState::Poisoned(_) | FactState::Unperformed | FactState::NotApplicable => {
+                        Err(SupportReason::Feature(
+                            UnsupportedFeature::InvalidCheckedProgram,
+                        ))
+                    }
+                }
+            }
+            ExprKind::Unit => Ok(()),
+            ExprKind::Group(value) => self.plan_expr(module, value, witnesses),
+            ExprKind::Tuple(values) => {
+                self.require(ExecutionCapability::Aggregates)?;
+                let key = ExpressionKey::new(module, expression);
+                let FactState::Known(typed) =
+                    self.view.program.resolution().body_types().expression(key)
+                else {
+                    return Err(SupportReason::Feature(
+                        UnsupportedFeature::InvalidCheckedProgram,
+                    ));
+                };
+                let supported = supports_local_tuple_type(
+                    self.view.program.resolution().signatures().types(),
+                    typed.ty(),
+                )
+                .map_err(|_| SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram))?;
+                if !supported {
+                    return Err(SupportReason::Feature(
+                        UnsupportedFeature::ReferenceAggregate,
+                    ));
+                }
+                for value in values {
+                    self.plan_expr(module, value, witnesses)?;
+                }
+                Ok(())
+            }
+            ExprKind::StructLiteral { .. } | ExprKind::VariantConstructor { .. } => {
+                self.require(ExecutionCapability::Aggregates)?;
+                self.plan_invocation(module, expression, witnesses)
+            }
+            ExprKind::If(branches) => {
+                self.require(ExecutionCapability::Branching)?;
+                self.plan_condition(module, branches.condition, witnesses)?;
+                self.plan_expr(module, branches.then_branch, witnesses)?;
+                if let Some(branch) = branches.else_branch {
+                    self.plan_expr(module, branch, witnesses)?;
+                }
+                if let Some(branch) = branches.unknown_branch {
+                    self.plan_expr(module, branch, witnesses)?;
+                }
+                Ok(())
+            }
+            ExprKind::Match(matched) => {
+                self.require(ExecutionCapability::Branching)?;
+                self.plan_expr(module, matched.scrutinee, witnesses)?;
+                for arm in matched.arms {
+                    self.plan_pattern(module, expression.body(), arm.pattern)?;
+                    if let Some(guard) = arm.guard {
+                        self.plan_condition(module, guard.condition, witnesses)?;
+                    }
+                    self.plan_expr(module, arm.value, witnesses)?;
+                }
+                Ok(())
+            }
+            ExprKind::Result(inner) => {
+                self.require(ExecutionCapability::FailureFlow)?;
+                self.plan_expr(module, inner, witnesses)
+            }
+            ExprKind::Checked(inner) => {
+                self.require(ExecutionCapability::CheckedIntegerArithmetic)?;
+                self.plan_expr(module, inner, witnesses)
+            }
+            ExprKind::Own(_) | ExprKind::Move(_) | ExprKind::DropOwn { .. } => Err(
+                SupportReason::Feature(UnsupportedFeature::OwnershipOperation),
+            ),
+            ExprKind::Lambda(_) => Err(SupportReason::Feature(UnsupportedFeature::Closure)),
+            ExprKind::Array(_) | ExprKind::Map(_) => {
+                Err(SupportReason::Feature(UnsupportedFeature::Container))
+            }
+            ExprKind::Unsafe(_) => Err(SupportReason::Feature(UnsupportedFeature::UnsafeOrPointer)),
+            ExprKind::TensorSchema(_) | ExprKind::ReduceByCandidate(_) => {
+                Err(SupportReason::Feature(UnsupportedFeature::Tensor))
+            }
+            ExprKind::DTypeCall(_) => Err(SupportReason::Feature(UnsupportedFeature::Tensor)),
+            ExprKind::Hole | ExprKind::Invalid => Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            )),
+        }
+    }
+
+    fn plan_checked_numeric(
+        &self,
+        module: ModuleId,
+        expression: ExprId,
+    ) -> Result<(), SupportReason> {
+        let key = ExpressionKey::new(module, expression);
+        let operation = match self
+            .view
+            .program
+            .resolution()
+            .body_types()
+            .checked_numeric(key)
+        {
+            FactState::Known(operation) => operation,
+            FactState::Unperformed => {
+                return Err(SupportReason::Feature(
+                    UnsupportedFeature::OrdinaryArithmetic,
+                ));
+            }
+            FactState::Poisoned(_) | FactState::NotApplicable => {
+                return Err(SupportReason::Feature(
+                    UnsupportedFeature::InvalidCheckedProgram,
+                ));
+            }
+        };
+        let Some(result) = self.view.primitive_type(operation.result()) else {
+            return Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ));
+        };
+        if !is_fixed_width_integer(result) {
+            return Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ));
+        }
+        self.require(ExecutionCapability::CheckedIntegerArithmetic)
+    }
+
+    fn plan_condition(
+        &mut self,
+        module: ModuleId,
+        condition: ExprId,
+        witnesses: &Witnesses,
+    ) -> Result<(), SupportReason> {
+        let key = ExpressionKey::new(module, condition);
+        let FactState::Known(typed) = self.view.program.resolution().body_types().expression(key)
+        else {
+            return Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ));
+        };
+        match self
+            .view
+            .program
+            .resolution()
+            .signatures()
+            .types()
+            .kind(typed.ty())
+        {
+            Ok(TypeKind::Primitive(PrimitiveType::Bool) | TypeKind::Never) => {
+                self.plan_expr(module, condition, witnesses)
+            }
+            Ok(_) => Err(SupportReason::Feature(
+                UnsupportedFeature::TriStateCondition,
+            )),
+            Err(_) => Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            )),
+        }
+    }
+
+    fn plan_stmt(
+        &mut self,
+        module: ModuleId,
+        statement: StmtId,
+        witnesses: &Witnesses,
+    ) -> Result<(), SupportReason> {
+        let body = self
+            .view
+            .body(module, statement.body())
+            .ok_or(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ))?;
+        let kind = body
+            .statement(statement)
+            .ok_or(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ))?
+            .kind()
+            .clone();
+        match kind {
+            StmtKind::Let {
+                pattern,
+                initializer,
+                ..
+            } => {
+                self.plan_pattern(module, statement.body(), pattern)?;
+                if let Some(initializer) = initializer {
+                    self.plan_expr(module, initializer, witnesses)?;
+                }
+                Ok(())
+            }
+            StmtKind::Assign { target, value } => {
+                let body = self
+                    .view
+                    .body(module, target.body())
+                    .ok_or(SupportReason::Feature(
+                        UnsupportedFeature::InvalidCheckedProgram,
+                    ))?;
+                if !matches!(
+                    body.expression(target).map(eglur_hir::Expr::kind),
+                    Some(ExprKind::Hole)
+                ) {
+                    self.require(ExecutionCapability::ReferencesAndMutation)?;
+                    self.plan_expr(module, target, witnesses)?;
+                }
+                self.plan_expr(module, value, witnesses)
+            }
+            StmtKind::Return(value) => {
+                if let Some(value) = value {
+                    self.plan_expr(module, value, witnesses)?;
+                }
+                Ok(())
+            }
+            StmtKind::Expression(value) | StmtKind::Yield(value) => {
+                self.plan_expr(module, value, witnesses)
+            }
+            StmtKind::While { .. }
+            | StmtKind::For { .. }
+            | StmtKind::Break
+            | StmtKind::Continue => Err(SupportReason::Feature(UnsupportedFeature::Loop)),
+            StmtKind::Invalid => Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            )),
+        }
+    }
+
+    fn plan_pattern(
+        &self,
+        module: ModuleId,
+        body_id: eglur_hir::BodyId,
+        pattern: PatternId,
+    ) -> Result<(), SupportReason> {
+        let body = self
+            .view
+            .body(module, body_id)
+            .ok_or(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ))?;
+        let pattern = body.pattern(pattern).ok_or(SupportReason::Feature(
+            UnsupportedFeature::InvalidCheckedProgram,
+        ))?;
+        match pattern.kind() {
+            PatternKind::Binding(_)
+            | PatternKind::Wildcard
+            | PatternKind::Literal(_)
+            | PatternKind::Unit => Ok(()),
+            PatternKind::Alias { pattern, .. } | PatternKind::Group(pattern) => {
+                self.plan_pattern(module, body_id, *pattern)
+            }
+            PatternKind::Or(patterns) => {
+                for pattern in patterns {
+                    self.plan_pattern(module, body_id, *pattern)?;
+                }
+                Ok(())
+            }
+            PatternKind::Tuple(elements) => {
+                for element in elements {
+                    let PatternElement::Pattern(pattern) = element else {
+                        return Err(SupportReason::Feature(UnsupportedFeature::AdvancedPattern));
+                    };
+                    self.plan_pattern(module, body_id, *pattern)?;
+                }
+                Ok(())
+            }
+            PatternKind::Variant { payload, .. } => match payload {
+                PatternPayload::Absent => Ok(()),
+                PatternPayload::Positional(elements) => {
+                    for element in elements {
+                        let PatternElement::Pattern(pattern) = element else {
+                            return Err(SupportReason::Feature(
+                                UnsupportedFeature::AdvancedPattern,
+                            ));
+                        };
+                        self.plan_pattern(module, body_id, *pattern)?;
+                    }
+                    Ok(())
+                }
+                PatternPayload::Named(_) => {
+                    Err(SupportReason::Feature(UnsupportedFeature::AdvancedPattern))
+                }
+            },
+            PatternKind::Struct { .. } => {
+                Err(SupportReason::Feature(UnsupportedFeature::AdvancedPattern))
+            }
+            PatternKind::Invalid => Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            )),
+        }
+    }
+
+    fn plan_invocation(
+        &mut self,
+        module: ModuleId,
+        expression: ExprId,
+        witnesses: &Witnesses,
+    ) -> Result<(), SupportReason> {
+        self.require(ExecutionCapability::Calls)?;
+        let (invocation, checked) =
+            self.view
+                .invocation(module, expression)
+                .ok_or(SupportReason::Feature(
+                    UnsupportedFeature::InvalidCheckedProgram,
+                ))?;
+        for argument in invocation.evaluation_order() {
+            self.plan_expr(module, *argument, witnesses)?;
+        }
+        let evidence = self.view.trait_evidence().ok_or(SupportReason::Feature(
+            UnsupportedFeature::InvalidCheckedProgram,
+        ))?;
+        let environment =
+            evidence
+                .environment(checked.evidence_environment())
+                .ok_or(SupportReason::Feature(
+                    UnsupportedFeature::InvalidCheckedProgram,
+                ))?;
+        let child = child_witnesses(environment, witnesses).ok_or(SupportReason::Feature(
+            UnsupportedFeature::InvalidCheckedProgram,
+        ))?;
+        match invocation.target() {
+            InvocationTarget::Constructor { declaration, .. } => {
+                self.plan_constructor(declaration, checked.dispatch())
+            }
+            InvocationTarget::Callable(_) => {
+                let direct_target = self.dispatch_target(checked.dispatch(), witnesses)?;
+                let target = self
+                    .view
+                    .trait_adapter_target(
+                        &direct_target,
+                        module,
+                        invocation.arguments(),
+                        environment,
+                        witnesses,
+                    )
+                    .map_err(|_| SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram))?
+                    .unwrap_or(direct_target);
+                match target {
+                    CanonicalTarget::Source(declaration) => self.plan_callable(declaration, &child),
+                    CanonicalTarget::External(declaration) => {
+                        let hook = self.plan_hook(&declaration)?;
+                        self.plan_hook_arguments(
+                            hook,
+                            module,
+                            invocation.arguments(),
+                            environment,
+                            witnesses,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fn plan_constructor(
+        &self,
+        declaration: &CanonicalTarget,
+        dispatch: &CheckedDispatch,
+    ) -> Result<(), SupportReason> {
+        if !matches!(dispatch, CheckedDispatch::Direct(found) if found == declaration) {
+            return Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ));
+        }
+        match declaration {
+            CanonicalTarget::Source(_) => self.require(ExecutionCapability::Aggregates),
+            CanonicalTarget::External(declaration) => self.plan_hook(declaration).map(|_| ()),
+        }
+    }
+
+    fn plan_hook(&self, declaration: &ExternalDefId) -> Result<RuntimeHook, SupportReason> {
+        let hook = self
+            .catalog
+            .runtime_hook(declaration)
+            .ok_or_else(|| SupportReason::MissingRuntimeHook(declaration.clone()))?;
+        self.require(hook.capability())?;
+        Ok(hook)
+    }
+
+    fn plan_hook_arguments(
+        &self,
+        hook: RuntimeHook,
+        module: ModuleId,
+        arguments: &[ExprId],
+        environment: &EvidenceEnvironment,
+        witnesses: &Witnesses,
+    ) -> Result<(), SupportReason> {
+        if hook != RuntimeHook::ToStr {
+            return Ok(());
+        }
+        let [argument] = arguments else {
+            return Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ));
+        };
+        let key = ExpressionKey::new(module, *argument);
+        let FactState::Known(typed) = self.view.program.resolution().body_types().expression(key)
+        else {
+            return Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ));
+        };
+        let primitive = match self
+            .view
+            .program
+            .resolution()
+            .signatures()
+            .types()
+            .kind(typed.ty())
+        {
+            Ok(TypeKind::Primitive(primitive)) => Some(*primitive),
+            Ok(_) => environment
+                .entries()
+                .iter()
+                .find(|entry| entry.subject() == typed.ty())
+                .and_then(|entry| match entry.source() {
+                    EvidenceSource::Bound(witness) => {
+                        Some(witnesses.get(witness)?.implementation.clone())
+                    }
+                    EvidenceSource::Implementation { implementation, .. } => {
+                        Some(implementation.clone())
+                    }
+                })
+                .and_then(|implementation| {
+                    self.view
+                        .program
+                        .resolution()
+                        .trait_environment()
+                        .checked_impl_target(&implementation)
+                })
+                .and_then(|target| {
+                    match self
+                        .view
+                        .program
+                        .resolution()
+                        .signatures()
+                        .types()
+                        .kind(target)
+                    {
+                        Ok(TypeKind::Primitive(primitive)) => Some(*primitive),
+                        Ok(_) | Err(_) => None,
+                    }
+                }),
+            Err(_) => {
+                return Err(SupportReason::Feature(
+                    UnsupportedFeature::InvalidCheckedProgram,
+                ));
+            }
+        };
+        if matches!(
+            primitive,
+            Some(
+                PrimitiveType::Bool
+                    | PrimitiveType::I8
+                    | PrimitiveType::I16
+                    | PrimitiveType::I32
+                    | PrimitiveType::I64
+                    | PrimitiveType::U8
+                    | PrimitiveType::U16
+                    | PrimitiveType::U32
+                    | PrimitiveType::U64
+                    | PrimitiveType::Nat
+                    | PrimitiveType::PositiveNat
+                    | PrimitiveType::Str
+            )
+        ) {
+            Ok(())
+        } else {
+            Err(SupportReason::Feature(UnsupportedFeature::HookArgumentType))
+        }
+    }
+
+    fn dispatch_target(
+        &self,
+        dispatch: &CheckedDispatch,
+        witnesses: &Witnesses,
+    ) -> Result<CanonicalTarget, SupportReason> {
+        match dispatch {
+            CheckedDispatch::Direct(target) => Ok(target.clone()),
+            CheckedDispatch::ImplTemplate { callable, .. } => Ok(callable.clone()),
+            CheckedDispatch::Bound { witness, method } => {
+                let evidence = witnesses.get(witness).ok_or(SupportReason::Feature(
+                    UnsupportedFeature::InvalidCheckedProgram,
+                ))?;
+                self.view
+                    .program
+                    .resolution()
+                    .trait_environment()
+                    .checked_impl_method(&evidence.implementation, method)
+                    .cloned()
+                    .ok_or(SupportReason::Feature(
+                        UnsupportedFeature::InvalidCheckedProgram,
+                    ))
+            }
+        }
+    }
+}
+
+fn supports_local_tuple_type(
+    types: &CanonicalTypeStore,
+    ty: TypeId,
+) -> Result<bool, TypeStoreError> {
+    let mut pending = vec![ty];
+    let mut visited = BTreeSet::new();
+    while let Some(current) = pending.pop() {
+        if !visited.insert(current) {
+            continue;
+        }
+        match types.kind(current)? {
+            TypeKind::Reference { .. } => {}
+            TypeKind::Tuple(elements) => pending.extend(elements.iter().copied()),
+            TypeKind::Never
+            | TypeKind::Primitive(_)
+            | TypeKind::Nominal { .. }
+            | TypeKind::GenericParameter(_)
+            | TypeKind::SelfType(_)
+            | TypeKind::RawPointer { .. }
+            | TypeKind::Callable { .. }
+            | TypeKind::ErrorUnion(_)
+            | TypeKind::AssociatedProjection(_) => {
+                if types.contains_reference(current)? {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use eglur_sema::{CanonicalTypeStore, PrimitiveType, ReferenceMutability};
+
+    use super::supports_local_tuple_type;
+
+    #[test]
+    fn reference_tuple_shape_is_closed_over_references_and_tuples_only() {
+        let mut types = CanonicalTypeStore::new().unwrap();
+        let integer = types.primitive(PrimitiveType::I64).unwrap();
+        let reference = types
+            .reference(ReferenceMutability::Mutable, integer)
+            .unwrap();
+        let nested = types.tuple([reference]).unwrap();
+        let supported = types.tuple([integer, reference, nested]).unwrap();
+        assert!(supports_local_tuple_type(&types, supported).unwrap());
+
+        let callable = types.callable([reference], integer).unwrap();
+        let unsupported = types.tuple([reference, callable]).unwrap();
+        assert!(!supports_local_tuple_type(&types, unsupported).unwrap());
+    }
+}

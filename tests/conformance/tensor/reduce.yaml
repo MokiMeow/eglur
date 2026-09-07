@@ -1,0 +1,1390 @@
+# Suite: tensor/reduce.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: RDX-public-axes-naming-and-reduction-example
+  category: axes
+  title: public naming and reduction example remains valid
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      result {
+        let t = ones[f32](2,3).with_names([#0:'mol, #1:'task])?
+        let u = reduce{ b c -> b }(t)?
+        yield Ok(to_str(u.axis_of('mol)? == #0))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-tensorview-input-reduces-to-owning-tensor
+  category: tensor_reduce
+  title: TensorView input reduces directly to an owning Tensor
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, Tensor, ones}
+    import std::tensor::prim::{permute, sum}
+
+    fn is_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      result {
+        let view = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let out = sum(view, #1)?
+        let schema_out = reduce{ i j -> i }(view)?
+        let ok = (is_tensor(out)
+          && is_tensor(schema_out)
+          && (to_str(out.shape()) == "[3]")
+          && (to_str(schema_out.shape()) == "[3]")
+          && (to_str(out.dtype()) == "f32"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-integer-sum-overflow-returns-numericerror
+  category: tensor_reduce
+  title: integer sum fails at the first overflowing checked left-fold step
+  code: |
+    import std::tensor::{AxisError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{sum, wrapping_add, wrapping_sub}
+
+    fn left_fold_overflow_input() -> Res[Tensor[i8], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let mut thirty_two = ones[i8]()
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        let sixty_four = wrapping_add(thirty_two, thirty_two)?
+        let ninety_six = wrapping_add(sixty_four, thirty_two)?
+        let minus_thirty_two = wrapping_sub(zeros[i8](), thirty_two)?
+        let minus_ninety_six = wrapping_sub(zeros[i8](), ninety_six)?
+
+        // [64, -32, 96, -96] has exact sum 32 but overflows at the third left-fold step.
+        let mut x = zeros[i8](4)
+        x = set_at(x, [IndexItem::At(0)].to_vec(), sixty_four, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1)].to_vec(), minus_thirty_two, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(2)].to_vec(), ninety_six, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(3)].to_vec(), minus_ninety_six, mode=ScatterMode::Assign)?
+        yield Ok(x)
+      }
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        _ = sum(left_fold_overflow_input()?, #0)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+      data_equals:
+        operation: sum
+        dtype: i8
+
+- id: RDX-default-reduce-integer-sum-overflow-returns-numericerror
+  category: tensor_reduce
+  title: default reduce fails at the first overflowing checked left-fold step
+  code: |
+    import std::tensor::{AxisError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{wrapping_add, wrapping_sub}
+
+    fn left_fold_overflow_input() -> Res[Tensor[i8], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let mut thirty_two = ones[i8]()
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        let sixty_four = wrapping_add(thirty_two, thirty_two)?
+        let ninety_six = wrapping_add(sixty_four, thirty_two)?
+        let minus_thirty_two = wrapping_sub(zeros[i8](), thirty_two)?
+        let minus_ninety_six = wrapping_sub(zeros[i8](), ninety_six)?
+
+        // [64, -32, 96, -96] has exact sum 32 but overflows at the third left-fold step.
+        let mut x = zeros[i8](4)
+        x = set_at(x, [IndexItem::At(0)].to_vec(), sixty_four, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1)].to_vec(), minus_thirty_two, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(2)].to_vec(), ninety_six, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(3)].to_vec(), minus_ninety_six, mode=ScatterMode::Assign)?
+        yield Ok(x)
+      }
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        _ = reduce{ i -> }(left_fold_overflow_input()?)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+      data_equals:
+        operation: reduce
+        dtype: i8
+
+- id: RDX-integer-sum-preserves-left-fold-and-source-axis-order
+  category: tensor_reduce
+  title: integer sum preserves checked left-fold grouping and source axis order
+  code: |
+    import std::tensor::{AxisError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{sum, wrapping_add, wrapping_sub}
+
+    fn order_values() -> Res[(Tensor[i8], Tensor[i8], Tensor[i8]), Union[ShapeError, DTypeError]] =
+      result {
+        let mut thirty_two = ones[i8]()
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        let sixty_four = wrapping_add(thirty_two, thirty_two)?
+        let ninety_six = wrapping_add(sixty_four, thirty_two)?
+        let minus_thirty_two = wrapping_sub(zeros[i8](), thirty_two)?
+        yield Ok((thirty_two, ninety_six, minus_thirty_two))
+      }
+
+    fn pairwise_reassociation_trap() -> Res[Tensor[i8], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let (thirty_two, ninety_six, minus_thirty_two) = order_values()?
+        // [-32, 0, 96, 32] left-folds to 96, while the adjacent pair 96 + 32 overflows.
+        let mut x = zeros[i8](4)
+        x = set_at(x, [IndexItem::At(0)].to_vec(), minus_thirty_two, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1)].to_vec(), zeros[i8](), mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(2)].to_vec(), ninety_six, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(3)].to_vec(), thirty_two, mode=ScatterMode::Assign)?
+        yield Ok(x)
+      }
+
+    fn axis_spelling_order_trap() -> Res[Tensor[i8], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let (thirty_two, ninety_six, minus_thirty_two) = order_values()?
+        // Source row-major order succeeds; traversing [#1, #0] as written starts 96 + 32.
+        let mut x = zeros[i8](2,2)
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(0)].to_vec(), ninety_six, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(1)].to_vec(), minus_thirty_two, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1), IndexItem::At(0)].to_vec(), thirty_two, mode=ScatterMode::Assign)?
+        yield Ok(x)
+      }
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let left_fold = sum(pairwise_reassociation_trap()?, #0)?.item()?
+        let source_axis_order = sum(axis_spelling_order_trap()?, [#1, #0].to_vec())?.item()?
+        yield Ok(to_str((left_fold == 96) && (source_axis_order == 96)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-sum-by-missing-axisname-fails-with-axis-name-not-found
+  category: axes
+  title: sum by missing AxisName fails with AXIS_NAME_NOT_FOUND
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, ones}
+    import std::tensor::prim::sum
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, DTypeError]] =
+      result {
+        let t = ones[f32](2,3).with_names([#0:'mol, #1:'task])?
+        _ = sum(t, 'batch)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: AxisError
+    value_diagnostics:
+    - code: AXIS_NAME_NOT_FOUND
+      message_contains: []
+      data_keys:
+      - name
+- id: RDX-mean-reduces-axis-and-preserves-floating-dtype
+  category: tensor_reduce
+  title: mean reduces axis and preserves floating dtype
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, ones}
+    import std::tensor::prim::mean
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, DTypeError]] =
+      result {
+        let x = ones[f32](2,3)
+        let y = mean(x, #1)?
+        let ok = (to_str(y.shape()) == "[2]") && (to_str(y.dtype()) == "f32")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-keepdims-preserves-reduced-axis-name
+  category: axes
+  title: keepdims preserves reduced axis name
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::sum
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'batch, #1:'feature])?
+        let y = sum(x, 'feature, keepdims=true)?
+        let ok = ((to_str(y.shape()) == "[2,1]")
+          && (y.names().len() == 2)
+          && (y.axis_of('batch)? == #0)
+          && (y.axis_of('feature)? == #1))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-mean-preserves-complex-dtype
+  category: tensor_reduce
+  title: mean preserves complex dtype
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, ones}
+    import std::tensor::prim::mean
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, DTypeError]] =
+      result {
+        let x = ones[complex64](2,3)
+        let y = mean(x, #1)?
+        let ok = (to_str(y.shape()) == "[2]") && (to_str(y.dtype()) == "complex64")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-mean-rejects-integer-dtype-with-dtype-error
+  category: tensor_reduce
+  title: mean rejects integer dtype with DTypeError
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, ones}
+    import std::tensor::prim::mean
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, DTypeError]] =
+      result {
+        let x = ones[i32](2,3)
+        _ = mean(x, #1)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: DTypeError
+
+- id: RDX-empty-primitive-sum-uses-additive-identities-in-result-dtype
+  category: tensor_reduce
+  title: empty primitive sum uses additive identities in result dtype
+  code: |
+    import std::parse::{parse_complex64, ParseError}
+    import std::tensor::{AxisError, DTypeError, IndexError, NumericError, ShapeError, zeros}
+    import std::tensor::prim::sum
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, IndexError, NumericError, ParseError, ShapeError]] =
+      result {
+        let integer_zero = sum(zeros[i32](0), #0)?.item()?
+        let floating_zero = sum(zeros[f32](0), #0)?.item()?
+        let complex_zero = sum(zeros[complex64](0), #0)?.item()?
+        let expected_complex_zero = parse_complex64("(0.0,0.0)")?
+        let ok = ((integer_zero == 0)
+          && (floating_zero == 0.0)
+          && (complex_zero == expected_complex_zero))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-empty-default-reduce-uses-additive-identity
+  category: tensor_reduce
+  title: empty default reduce uses additive identity
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, Tensor, zeros}
+
+    fn main!() -> Res[Tensor[i32], Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      reduce{ batch feature -> batch }(zeros[i32](2,0))
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: i32
+        shape: [2]
+        expected: [0, 0]
+        mode: exact
+
+- id: RDX-empty-default-reduce-with-no-output-coordinates-returns-empty-tensor
+  category: tensor_reduce
+  title: empty default reduce with no output coordinates returns empty tensor
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, Tensor, zeros}
+
+    fn main!() -> Res[Tensor[i32], Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      reduce{ batch feature -> batch }(zeros[i32](0,0))
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: i32
+        shape: [0]
+        expected: []
+        mode: exact
+
+- id: RDX-empty-real-mean-produces-nan-in-preserved-dtype
+  category: tensor_reduce
+  title: empty real mean produces NaN in preserved dtype
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, Tensor, zeros}
+    import std::tensor::prim::mean
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, DTypeError, ShapeError]] =
+      mean(zeros[f32](2,0), #1)
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2]
+        expected: ["nan", "nan"]
+
+- id: RDX-empty-complex-mean-produces-component-nans-in-preserved-dtype
+  category: tensor_reduce
+  title: empty complex mean produces component NaNs in preserved dtype
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, Tensor, zeros}
+    import std::tensor::prim::mean
+
+    fn main!() -> Res[Tensor[complex64], Union[AxisError, DTypeError, ShapeError]] =
+      mean(zeros[complex64](1,0), #1)
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: complex64
+        shape: [1]
+        expected: ["nan+nani"]
+
+- id: RDX-const-empty-max-domain-fails-before-empty-output-short-circuit
+  category: tensor_reduce
+  title: const empty max domain fails before empty output short circuit
+  code: |
+    import std::tensor::zeros
+    import std::tensor::prim::max
+
+    fn main!() -> Res[Str, Str] {
+      _ = max(zeros[f32](0,0,0), [#2, #0].to_vec()) // @primary empty-max-domain
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: REDUCTION_EMPTY_DOMAIN
+      message_contains:
+      - reduction
+      - empty
+      - domain
+      data_keys:
+      - operation
+      - axis
+      data_equals:
+        operation: max
+        axis: 0
+      primary_span:
+        marker: empty-max-domain
+
+- id: RDX-dynamic-empty-max-domain-returns-shapeerror
+  category: tensor_reduce
+  title: dynamic empty max domain returns ShapeError
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, Tensor, zeros}
+    import std::tensor::prim::max
+    import std::time::now!
+
+    fn dynamic_empty!() -> Tensor[f32] {
+      _ = now!()
+      yield zeros[f32](0,0,0)
+    }
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, ShapeError]] =
+      result {
+        _ = max(dynamic_empty!(), [#2, #0].to_vec())?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ShapeError
+    value_diagnostics:
+    - code: REDUCTION_EMPTY_DOMAIN
+      message_contains:
+      - reduction
+      - empty
+      - domain
+      data_keys:
+      - operation
+      - axis
+      data_equals:
+        operation: max
+        axis: 0
+
+- id: RDX-zero-sized-retained-axis-does-not-empty-reduction-domain
+  category: tensor_reduce
+  title: zero-sized retained axis does not empty reduction domain
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, zeros}
+    import std::tensor::prim::{max, mean, sum}
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      result {
+        let x = zeros[f32](0,3)
+        let summed = sum(x, #1)?
+        let maximum = max(x, #1)?
+        let average = mean(x, #1)?
+        let ok = ((to_str(summed.shape()) == "[0]")
+          && (to_str(maximum.shape()) == "[0]")
+          && (to_str(average.shape()) == "[0]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-empty-axis-selection-is-owning-no-op-for-primitive-reductions
+  category: tensor_reduce
+  title: empty axis selection is owning no-op for primitive reductions
+  code: |
+    import std::tensor::{AxisError, AxisSel, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{max, mean, sum}
+    import std::vec::Vec
+
+    fn is_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let marked = set_at(
+          zeros[f32](2,3),
+          [IndexItem::At(1), IndexItem::At(2)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let x = marked.with_names([#0:'batch, #1:'feature])?
+        let no_axes = Vec[AxisSel].new()
+        let summed = sum(x, no_axes, keepdims=true)?
+        let maximum = max(x, no_axes, keepdims=true)?
+        let average = mean(x, no_axes, keepdims=true)?
+        let marked_coordinate = [IndexItem::At(1), IndexItem::At(2)].to_vec()
+        let zero_coordinate = [IndexItem::At(0), IndexItem::At(0)].to_vec()
+        let ok = (is_tensor(summed)
+          && is_tensor(maximum)
+          && is_tensor(average)
+          && (to_str(summed.shape()) == "[2,3]")
+          && (to_str(maximum.shape()) == "[2,3]")
+          && (to_str(average.shape()) == "[2,3]")
+          && (to_str(summed.dtype()) == "f32")
+          && (to_str(maximum.dtype()) == "f32")
+          && (to_str(average.dtype()) == "f32")
+          && (summed.names().len() == 2)
+          && (maximum.names().len() == 2)
+          && (average.names().len() == 2)
+          && (summed.axis_of('batch)? == #0)
+          && (summed.axis_of('feature)? == #1)
+          && (maximum.axis_of('batch)? == #0)
+          && (maximum.axis_of('feature)? == #1)
+          && (average.axis_of('batch)? == #0)
+          && (average.axis_of('feature)? == #1)
+          && (get_at(summed, marked_coordinate)?.item()? == 1.0)
+          && (get_at(maximum, marked_coordinate)?.item()? == 1.0)
+          && (get_at(average, marked_coordinate)?.item()? == 1.0)
+          && (get_at(summed, zero_coordinate)?.item()? == 0.0)
+          && (get_at(maximum, zero_coordinate)?.item()? == 0.0)
+          && (get_at(average, zero_coordinate)?.item()? == 0.0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-empty-axis-selection-still-validates-sum-dtype
+  category: tensor_reduce
+  title: empty axis selection still validates sum dtype
+  code: |
+    import std::tensor::{AxisError, AxisSel, DTypeError, NumericError, ShapeError, zeros}
+    import std::tensor::prim::sum
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      result {
+        _ = sum(zeros[bool](2,3), Vec[AxisSel].new())?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: DTypeError
+
+- id: RDX-empty-axis-selection-still-validates-mean-dtype
+  category: tensor_reduce
+  title: empty axis selection still validates mean dtype
+  code: |
+    import std::tensor::{AxisError, AxisSel, DTypeError, ShapeError, zeros}
+    import std::tensor::prim::mean
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, ShapeError]] =
+      result {
+        _ = mean(zeros[i32](2,3), Vec[AxisSel].new())?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: DTypeError
+
+- id: RDX-empty-reduction-keepdims-retains-size-one-axis-and-name
+  category: tensor_reduce
+  title: empty reduction keepdims retains size-one axis and name
+  code: |
+    import std::tensor::{AxisError, DTypeError, IndexError, NumericError, ShapeError, zeros}
+    import std::tensor::prim::{mean, sum}
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, IndexError, NumericError, ShapeError]] =
+      result {
+        let x = zeros[f32](2,0).with_names([#0:'batch, #1:'feature])?
+        let summed = sum(x, 'feature, keepdims=true)?
+        let average = mean(x, 'feature, keepdims=true)?
+        let average_total = sum(average, [#0, #1].to_vec())?.item()?
+        let positive_infinity: f32 = 1.0 /. 0.0
+        let ok = ((to_str(summed.shape()) == "[2,1]")
+          && (to_str(average.shape()) == "[2,1]")
+          && (summed.axis_of('feature)? == #1)
+          && (average.axis_of('feature)? == #1)
+          && (average_total > positive_infinity))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-empty-reduce-by-subtensors-are-passed-to-the-callback
+  category: tensor_reduce
+  title: empty reduce_by subtensors are passed to the callback
+  code: |
+    import std::tensor::{Tensor, TensorView, TransformError, zeros}
+
+    fn empty_to_seven(values: TensorView[i32]) -> Res[i32, Str] =
+      if to_str(values.shape()) == "[0]" { yield Ok(7) } else { yield Err("not_empty") }
+
+    fn main!() -> Res[Tensor[i32], Union[Str, TransformError]] =
+      reduce{ batch feature -> batch }.reduce_by(empty_to_seven)(zeros[i32](2,0))
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: i32
+        shape: [2]
+        expected: [7, 7]
+        mode: exact
+
+- id: RDX-empty-reduce-by-callback-errors-propagate-without-an-identity-fallback
+  category: tensor_reduce
+  title: empty reduce_by callback errors propagate without an identity fallback
+  code: |
+    import std::tensor::{Tensor, TensorView, TransformError, zeros}
+
+    fn reject_empty(values: TensorView[i32]) -> Res[i32, Str] =
+      if to_str(values.shape()) == "[0]" { yield Err("empty") } else { yield Ok(0) }
+
+    fn main!() -> Res[Tensor[i32], Union[Str, TransformError]] =
+      reduce{ batch feature -> batch }.reduce_by(reject_empty)(zeros[i32](2,0))
+  expect:
+    value:
+      kind: Err
+      repr: '"empty"'
+
+- id: RDX-empty-reduce-by-with-no-output-coordinates-does-not-invoke-callback
+  category: tensor_reduce
+  title: empty reduce_by with no output coordinates does not invoke callback
+  code: |
+    import std::tensor::{Tensor, TensorView, TransformError, zeros}
+
+    fn reject_invocation(_values: TensorView[i32]) -> Res[i32, Str] = Err("called")
+
+    fn main!() -> Res[Tensor[i32], Union[Str, TransformError]] =
+      reduce{ batch feature -> batch }.reduce_by(reject_invocation)(zeros[i32](0,0))
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: i32
+        shape: [0]
+        expected: []
+        mode: exact
+
+- id: RDX-reduce-by-with-single-reducer-function-is-accepted
+  category: tensor_reduce
+  title: reduce_by single reducer may change dtype and materializes Tensor
+  code: |
+    import std::tensor::{Tensor, TensorView, TransformError, ones}
+
+    fn to_f64(_values: TensorView[i32]) -> Res[f64, Str] = Ok(1.0)
+
+    fn is_f64_tensor(_value: Tensor[f64]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[Str, TransformError]] =
+      result {
+        let viewed = ones[i32](2,3,4).then(view{ b h w -> b h w })?
+        let y = viewed.then(reduce{ b h w -> b }.reduce_by(to_f64))?
+        let ok = (is_f64_tensor(y)
+          && (to_str(y.shape()) == "[2]")
+          && (to_str(y.dtype()) == "f64"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-reduce-by-one-ordered-phase-may-cover-all-reduced-axes
+  category: tensor_reduce
+  title: reduce_by accepts one ordered phase that covers all reduced axes
+  code: |
+    import std::tensor::{Tensor, TensorView, TransformError, ones}
+
+    fn collapse(_values: TensorView[i32]) -> Res[f64, Str] = Ok(1.0)
+
+    fn is_f64_tensor(_value: Tensor[f64]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[Str, TransformError]] =
+      result {
+        let x = ones[i32](2,3)
+        let schema = reduce{ b h -> b }
+        let y = x.then(
+          schema.reduce_by((h, collapse))
+        )?
+        let ok = (is_f64_tensor(y)
+          && (to_str(y.shape()) == "[2]")
+          && (to_str(y.dtype()) == "f64"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-reduce-by-immediate-phases-infer-heterogeneous-callback-chain
+  category: tensor_reduce
+  title: immediate reduce_by phases infer a heterogeneous inline callback chain
+  code: |
+    import std::tensor::{Tensor, TensorView, TransformError, ones}
+
+    fn rank_f64(values: TensorView[f64]) -> Nat = values.rank()
+
+    fn is_bool_tensor(_value: Tensor[Bool]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[Str, i64, TransformError]] =
+      result {
+        let y = reduce{ b h w -> b }.reduce_by(
+          (h, { |values|
+            let reduced: Res[f64, Str] = if values.rank() == 1 {
+              yield Ok(1.0)
+            } else {
+              yield Err("bad_rank")
+            }
+            reduced
+          }),
+          (w, { |values|
+            let reduced: Res[Bool, i64] = if rank_f64(values) == 1 {
+              yield Ok(true)
+            } else {
+              yield Err(1)
+            }
+            reduced
+          }),
+        )(ones[i32](2,3,4))?
+        let ok = is_bool_tensor(y) && (to_str(y.shape()) == "[2]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-reduce-by-direct-invocation-infers-inline-callback-input
+  category: tensor_reduce
+  title: direct reduce_by invocation infers an inline callback input
+  code: |
+    import std::tensor::{Tensor, TransformError, ones}
+
+    fn is_f64_tensor(_value: Tensor[f64]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[Str, TransformError]] =
+      result {
+        let y = reduce{ b h -> b }.reduce_by({ |values|
+          let reduced: Res[f64, Str] = if values.rank() == 1 {
+            yield Ok(1.0)
+          } else {
+            yield Err("bad_rank")
+          }
+          reduced
+        })(ones[i32](2,3))?
+        let ok = is_f64_tensor(y) && (to_str(y.shape()) == "[2]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-reduce-by-then-infers-inline-callback-input
+  category: tensor_reduce
+  title: then desugaring provides reduce_by callback input context
+  code: |
+    import std::tensor::{Tensor, TransformError, ones}
+
+    fn is_f64_tensor(_value: Tensor[f64]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[Str, TransformError]] =
+      result {
+        let y = ones[i32](2,3).then(
+          reduce{ b h -> b }.reduce_by({ |values|
+            let reduced: Res[f64, Str] = if values.rank() == 1 {
+              yield Ok(1.0)
+            } else {
+              yield Err("bad_rank")
+            }
+            reduced
+          })
+        )?
+        let ok = is_f64_tensor(y) && (to_str(y.shape()) == "[2]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-reduce-by-apply-infers-inline-callback-input
+  category: tensor_reduce
+  title: unary apply desugaring provides reduce_by callback input context
+  code: |
+    import std::tensor::{Tensor, TransformError, ones}
+
+    fn is_f64_tensor(_value: Tensor[f64]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[Str, TransformError]] =
+      result {
+        let y = (ones[i32](2,3),).apply(
+          reduce{ b h -> b }.reduce_by({ |values|
+            let reduced: Res[f64, Str] = if values.rank() == 1 {
+              yield Ok(1.0)
+            } else {
+              yield Err("bad_rank")
+            }
+            reduced
+          })
+        )?
+        let ok = is_f64_tensor(y) && (to_str(y.shape()) == "[2]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-reduce-by-typed-stored-schema-is-reusable
+  category: tensor_reduce
+  title: construction-site-complete reduce_by schema is reusable
+  code: |
+    import std::tensor::{Tensor, TensorView, TransformError, ones}
+
+    fn is_f64_tensor(_value: Tensor[f64]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[Str, TransformError]] =
+      result {
+        let op = reduce{ b h -> b }.reduce_by({ |values: TensorView[i32]|
+          let reduced: Res[f64, Str] = if values.rank() == 1 {
+            yield Ok(1.0)
+          } else {
+            yield Err("bad_rank")
+          }
+          reduced
+        })
+        let first = op(ones[i32](2,3))?
+        let second = op(ones[i32](4,5))?
+        let ok = (is_f64_tensor(first)
+          && is_f64_tensor(second)
+          && (to_str(first.shape()) == "[2]")
+          && (to_str(second.shape()) == "[4]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-reduce-by-typed-stored-schema-is-monomorphic
+  category: tensor_reduce
+  title: typed stored reduce_by schema rejects a conflicting element dtype
+  code: |
+    import std::tensor::{TensorView, ones}
+
+    fn main!() -> Res[Str, Str] {
+      let op = reduce{ b h -> b }.reduce_by({ |values: TensorView[i32]|
+        let reduced: Res[f64, Str] = if values.rank() == 1 {
+          yield Ok(1.0)
+        } else {
+          yield Err("bad_rank")
+        }
+        reduced
+      })
+      _ = op(ones[f32](2,3))
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - parameter
+      - expected_type
+      data_equals:
+        reason: parameter_type
+
+- id: RDX-reduce-by-untyped-stored-schema-fails-at-initializer
+  category: tensor_reduce
+  title: later invocation does not repair an untyped stored reduce_by schema
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] {
+      let op = reduce{ b h -> b }.reduce_by({ |values|
+        let reduced: Res[f64, Str] = if values.rank() == 1 {
+          yield Ok(1.0)
+        } else {
+          yield Err("bad_rank")
+        }
+        reduced
+      })
+      _ = op(ones[i32](2,3))
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: BINDING_TYPE_UNDETERMINED
+      message_contains:
+      - binding
+      - type
+      - initializer
+      data_keys: []
+
+- id: RDX-reduce-by-immediate-invocation-requires-complete-callback-result
+  category: tensor_reduce
+  title: immediate reduce_by invocation does not invent a callback error type
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] {
+      let out = reduce{ b h -> b }.reduce_by({ |values|
+        _ = values.rank()
+        Ok(1.0)
+      })(ones[i32](2,3))
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: BINDING_TYPE_UNDETERMINED
+      message_contains:
+      - binding
+      - type
+      - initializer
+      data_keys: []
+
+- id: RDX-reduce-by-does-not-specialize-generic-named-callback
+  category: tensor_reduce
+  title: reduce_by does not specialize a generic named callback from invocation input
+  code: |
+    import std::tensor::{TensorView, ones}
+
+    fn reduce_any[T](_values: TensorView[T]) -> Res[f64, Str] = Ok(1.0)
+
+    fn main!() -> Res[Str, Str] {
+      let out = reduce{ b h -> b }.reduce_by(reduce_any)(ones[i32](2,3))
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: TYPE_ARG_INFERENCE_FAILED
+      message_contains:
+      - type argument
+      - inference
+      - failed
+      data_keys: []
+
+- id: RDX-user-method-named-reduce-by-keeps-ordinary-tuple-argument
+  category: tensor_reduce
+  title: user reduce_by method keeps ordinary tuple call semantics
+  code: |
+    struct Counter {
+      field base: i64
+
+      fn reduce_by(self: &Self, pair: (i64, i64)) -> i64 =
+        wrapping_add(self.base, wrapping_add(pair.0, pair.1))
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let counter = Counter{ base: 4 }
+      let h = 2
+      let f = 3
+      yield Ok(to_str(counter.reduce_by((h, f))))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"9"'
+
+- id: RDX-user-method-named-reduce-by-rejects-schema-axis-syntax
+  category: tensor_reduce
+  title: user reduce_by method does not activate schema-only axis syntax
+  code: |
+    struct Counter {
+      field base: i64
+
+      fn reduce_by(self: &Self, pair: (i64, i64)) -> i64 =
+        wrapping_add(self.base, wrapping_add(pair.0, pair.1))
+    }
+
+    fn collapse(value: i64) -> i64 = value
+
+    fn main!() -> Res[Str, Str] {
+      let counter = Counter{ base: 4 }
+      _ = counter.reduce_by(((h w), collapse))
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: REDUCE_BY_ARGUMENTS_INVALID
+      message_contains:
+      - reduce_by
+      - arguments
+      - invalid
+      data_keys: []
+
+- id: RDX-reduce-schema-reduce-by-does-not-fall-back-to-empty-ordinary-call
+  category: tensor_reduce
+  title: canonical reduce_by rejects an empty ordinary-call fallback
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let schema = reduce{ b h -> b }
+      _ = schema.reduce_by()
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: REDUCE_BY_ARGUMENTS_INVALID
+      message_contains:
+      - reduce_by
+      - arguments
+      - invalid
+      data_keys: []
+
+- id: RDX-reduce-by-ordered-phase-reducers-cover-all-reduced-axes
+  category: tensor_reduce
+  title: reduce_by ordered phases form a heterogeneous dtype chain
+  code: |
+    import std::tensor::{Tensor, TensorView, TransformError, ones}
+
+    fn reduce_h(_values: TensorView[i32]) -> Res[f64, Str] = Ok(1.0)
+
+    fn reduce_w(_values: TensorView[f64]) -> Res[Bool, i64] = Ok(true)
+
+    fn is_bool_tensor(_value: Tensor[Bool]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[Str, i64, TransformError]] =
+      result {
+        let x = ones[i32](2,3,4)
+        let y = x.then(
+          reduce{ b h w -> b }.reduce_by(
+            (h, reduce_h),
+            (w, reduce_w),
+          )
+        )?
+        let ok = (is_bool_tensor(y)
+          && (to_str(y.shape()) == "[2]")
+          && (to_str(y.dtype()) == "bool"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RDX-reduce-by-ordered-phase-input-matches-prior-output
+  category: tensor_reduce
+  title: reduce_by phase input must match the prior phase output
+  code: |
+    import std::tensor::{TensorView, ones}
+
+    fn reduce_h(_values: TensorView[i32]) -> Res[f64, Str] = Ok(1.0)
+
+    fn wrong_reduce_w(_values: TensorView[i32]) -> Res[Bool, Str] = Ok(true)
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[i32](2,3,4)
+      _ = reduce{ b h w -> b }.reduce_by(
+        (h, reduce_h),
+        (w, wrong_reduce_w),
+      )(x)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - parameter
+      - expected_type
+      data_equals:
+        reason: parameter_type
+
+- id: RDX-reduce-by-rejects-unsupported-phase-payload-dtype
+  category: tensor_reduce
+  title: reduce_by rejects a phase payload without a tensor DType witness
+  code: |
+    import std::logic::Tri
+    import std::tensor::{TensorView, ones}
+
+    fn reduce_to_tri(_values: TensorView[i32]) -> Res[Tri, Str] = Ok(Tri::Unknown)
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[i32](2,3)
+      _ = reduce{ b h -> b }.reduce_by(reduce_to_tri)(x)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - expected_family
+      data_equals:
+        reason: type_family
+        actual_type: Tri
+        expected_family: phase_payload_dtype
+
+- id: RDX-reduce-by-propagates-first-phase-error-without-wrapping
+  category: tensor_reduce
+  title: reduce_by propagates the first phase error unchanged
+  code: |
+    import std::tensor::{TensorView, TransformError, ones}
+
+    fn fail_h(_values: TensorView[i32]) -> Res[f64, Str] = Err("first")
+
+    fn fail_w(_values: TensorView[f64]) -> Res[Bool, i64] = Err(2)
+
+    fn main!() -> Res[Str, Union[Str, i64, TransformError]] =
+      result {
+        let x = ones[i32](2,3,4)
+        _ = x.then(
+          reduce{ b h w -> b }.reduce_by(
+            (h, fail_h),
+            (w, fail_w),
+          )
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"first"'
+
+- id: RDX-reduce-by-propagates-later-phase-error-without-wrapping
+  category: tensor_reduce
+  title: reduce_by propagates a later phase error unchanged
+  code: |
+    import std::tensor::{TensorView, TransformError, ones}
+
+    fn pass_h(_values: TensorView[i32]) -> Res[f64, Str] = Ok(1.0)
+
+    fn fail_w(_values: TensorView[f64]) -> Res[Bool, i64] = Err(2)
+
+    fn main!() -> Res[Str, Union[Str, i64, TransformError]] =
+      result {
+        let x = ones[i32](2,3,4)
+        _ = x.then(
+          reduce{ b h w -> b }.reduce_by(
+            (h, pass_h),
+            (w, fail_w),
+          )
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '2'
+
+- id: RDX-reduce-by-runtime-schema-failure-is-transformerror
+  category: tensor_reduce
+  title: reduce_by runtime schema failure returns TransformError
+  code: |
+    import std::map::Map
+    import std::tensor::{TensorView, TransformError, ones}
+
+    fn collapse(_values: TensorView[i32]) -> Res[f64, Str] = Ok(1.0)
+
+    fn main!() -> Res[Str, Union[IoError, Str, TransformError]] =
+      result {
+        let argc = args!()?.len()
+        let key = concat(["unknown_", to_str(argc)])
+        let sizes = Map[Str,Nat].new().insert(key, 3)
+        let x = ones[i32](2,12)
+        _ = x.then(
+          reduce{ b (h*w) -> b }.with_sizes(sizes).reduce_by(collapse)
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TransformError
+    value_diagnostics:
+    - code: WITH_SIZES_UNKNOWN_KEY
+      message_contains:
+      - with_sizes
+      - unknown
+      data_keys:
+      - key
+      - operation
+
+- id: RDX-reduce-by-rejects-effectful-phase-callback
+  category: tensor_reduce
+  title: reduce_by requires pure phase callbacks
+  code: |
+    import std::tensor::{TensorView, ones}
+
+    fn reduce_all!(_values: TensorView[i32]) -> Res[f64, Str] = Ok(1.0)
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[i32](2,3)
+      _ = reduce{ b h -> b }.reduce_by(reduce_all!)(x)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+
+- id: RDX-phase-partition-validation-precedes-effectful-callback-rejection
+  category: tensor_reduce
+  title: reduce_by phase partition validation precedes effectful callback rejection
+  code: |
+    import std::tensor::{TensorView, ones}
+
+    fn reduce_all!(_values: TensorView[i32]) -> Res[i32, Str] = Ok(0)
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[i32](2,3,4)
+      _ = reduce{ b h w -> b }.reduce_by(
+        (h, reduce_all!),
+        (h, reduce_all!), // @primary phase-overlap-before-effect
+        (w, reduce_all!),
+      )(x)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: REDUCE_BY_PHASE_OVERLAP
+      message_contains:
+      - reduce_by
+      - phase
+      - overlap
+      data_keys:
+      - axis
+      - phase_index
+      primary_span:
+        marker: phase-overlap-before-effect
+
+- id: RDX-reduce-by-phase-axis-must-be-reduced-axis
+  category: tensor_reduce
+  title: reduce_by phase axis must be reduced axis
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[i32](2,3,4)
+        _ = x.then(
+          reduce{ b h w -> b }.reduce_by(
+            (b, { |v| Ok(0) }),
+            (h, { |v| Ok(0) }),
+            (w, { |v| Ok(0) }),
+          )
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: REDUCE_BY_PHASE_NON_REDUCED_AXIS
+      message_contains:
+      - reduce_by
+      - phase
+      - non-reduced
+      data_keys:
+      - axis
+      - phase_index
+
+- id: RDX-reduce-by-phase-axis-sets-must-be-disjoint
+  category: tensor_reduce
+  title: reduce_by phase axis sets must be disjoint
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[i32](2,3,4)
+        _ = x.then(
+          reduce{ b h w -> b }.reduce_by(
+            (h, { |v| Ok(0) }),
+            (h, { |v| Ok(1) }),
+            (w, { |v| Ok(0) }),
+          )
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: REDUCE_BY_PHASE_OVERLAP
+      message_contains:
+      - reduce_by
+      - phase
+      - overlap
+      data_keys:
+      - axis
+      - phase_index
+
+- id: RDX-reduce-by-phase-coverage-cannot-be-partial
+  category: tensor_reduce
+  title: reduce_by phase coverage cannot be partial
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[i32](2,3,4)
+        _ = x.then(
+          reduce{ b h w -> b }.reduce_by(
+            (h, { |v| Ok(0) }),
+          )
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: REDUCE_BY_PHASE_INCOMPLETE
+      message_contains:
+      - reduce_by
+      - phase
+      - incomplete
+      - missing
+      data_keys:
+      - expected_axes
+      - actual_axes
+
+- id: RDX-legacy-by-method-is-not-exposed-on-reduce-schema
+  category: tensor_reduce
+  title: legacy by method is not exposed on reduce schema
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = reduce{ b h w -> b }.by({ |v| Ok(0) })
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+
+- id: RDX-all-reduction-primitives-read-tensorview-and-return-owning-tensor
+  category: tensor_reduce
+  title: sum max and mean read TensorView and return owning Tensor
+  code: |
+    import std::tensor::{AxisError, DTypeError, NumericError, ShapeError, Tensor, ones}
+    import std::tensor::prim::{max, mean, permute, sum}
+
+    fn is_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, NumericError, ShapeError]] =
+      result {
+        let view = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let summed = sum(view, #1)?
+        let maximum = max(view, #1)?
+        let average = mean(view, #1)?
+        let ok = (is_tensor(summed)
+          && is_tensor(maximum)
+          && is_tensor(average)
+          && (to_str(summed.shape()) == "[3]")
+          && (to_str(maximum.shape()) == "[3]")
+          && (to_str(average.shape()) == "[3]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

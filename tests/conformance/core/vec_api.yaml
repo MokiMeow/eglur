@@ -1,0 +1,423 @@
+# Suite: core/vec_api.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: VEC-vec-pure-insert-and-remove-work-with-value-semantics
+  category: vec
+  title: Vec pure insert and remove work with value semantics
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, IndexError] =
+      result {
+        let v0 = Vec[i64].new().push(1).push(3)
+        let v1 = v0.insert(1, 2)?
+        _ = v1.remove(2)?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: VEC-vec-bang-insert-and-remove-mutate-in-place
+  category: vec
+  title: Vec bang insert! and remove! mutate in place
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, IndexError] =
+      result {
+        let mut v = Vec[i64].new().push(1).push(3)
+        v.insert!(1, 2)?
+        _ = v.remove!(0)?
+        yield Ok(to_str(v))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,3]"'
+
+- id: VEC-vec-slice-and-membership-helpers-are-available
+  category: vec
+  title: Vec slice and membership helpers are available
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, IndexError] =
+      result {
+        let v = Vec[i64].new().push(4).push(5).push(6)
+        let s = v.slice(0, 2)?
+        let c = s.contains(&5)
+        _ = s.index_of(&6).is_none()
+        yield Ok(to_str(c))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: VEC-vec-bounds-allow-empty-slice-get-at-len-none-and-insert-at-len
+  category: vec
+  title: Vec bounds allow empty slice, get at len None, and insert at len
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, IndexError] =
+      result {
+        let v = Vec[i64].new().push(1).push(2)
+        let empty = v.slice(2, 2)?
+        let appended = v.insert(2, 3)?
+        let get_at_len_is_none = v.get(2).is_none()
+        yield Ok(concat([to_str(empty), "|", to_str(appended), "|", to_str(get_at_len_is_none)]))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[]|[1,2,3]|true"'
+
+- id: VEC-vec-pure-out-of-bounds-operations-return-index-error-and-preserve-source
+  category: vec
+  title: Vec pure out-of-bounds operations return IndexError and preserve source
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let v = Vec[i64].new().push(1).push(2)
+      let slice_order_err = v.slice(2, 1).is_err()
+      let slice_end_err = v.slice(0, 3).is_err()
+      let insert_err = v.insert(3, 9).is_err()
+      let remove_err = v.remove(2).is_err()
+      let all_err = slice_order_err && slice_end_err && insert_err && remove_err
+      yield Ok(concat([to_str(all_err), "|", to_str(v)]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true|[1,2]"'
+
+- id: VEC-vec-consuming-extend-reverse-retain-and-freeze-work
+  category: vec
+  title: Vec consuming extend reverse retain and freeze work
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let base = Vec[i64].new().push(1).extend([2,3,4])
+      let reversed = base.reverse()
+      let retained = base.retain { _ % 2 == 0 }
+      let frozen = retained.freeze()
+      yield Ok(to_str([base, reversed, frozen]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[1,2,3,4],[4,3,2,1],[2,4]]"'
+
+- id: VEC-vec-pure-value-update-branch-is-independent-from-bang-mutation
+  category: vec
+  title: Vec pure value update branch is independent from bang mutation
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let base = Vec[i64].new().push(1).push(2)
+      let branched = base.push(3)
+      let mut edited = branched
+      edited.push!(4)
+      yield Ok(to_str([base, branched, edited]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[1,2],[1,2,3],[1,2,3,4]]"'
+
+- id: VEC-vec-dedup-keeps-first-occurrence-and-preserves-source
+  category: vec
+  title: Vec dedup keeps first occurrence and preserves source
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let base = Vec[i64].new().extend([3,1,3,2,1,2])
+      let deduped = base.dedup()
+      yield Ok(to_str([base, deduped]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[[3,1,3,2,1,2],[3,1,2]]"'
+
+- id: VEC-vec-dedup-bang-removes-non-adjacent-duplicates-in-place
+  category: vec
+  title: Vec dedup! removes non-adjacent duplicates in place
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let mut v = Vec[i64].new().extend([3,1,3,2,1,2])
+      v.dedup!()
+      yield Ok(to_str(v))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[3,1,2]"'
+
+- id: VEC-vec-bang-pop-truncate-reverse-retain-reserve-resize-and-clear-mutate-in-place
+  category: vec
+  title: Vec bang pop truncate reverse retain reserve resize and clear mutate in place
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let mut v = Vec[i64].new().extend([1,2,3])
+        let popped = v.pop!().unwrap_or(-1)
+        v.push!(4)
+        v.reverse!()
+        v.retain! { _ != 2 }
+        v.reserve!(10)
+        v.resize!(4, 9)
+        v.truncate!(3).map_err { |_| "truncate" }?
+        let before_clear = to_str(v)
+        v.clear!()
+        yield Ok(concat([to_str(popped), "|", before_clear, "|", to_str(v.is_empty())]))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3|[4,1,9]|true"'
+
+- id: VEC-vec-bang-out-of-bounds-operations-return-index-error-without-mutation
+  category: vec
+  title: Vec bang out-of-bounds operations return IndexError without mutation
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let mut v = Vec[i64].new().push(1).push(2)
+      let set_err = v.set!(2, 9).is_err()
+      let insert_err = v.insert!(3, 9).is_err()
+      let remove_err = v.remove!(2).is_err()
+      let truncate_err = v.truncate!(3).is_err()
+      let all_err = set_err && insert_err && remove_err && truncate_err
+      yield Ok(concat([to_str(all_err), "|", to_str(v)]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true|[1,2]"'
+
+- id: VEC-vec-sort-by-is-stable-for-equal-keys
+  category: vec
+  title: Vec sort_by is stable for equal keys
+  code: |
+    import std::vec::Vec
+
+    struct Row {
+      field k: i64
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let v = Vec[Row].new()
+        .push(Row{ k: 1, id: 10 })
+        .push(Row{ k: 0, id: 20 })
+        .push(Row{ k: 1, id: 30 })
+      let ids = v.sort_by { _.k }.map { _.id }
+      yield Ok(to_str(ids))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[20,10,30]"'
+
+- id: VEC-vec-sort-dispatches-canonical-user-ord
+  category: vec
+  title: Vec sort dispatches the canonical user Ord implementation
+  code: |
+    import std::vec::Vec
+
+    struct Priority {
+      field rank: i64
+    }
+
+    impl Eq for Priority {
+      fn eq(self: &Self, other: &Self) -> Bool = self.rank == other.rank
+    }
+
+    impl Ord for Priority {
+      fn cmp(self: &Self, other: &Self) -> Ordering =
+        Ord.cmp(&other.rank, &self.rank)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let ranks = Vec[Priority].new()
+        .push(Priority{ rank: 1 })
+        .push(Priority{ rank: 3 })
+        .push(Priority{ rank: 2 })
+        .sort()
+        .map { _.rank }
+      yield Ok(to_str(ranks))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[3,2,1]"'
+
+- id: VEC-vec-sort-by-is-stable-for-equal-keys-2
+  category: vec
+  title: Vec sort_by! is stable for equal keys
+  code: |
+    import std::vec::Vec
+
+    struct Row {
+      field k: i64
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let mut v = Vec[Row].new()
+        .push(Row{ k: 1, id: 10 })
+        .push(Row{ k: 0, id: 20 })
+        .push(Row{ k: 1, id: 30 })
+      v.sort_by! { _.k }
+      let ids = v.map { _.id }
+      yield Ok(to_str(ids))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[20,10,30]"'
+
+- id: VEC-vec-sort-by-uses-nan-last-total-order-and-keeps-nan-encounter-order
+  category: vec
+  title: Vec sort_by uses NaN-last total order and keeps NaN encounter order
+  code: |
+    import std::vec::Vec
+
+    struct Row {
+      field k: f32
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let nanv: f32 = 0.0 /. 0.0
+      let v = Vec[Row].new()
+        .push(Row{ k: 1.0, id: 10 })
+        .push(Row{ k: nanv, id: 20 })
+        .push(Row{ k: -2.0, id: 30 })
+        .push(Row{ k: nanv, id: 40 })
+      let ids = v.sort_by { _.k }.map { _.id }
+      yield Ok(to_str(ids))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[30,10,20,40]"'
+
+- id: VEC-vec-sort-by-uses-nan-last-total-order-and-keeps-nan-encounter-order-2
+  category: vec
+  title: Vec sort_by! uses NaN-last total order and keeps NaN encounter order
+  code: |
+    import std::vec::Vec
+
+    struct Row {
+      field k: f32
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let nanv: f32 = 0.0 /. 0.0
+      let mut v = Vec[Row].new()
+        .push(Row{ k: 1.0, id: 10 })
+        .push(Row{ k: nanv, id: 20 })
+        .push(Row{ k: -2.0, id: 30 })
+        .push(Row{ k: nanv, id: 40 })
+      v.sort_by! { _.k }
+      let ids = v.map { _.id }
+      yield Ok(to_str(ids))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[30,10,20,40]"'
+
+- id: VEC-vec-sort-by-orders-0-0-before-0-0-under-unified-total-order
+  category: vec
+  title: Vec sort_by orders -0.0 before +0.0 under unified total order
+  code: |
+    import std::vec::Vec
+
+    struct Row {
+      field k: f64
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let v = Vec[Row].new()
+        .push(Row{ k: 0.0, id: 10 })
+        .push(Row{ k: -0.0, id: 20 })
+        .push(Row{ k: 1.0, id: 30 })
+      let ids = v.sort_by { _.k }.map { _.id }
+      yield Ok(to_str(ids))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[20,10,30]"'
+
+- id: VEC-retain-bang-invokes-effectful-predicate-once-in-original-order
+  category: vec
+  title: Vec retain! invokes its effectful predicate once in original order
+  code: |
+    import std::vec::Vec
+    import std::test::emit!
+
+    fn keep!(x: i64) -> Bool {
+      emit!(to_str(x))
+      yield x % 2 != 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let mut v = Vec[i64].new().extend([3,1,2,1])
+      v.retain! { keep!(_) }
+      yield Ok(to_str(v))
+    }
+  expect:
+    side_effects:
+    - '3'
+    - '1'
+    - '2'
+    - '1'
+    value:
+      kind: Ok
+      repr: '"[3,1,1]"'
+
+- id: VEC-sort-by-bang-rejects-effectful-key-callback
+  category: vec
+  title: Vec sort_by! rejects an effectful key callback
+  code: |
+    import std::vec::Vec
+    import std::test::emit!
+
+    fn key!(x: i64) -> i64 {
+      emit!(to_str(x))
+      yield x
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let mut v = Vec[i64].new().extend([2,1])
+      v.sort_by! { key!(_) }
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []

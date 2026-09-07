@@ -1,0 +1,39 @@
+[workspace]
+channels = ["conda-forge"]
+license = "Apache-2.0"
+license-file = "LICENSE"
+name = "eglur-spec-tooling"
+platforms = ["osx-arm64", "linux-64"]
+requires-pixi = ">=0.76.2,<0.77"
+
+[tasks]
+lint = { cmd = "ruff check tests/conformance/tools", clean-env = true, description = "Lint all conformance Python tooling." }
+format-check = { cmd = "ruff format --check tests/conformance/tools", clean-env = true, description = "Check canonical Ruff formatting." }
+typecheck = { cmd = "pyrefly check tests/conformance/tools", clean-env = true, description = "Type-check the complete conformance tooling surface." }
+test = { cmd = "python -m unittest discover -s tests/conformance/tools -p 'test_*.py'", clean-env = true, description = "Run all conformance tooling regression tests." }
+rekey = { cmd = "python tests/conformance/tools/rekey_ids.py", clean-env = true, description = "Preview or apply semantic conformance ID rekeying; append tool arguments." }
+generate-traceability = { cmd = "python tests/conformance/tools/gen_traceability.py", clean-env = true, description = "Regenerate canonical diagnostic traceability." }
+generate-frontend-expectations = { cmd = "python tests/conformance/tools/project_frontend_expectations.py", clean-env = true, description = "Regenerate the syntax-front-end expectation corpus." }
+generate-semantic-expectations = { cmd = "python tests/conformance/tools/project_semantic_expectations.py", clean-env = true, description = "Regenerate the first semantic fixture corpus." }
+render-effects = { cmd = "python tests/conformance/tools/render_effect_summaries.py", clean-env = true, description = "Render the generated standard-library effect reference." }
+validate-artifacts = { cmd = "python tests/conformance/tools/validate_artifact_inventory.py", clean-env = true }
+validate-schema = { cmd = "python tests/conformance/tools/validate_conformance_schema.py", clean-env = true }
+validate-effects = { cmd = "python tests/conformance/tools/validate_effect_summaries.py", clean-env = true }
+validate-doc-links = { cmd = "python tests/conformance/tools/validate_documentation_links.py", clean-env = true }
+validate-traceability = { cmd = "python tests/conformance/tools/gen_traceability.py --check", clean-env = true }
+validate-open-items = { cmd = "python tests/conformance/tools/validate_open_items.py", clean-env = true }
+validate-keywords = { cmd = "python tests/conformance/tools/validate_normative_keywords.py", clean-env = true }
+validate-frontend-expectations = { cmd = "python tests/conformance/tools/project_frontend_expectations.py --check", clean-env = true }
+validate-semantic-expectations = { cmd = "python tests/conformance/tools/project_semantic_expectations.py --check", clean-env = true }
+validate = { depends-on = [{ task = "validate-artifacts" }, { task = "validate-schema" }, { task = "validate-effects" }, { task = "validate-doc-links" }, { task = "validate-traceability" }, { task = "validate-open-items" }, { task = "validate-keywords" }, { task = "validate-frontend-expectations" }, { task = "validate-semantic-expectations" }], description = "Run every standalone static specification validator." }
+check = { depends-on = [{ task = "lint" }, { task = "format-check" }, { task = "typecheck" }, { task = "test" }, { task = "validate" }], description = "Run the complete Python tooling quality gate." }
+release-gate = { cmd = "python tests/conformance/tools/validate_release_gate.py", clean-env = true, description = "Run a release-gate mode; append mode and evidence arguments." }
+
+[dependencies]
+python = "3.11.*"
+git = ">=2.55.0,<3"
+
+[pypi-dependencies]
+pyyaml = "==6.0.3"
+ruff = "==0.16.3"
+pyrefly = "==0.32.0"

@@ -1,0 +1,580 @@
+# Suite: core/containers.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: CNT-vec-consuming-push-chains-without-bang
+  category: containers
+  title: Vec consuming push chains without bang
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let v = Vec[i64].new().push(1).push(2)
+      yield Ok(to_str(v.len()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: CNT-vec-sort-is-bang-and-sorts-in-place
+  category: containers
+  title: Vec sort! is bang and sorts in-place
+  code: |
+    import std::vec::Vec
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let mut v = Vec[i64].new().push(3).push(1).push(2)
+      _ = v.tap! { |_| emit!("before") }
+      v.sort!()
+      yield Ok(to_str(v))
+    }
+  expect:
+    side_effects:
+    - before
+    value:
+      kind: Ok
+      repr: '"[1,2,3]"'
+- id: CNT-map-iterates-in-insertion-order
+  category: containers
+  title: Map iterates in insertion order
+  code: |
+    import std::map::Map
+
+    fn main!() -> Res[Str, Str] {
+      let m = Map[Str,i64].new().insert("b", 2).insert("a", 1)
+      let ks = m.keys().to_vec()
+      yield Ok(to_str(ks))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[\"b\",\"a\"]"'
+- id: CNT-map-literal-evaluates-in-source-order-and-replaces-equal-keys
+  category: containers
+  title: Map literal evaluates key then value in source order and replaces equal keys
+  code: |
+    import std::test::emit!
+
+    fn key!(event: Str, value: Str) -> Str {
+      emit!(event)
+      yield value
+    }
+
+    fn value!(event: Str, value: i64) -> i64 {
+      emit!(event)
+      yield value
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let map = [
+        key!("k1", "a"): value!("v1", 1),
+        key!("k2", "b"): value!("v2", 2),
+        key!("k3", "a"): value!("v3", 3),
+      ]
+      let ok = (map.keys() == ["a", "b"]) && (map.get(&"a") == Some(3))
+      yield Ok(to_str(ok))
+    }
+  expect:
+    side_effects:
+    - k1
+    - v1
+    - k2
+    - v2
+    - k3
+    - v3
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: CNT-empty-map-literal-uses-expected-map-type
+  category: containers
+  title: Empty map literal uses expected Map type
+  code: |
+    import std::map::Map
+
+    fn main!() -> Res[Str, Str] {
+      let map: Map[Str, i64] = [:]
+      yield Ok(to_str(map.is_empty()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: CNT-map-literal-identifier-key-is-an-ordinary-value-expression
+  category: containers
+  title: Map literal identifier key is an ordinary value expression
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let name = "actual"
+      let map = [name: 7]
+      let ok = map.contains_key(&"actual") && !map.contains_key(&"name")
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: CNT-map-literal-requires-eq-and-hash-key-bounds
+  category: containers
+  title: Map literal requires Eq and Hash key bounds
+  code: |
+    struct EqOnly {}
+    impl Eq for EqOnly {
+      fn eq(self: &Self, other: &Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let key = EqOnly{}
+      _ = [key: 1]
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: CNT-to-map-fails-on-duplicate-keys
+  category: containers
+  title: to_map fails on duplicate keys
+  code: |
+    fn main!() -> Res[Str, DuplicateKeyError] =
+      result {
+        _ = [("k",1), ("k",2)].to_map()?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: DuplicateKeyError
+    value_diagnostics:
+    - code: DUPLICATE_KEY
+      message_contains:
+      - duplicate
+      data_keys:
+      - key
+- id: CNT-set-membership-and-insertion
+  category: containers
+  title: Set membership and insertion
+  code: |
+    import std::set::Set
+
+    fn main!() -> Res[Str, Str] {
+      let s = Set[Str].new().insert("x").insert("y")
+      yield Ok(to_str(s.contains(&"x")))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: CNT-seq-sort-by-is-stable-for-equal-keys
+  category: containers
+  title: Seq sort_by is stable for equal keys
+  code: |
+    struct Row {
+      field k: i64
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let xs = [
+        Row{ k: 1, id: 10 },
+        Row{ k: 0, id: 20 },
+        Row{ k: 1, id: 30 },
+      ]
+      let ids = xs.sort_by { _.k }.map { _.id }.to_vec()
+      yield Ok(to_str(ids))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[20,10,30]"'
+
+- id: CNT-seq-sort-by-uses-nan-last-total-order-and-keeps-nan-encounter-order
+  category: containers
+  title: Seq sort_by uses NaN-last total order and keeps NaN encounter order
+  code: |
+    struct Row {
+      field k: f32
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let nanv: f32 = 0.0 /. 0.0
+      let xs = [
+        Row{ k: 1.0, id: 10 },
+        Row{ k: nanv, id: 20 },
+        Row{ k: -2.0, id: 30 },
+        Row{ k: nanv, id: 40 },
+      ]
+      let ids = xs.sort_by { _.k }.map { _.id }.to_vec()
+      yield Ok(to_str(ids))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[30,10,20,40]"'
+
+- id: CNT-seq-sort-by-orders-0-0-before-0-0-under-unified-total-order
+  category: containers
+  title: Seq sort_by orders -0.0 before +0.0 under unified total order
+  code: |
+    struct Row {
+      field k: f64
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let xs = [
+        Row{ k: 0.0, id: 10 },
+        Row{ k: -0.0, id: 20 },
+        Row{ k: 1.0, id: 30 },
+      ]
+      let ids = xs.sort_by { _.k }.map { _.id }.to_vec()
+      yield Ok(to_str(ids))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[20,10,30]"'
+
+- id: CNT-map-query-surface-covers-len-is-empty-contains-get-keys-values-items
+  category: containers
+  title: Map query surface covers len/is_empty/contains/get/keys/values/items
+  code: |
+    import std::map::Map
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let empty = Map[Str,i64].new()
+      emit!(to_str(empty.len()))
+      emit!(to_str(empty.is_empty()))
+
+      let m = empty.insert("b", 2).insert("a", 1)
+      emit!(to_str(m.len()))
+      emit!(to_str(m.is_empty()))
+      emit!(to_str(m.contains_key(&"a")))
+      emit!(to_str(m.contains_key(&"z")))
+      emit!(to_str(m.get(&"a").is_some()))
+      emit!(to_str(m.get(&"z").is_none()))
+      emit!(to_str(m.keys().to_vec()))
+      emit!(to_str(m.values().to_vec()))
+      emit!(to_str(m.items().len()))
+      yield Ok("ok")
+    }
+  expect:
+    side_effects:
+    - "0"
+    - "true"
+    - "2"
+    - "false"
+    - "true"
+    - "false"
+    - "true"
+    - "true"
+    - "[\"b\",\"a\"]"
+    - "[2,1]"
+    - "2"
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: CNT-map-consuming-insert-remove-return-new-values-without-mutating-original
+  category: containers
+  title: Map consuming insert/remove return new values without mutating original
+  code: |
+    import std::map::Map
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let base = Map[Str,i64].new().insert("x", 1)
+      let branched = base.insert("y", 2)
+      let pruned = branched.remove(&"x")
+
+      emit!(to_str(base.len()))
+      emit!(to_str(branched.len()))
+      emit!(to_str(pruned.len()))
+      emit!(to_str(base.contains_key(&"y")))
+      emit!(to_str(branched.contains_key(&"x")))
+      emit!(to_str(pruned.contains_key(&"x")))
+      yield Ok("ok")
+    }
+  expect:
+    side_effects:
+    - "1"
+    - "2"
+    - "1"
+    - "false"
+    - "true"
+    - "false"
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: CNT-map-bang-insert-remove-return-previous-value-contract
+  category: containers
+  title: Map bang insert!/remove! return previous value contract
+  code: |
+    import std::map::Map
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let mut m = Map[Str,i64].new()
+      let r0 = m.insert!("a", 1)
+      emit!(to_str(r0.is_none()))
+
+      let r1 = m.insert!("a", 2)
+      emit!(to_str(r1.is_some()))
+      emit!(to_str(r1.unwrap_or(-1)))
+
+      let r2 = m.remove!(&"a")
+      emit!(to_str(r2.is_some()))
+      emit!(to_str(r2.unwrap_or(-1)))
+
+      let r3 = m.remove!(&"a")
+      emit!(to_str(r3.is_none()))
+      emit!(to_str(m.contains_key(&"a")))
+      yield Ok("ok")
+    }
+  expect:
+    side_effects:
+    - "true"
+    - "true"
+    - "1"
+    - "true"
+    - "2"
+    - "true"
+    - "false"
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: CNT-set-query-surface-covers-len-contains-items-deterministic-order
+  category: containers
+  title: Set query surface covers len/contains/items deterministic order
+  code: |
+    import std::set::Set
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let empty = Set[Str].new()
+      emit!(to_str(empty.len()))
+      emit!(to_str(empty.contains(&"x")))
+
+      let s = empty.insert("x").insert("y")
+      emit!(to_str(s.len()))
+      emit!(to_str(s.contains(&"x")))
+      emit!(to_str(s.items().to_vec()))
+      yield Ok("ok")
+    }
+  expect:
+    side_effects:
+    - "0"
+    - "false"
+    - "2"
+    - "true"
+    - "[\"x\",\"y\"]"
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: CNT-set-consuming-remove-returns-new-set-while-preserving-source-set
+  category: containers
+  title: Set consuming remove returns new set while preserving source set
+  code: |
+    import std::set::Set
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let base = Set[Str].new().insert("x").insert("y")
+      let pruned = base.remove(&"x")
+
+      emit!(to_str(base.contains(&"x")))
+      emit!(to_str(pruned.contains(&"x")))
+      emit!(to_str(base.len()))
+      emit!(to_str(pruned.len()))
+      yield Ok("ok")
+    }
+  expect:
+    side_effects:
+    - "true"
+    - "false"
+    - "2"
+    - "1"
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: CNT-set-bang-insert-remove-success-flags-are-deterministic
+  category: containers
+  title: Set bang insert!/remove! success flags are deterministic
+  code: |
+    import std::set::Set
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let mut s = Set[Str].new()
+      emit!(to_str(s.insert!("x")))
+      emit!(to_str(s.insert!("x")))
+      emit!(to_str(s.remove!(&"x")))
+      emit!(to_str(s.remove!(&"x")))
+      emit!(to_str(s.len()))
+      yield Ok("ok")
+    }
+  expect:
+    side_effects:
+    - "true"
+    - "false"
+    - "true"
+    - "false"
+    - "0"
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: CNT-map-uses-coherent-custom-eq-and-hash-implementations-for-key-identity
+  category: containers
+  title: Map uses coherent custom Eq and Hash implementations for key identity
+  code: |
+    import std::map::Map
+
+    struct Key {
+      field id: i64
+      field label: Str
+    }
+
+    impl Eq for Key {
+      fn eq(self: &Self, other: &Self) -> Bool = self.id == other.id
+    }
+
+    impl Hash for Key {
+      fn hash(self: &Self, seed: u64) -> u64 =
+        Hash.hash(&self.id, seed)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let map = Map[Key,Str].new()
+        .insert(Key{ id: 1, label: "first" }, "old")
+        .insert(Key{ id: 1, label: "second" }, "new")
+      let probe = Key{ id: 1, label: "probe" }
+      yield Ok(to_str((map.len() == 1) && (map.get(&probe) == Some("new"))))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: CNT-map-accepts-required-structural-hash-key-families
+  category: containers
+  title: Map accepts required structural Hash key families
+  code: |
+    import std::map::Map
+
+    fn main!() -> Res[Str, Str] {
+      let tuple_map = Map[(i64,i64),Str].new().insert((1, 2), "tuple")
+
+      let opt_key: Opt[i64] = Some(3)
+      let opt_map = Map[Opt[i64],Str].new().insert(opt_key, "opt")
+
+      let res_key: Res[i64,Str] = Ok(4)
+      let res_map = Map[Res[i64,Str],Str].new().insert(res_key, "res")
+
+      let seq_key: Seq[i64] = [5, 6]
+      let seq_map = Map[Seq[i64],Str].new().insert(seq_key, "seq")
+
+      let vec_key: Vec[i64] = [7, 8].to_vec()
+      let vec_map = Map[Vec[i64],Str].new().insert(vec_key, "vec")
+
+      yield Ok(to_str(
+        (tuple_map.get(&(1, 2)).is_some()
+        && opt_map.get(&Some(3)).is_some()
+        && res_map.get(&Ok(4)).is_some()
+        && seq_map.get(&[5, 6]).is_some()
+        && vec_map.get(&[7, 8].to_vec()).is_some())
+      ))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: CNT-map-float-keys-distinguish-signed-zero-and-support-nan-lookup
+  category: containers
+  title: Map float keys distinguish signed zero and support NaN lookup
+  code: |
+    import std::map::Map
+
+    fn main!() -> Res[Str, Str] {
+      let nan: f64 = 0.0 /. 0.0
+      let negative_zero: f64 = -0.0
+      let positive_zero: f64 = 0.0
+      let map = Map[f64,Str].new()
+        .insert(negative_zero, "negative")
+        .insert(positive_zero, "positive")
+        .insert(nan, "nan")
+      yield Ok(to_str(
+        ((map.len() == 3)
+        && (map.get(&negative_zero) == Some("negative"))
+        && (map.get(&positive_zero) == Some("positive"))
+        && (map.get(&nan) == Some("nan")))
+      ))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: CNT-map-type-head-rejects-key-with-eq-but-without-hash
+  category: containers
+  title: Map type head rejects key with Eq but without Hash
+  code: |
+    import std::map::Map
+
+    struct EqOnly {}
+    impl Eq for EqOnly {
+      fn eq(self: &Self, other: &Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] {
+      _ = Map[EqOnly,i64].new()
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: CNT-set-type-head-rejects-element-with-hash-but-without-eq
+  category: containers
+  title: Set type head rejects element with Hash but without Eq
+  code: |
+    import std::set::Set
+
+    struct HashOnly {}
+    impl Hash for HashOnly {
+      fn hash(self: &Self, seed: u64) -> u64 = seed
+    }
+
+    fn main!() -> Res[Str, Str] {
+      _ = Set[HashOnly].new()
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type

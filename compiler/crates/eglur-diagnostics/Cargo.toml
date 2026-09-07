@@ -1,0 +1,13 @@
+[package]
+name = "eglur-diagnostics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+eglur-hir = { path = "../eglur-hir" }
+eglur-source = { path = "../eglur-source" }
+
+[lints]
+workspace = true

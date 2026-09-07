@@ -1,0 +1,658 @@
+version: '0.1'
+baseline_index: docs/spec/STDLIB.md
+sources:
+- docs/spec/stdlib/prelude.md
+- docs/spec/stdlib/str.md
+- docs/spec/stdlib/logic.md
+- docs/spec/stdlib/opt.md
+- docs/spec/stdlib/res.md
+- docs/spec/stdlib/seq.md
+- docs/spec/stdlib/vec.md
+- docs/spec/stdlib/map.md
+- docs/spec/stdlib/set.md
+- docs/spec/stdlib/parse.md
+- docs/spec/stdlib/json.md
+- docs/spec/stdlib/io.md
+- docs/spec/stdlib/net.md
+- docs/spec/stdlib/time.md
+- docs/spec/stdlib/tensor.md
+- docs/spec/stdlib/concurrency.md
+- docs/spec/stdlib/test-harness.md
+profiles:
+  pure:
+    kind: Known
+    categories: []
+    state_scope: none
+  state-localizable:
+    kind: Known
+    categories:
+    - STATE
+    state_scope: localizable
+  state-nonlocal:
+    kind: Known
+    categories:
+    - STATE
+    state_scope: nonlocal
+  io:
+    kind: Known
+    categories:
+    - IO
+    state_scope: none
+  io-state-localizable:
+    kind: Known
+    categories:
+    - IO
+    - STATE
+    state_scope: localizable
+  io-nondet:
+    kind: Known
+    categories:
+    - IO
+    - NONDET
+    state_scope: none
+  nondet:
+    kind: Known
+    categories:
+    - NONDET
+    state_scope: none
+  state-nonlocal-nondet:
+    kind: Known
+    categories:
+    - STATE
+    - NONDET
+    state_scope: nonlocal
+  unknown:
+    kind: Unknown
+default_own_summary: pure
+callables:
+  std::prelude:
+  - declaration: 'fn T.tap[T](self: T, f: callback[pure](&T) -> Unit) -> T'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn T.tap![T](self: T, f: callback[effectful](&T) -> Unit) -> T'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  std::opt:
+  - declaration: 'fn Opt[T].map[U](self: Opt[T], f: callback[pure](T) -> U) -> Opt[U]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Opt[T].and_then[U](self: Opt[T], f: callback[pure](T) -> Opt[U]) -> Opt[U]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Opt[T].or_else(self: Opt[T], f: callback[pure](Unit) -> Opt[T]) -> Opt[T]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Opt[T].unwrap_or_else(self: Opt[T], f: callback[pure](Unit) -> T) -> T'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Opt[T].ok_or_else[E](self: Opt[T], f: callback[pure](Unit) -> E) -> Res[T,E]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  std::res:
+  - declaration: 'fn Res[T,E].map[U](self: Res[T,E], f: callback[pure](T) -> U) -> Res[U,E]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Res[T,E].and_then[U](self: Res[T,E], f: callback[pure](T) -> Res[U,E]) -> Res[U,E]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Res[T,E].map_err[F](self: Res[T,E], f: callback[pure](E) -> F) -> Res[T,F]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Res[T,E].or_else[F](self: Res[T,E], f: callback[pure](E) -> Res[T,F]) -> Res[T,F]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Res[T,E].unwrap_or_else(self: Res[T,E], f: callback[pure](E) -> T) -> T'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Res[T,E].tap_ok!(self: Res[T,E], f: callback[effectful](&T) -> Unit) -> Res[T,E]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Res[T,E].tap_err!(self: Res[T,E], f: callback[effectful](&E) -> Unit) -> Res[T,E]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  std::seq:
+  - declaration: 'fn Seq[T].map[U](self: Seq[T], f: callback[pure](T) -> U) -> Seq[U]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[T].filter(self: Seq[T], p: callback[pure](T) -> Bool) -> Seq[T]'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Seq[T].flat_map[U](self: Seq[T], f: callback[pure](T) -> Seq[U]) -> Seq[U]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[T].filter_map[U](self: Seq[T], f: callback[pure](T) -> Opt[U]) -> Seq[U]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[T].drop_while(self: Seq[T], p: callback[pure](T) -> Bool) -> Seq[T]'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Seq[T].find(self: Seq[T], p: callback[pure](T) -> Bool) -> Opt[T]'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Seq[T].find_map[U](self: Seq[T], f: callback[pure](T) -> Opt[U]) -> Opt[U]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[T].any(self: Seq[T], p: callback[pure](T) -> Bool) -> Bool'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Seq[T].all(self: Seq[T], p: callback[pure](T) -> Bool) -> Bool'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Seq[T].partition(self: Seq[T], p: callback[pure](T) -> Bool) -> (Seq[T], Seq[T])'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Seq[T].group_by[K](self: Seq[T], key: callback[pure](T) -> K) -> Map[K, Seq[T]] requires Eq[K] + Hash[K]'
+    own_summary: pure
+    callbacks:
+      key: pure
+  - declaration: 'fn Seq[T].tap(self: Seq[T], f: callback[pure](&T) -> Unit) -> Seq[T]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[T].tap!(self: Seq[T], f: callback[effectful](&T) -> Unit) -> Seq[T]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[T].for_each!(self: Seq[T], f: callback[effectful](&T) -> Unit) -> Unit'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[T].map![U](self: Seq[T], f: callback[effectful](T) -> U) -> Seq[U]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[T].filter_map![U](self: Seq[T], f: callback[effectful](T) -> Opt[U]) -> Seq[U]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[T].find!(self: Seq[T], p: callback[effectful](T) -> Bool) -> Opt[T]'
+    own_summary: pure
+    callbacks:
+      p: effectful
+  - declaration: 'fn Seq[T].find_map![U](self: Seq[T], f: callback[effectful](T) -> Opt[U]) -> Opt[U]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[T].any!(self: Seq[T], p: callback[effectful](T) -> Bool) -> Bool'
+    own_summary: pure
+    callbacks:
+      p: effectful
+  - declaration: 'fn Seq[T].all!(self: Seq[T], p: callback[effectful](T) -> Bool) -> Bool'
+    own_summary: pure
+    callbacks:
+      p: effectful
+  - declaration: 'fn Seq[T].partition!(self: Seq[T], p: callback[effectful](T) -> Bool) -> (Seq[T], Seq[T])'
+    own_summary: pure
+    callbacks:
+      p: effectful
+  - declaration: 'fn Seq[T].group_by![K](self: Seq[T], key: callback[effectful](T) -> K) -> Map[K, Seq[T]] requires Eq[K] + Hash[K]'
+    own_summary: pure
+    callbacks:
+      key: effectful
+  - declaration: 'fn Seq[T].find_res[E](self: Seq[T], p: callback[pure](T) -> Res[Bool,E]) -> Res[Opt[T],E]'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Seq[T].find_map_res[U,E](self: Seq[T], f: callback[pure](T) -> Res[Opt[U],E]) -> Res[Opt[U],E]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[T].filter_map_res[U,E](self: Seq[T], f: callback[pure](T) -> Res[Opt[U],E]) -> Res[Seq[U],E]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[T].partition_res[E](self: Seq[T], p: callback[pure](T) -> Res[Bool,E]) -> Res[(Seq[T], Seq[T]),E]'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Seq[T].find_res![E](self: Seq[T], p: callback[effectful](T) -> Res[Bool,E]) -> Res[Opt[T],E]'
+    own_summary: pure
+    callbacks:
+      p: effectful
+  - declaration: 'fn Seq[T].find_map_res![U,E](self: Seq[T], f: callback[effectful](T) -> Res[Opt[U],E]) -> Res[Opt[U],E]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[T].filter_map_res![U,E](self: Seq[T], f: callback[effectful](T) -> Res[Opt[U],E]) -> Res[Seq[U],E]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[T].partition_res![E](self: Seq[T], p: callback[effectful](T) -> Res[Bool,E]) -> Res[(Seq[T], Seq[T]),E]'
+    own_summary: pure
+    callbacks:
+      p: effectful
+  - declaration: 'fn Seq[T].sort_by[K](self: Seq[T], key: callback[pure](T) -> K) -> Seq[T] requires Ord[K]'
+    own_summary: pure
+    callbacks:
+      key: pure
+  - declaration: 'fn Seq[A].fold[B](self: Seq[A], init: B, f: callback[pure](B, A) -> B) -> B'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[A].fold_res[B,E](self: Seq[A], init: B, f: callback[pure](B, A) -> Res[B,E]) -> Res[B,E]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[A].scan[B](self: Seq[A], init: B, f: callback[pure](B, A) -> B) -> Seq[B]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[A].scan0[B](self: Seq[A], init: B, f: callback[pure](B, A) -> B) -> Seq[B]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[A].fold![B](self: Seq[A], init: B, f: callback[effectful](B, A) -> B) -> B'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[A].fold_res![B,E](self: Seq[A], init: B, f: callback[effectful](B, A) -> Res[B,E]) -> Res[B,E]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[A].scan![B](self: Seq[A], init: B, f: callback[effectful](B, A) -> B) -> Seq[B]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[A].scan0![B](self: Seq[A], init: B, f: callback[effectful](B, A) -> B) -> Seq[B]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[A].traverse_res[B,E](self: Seq[A], f: callback[pure](A) -> Res[B,E]) -> Res[Seq[B],E]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[A].traverse_opt[B](self: Seq[A], f: callback[pure](A) -> Opt[B]) -> Opt[Seq[B]]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Seq[A].traverse_res![B,E](self: Seq[A], f: callback[effectful](A) -> Res[B,E]) -> Res[Seq[B],E]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[A].traverse_opt![B](self: Seq[A], f: callback[effectful](A) -> Opt[B]) -> Opt[Seq[B]]'
+    own_summary: pure
+    callbacks:
+      f: effectful
+  std::vec:
+  - declaration: 'fn Vec[T].retain(self: Vec[T], p: callback[pure](T) -> Bool) -> Vec[T]'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Vec[T].map[U](self: Vec[T], f: callback[pure](T) -> U) -> Vec[U]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'fn Vec[T].filter(self: Vec[T], p: callback[pure](T) -> Bool) -> Vec[T]'
+    own_summary: pure
+    callbacks:
+      p: pure
+  - declaration: 'fn Vec[T].sort_by[K](self: Vec[T], key: callback[pure](T) -> K) -> Vec[T] requires Ord[K]'
+    own_summary: pure
+    callbacks:
+      key: pure
+  - declaration: 'fn Vec[T].push!(self: &mut Self, x: T) -> Unit'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].pop!(self: &mut Self) -> Opt[T]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].set!(self: &mut Self, i: Nat, x: T) -> Res[Unit, IndexError]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].insert!(self: &mut Self, i: Nat, x: T) -> Res[Unit, IndexError]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].remove!(self: &mut Self, i: Nat) -> Res[T, IndexError]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].clear!(self: &mut Self) -> Unit'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].truncate!(self: &mut Self, n: Nat) -> Res[Unit, IndexError]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].reverse!(self: &mut Self) -> Unit'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].dedup!(self: &mut Self) -> Unit requires Eq[T]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].retain!(self: &mut Self, p: callback[effectful](T) -> Bool) -> Unit'
+    own_summary: state-localizable
+    callbacks:
+      p: effectful
+  - declaration: 'fn Vec[T].reserve!(self: &mut Self, additional: Nat) -> Unit'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].resize!(self: &mut Self, n: Nat, fill: T) -> Unit requires Clone[T] when n > self.len()'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].sort!(self: &mut Self) -> Unit requires Ord[T]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Vec[T].sort_by![K](self: &mut Self, key: callback[pure](T) -> K) -> Unit requires Ord[K]'
+    own_summary: state-localizable
+    callbacks:
+      key: pure
+  std::map:
+  - declaration: 'fn Map[K,V].insert!(self: &mut Self, k: K, v: V) -> Opt[V]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Map[K,V].remove!(self: &mut Self, k: &K) -> Opt[V]'
+    own_summary: state-localizable
+    callbacks: {}
+  std::set:
+  - declaration: 'fn Set[T].insert!(self: &mut Self, x: T) -> Bool'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Set[T].remove!(self: &mut Self, x: &T) -> Bool'
+    own_summary: state-localizable
+    callbacks: {}
+  std::io:
+  - declaration: fn process_snapshot!() -> ProcessSnapshot
+    own_summary: io-nondet
+    callbacks: {}
+  - declaration: fn invocation_arg!() -> Res[Opt[Str], IoError]
+    own_summary: io-nondet
+    callbacks: {}
+  - declaration: fn args!() -> Res[Seq[Str], IoError]
+    own_summary: io-nondet
+    callbacks: {}
+  - declaration: 'fn env_get!(key: Str) -> Res[Opt[Str], IoError]'
+    own_summary: io-nondet
+    callbacks: {}
+  - declaration: fn cwd!() -> Res[Path, IoError]
+    own_summary: io-nondet
+    callbacks: {}
+  - declaration: 'fn open_reader!(path: Path, links: LinkMode) -> Res[Own[ByteReader], IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn open_writer!(path: Path, links: LinkMode) -> Res[Own[ByteWriter], IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn with_reader![T](path: Path, links: LinkMode, f: callback[scoped-resource](&mut Own[ByteReader]) -> Res[T, IoError]) -> Res[T, ScopedFailure[IoError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn with_writer![T](path: Path, links: LinkMode, f: callback[scoped-resource](&mut Own[ByteWriter]) -> Res[T, IoError]) -> Res[T, ScopedFailure[IoError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn Own[ByteReader].read_chunk!(self: &mut Self, max_bytes: PositiveNat) -> Res[Opt[Vec[u8]], IoError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[ByteReader].close!(self: Self) -> Res[Unit, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn Own[ByteWriter].write_all!(self: &mut Self, xs: Vec[u8]) -> Res[Unit, IoError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[ByteWriter].flush!(self: &mut Self) -> Res[Unit, IoError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[ByteWriter].close!(self: Self) -> Res[Unit, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn open_text_reader!(path: Path, links: LinkMode) -> Res[Own[TextReader], TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn open_text_writer!(path: Path, links: LinkMode) -> Res[Own[TextWriter], TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn with_text_reader![T](path: Path, links: LinkMode, f: callback[scoped-resource](&mut Own[TextReader]) -> Res[T, TextError]) -> Res[T, ScopedFailure[TextError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn with_text_writer![T](path: Path, links: LinkMode, f: callback[scoped-resource](&mut Own[TextWriter]) -> Res[T, TextError]) -> Res[T, ScopedFailure[TextError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn Own[TextReader].read_line!(self: &mut Self) -> Res[Opt[Str], TextError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[TextReader].close!(self: Self) -> Res[Unit, TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn Own[TextWriter].write_str!(self: &mut Self, s: Str) -> Res[Unit, TextError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[TextWriter].write_line!(self: &mut Self, s: Str) -> Res[Unit, TextError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[TextWriter].flush!(self: &mut Self) -> Res[Unit, TextError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[TextWriter].close!(self: Self) -> Res[Unit, TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: fn stdin!() -> Res[Own[TextReader], TextError]
+    own_summary: io
+    callbacks: {}
+  - declaration: fn stdout!() -> Res[Own[TextWriter], TextError]
+    own_summary: io
+    callbacks: {}
+  - declaration: fn stderr!() -> Res[Own[TextWriter], TextError]
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn with_stdin![T](f: callback[scoped-resource](&mut Own[TextReader]) -> Res[T, TextError]) -> Res[T, ScopedFailure[TextError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn with_stdout![T](f: callback[scoped-resource](&mut Own[TextWriter]) -> Res[T, TextError]) -> Res[T, ScopedFailure[TextError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn with_stderr![T](f: callback[scoped-resource](&mut Own[TextWriter]) -> Res[T, TextError]) -> Res[T, ScopedFailure[TextError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn print!(s: Str) -> Res[Unit, TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn eprint!(s: Str) -> Res[Unit, TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn open_appender!(path: Path, links: LinkMode) -> Res[Own[ByteWriter], IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn open_text_appender!(path: Path, links: LinkMode) -> Res[Own[TextWriter], TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn with_appender![T](path: Path, links: LinkMode, f: callback[scoped-resource](&mut Own[ByteWriter]) -> Res[T, IoError]) -> Res[T, ScopedFailure[IoError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn with_text_appender![T](path: Path, links: LinkMode, f: callback[scoped-resource](&mut Own[TextWriter]) -> Res[T, TextError]) -> Res[T, ScopedFailure[TextError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn read_bytes!(path: Path, links: LinkMode) -> Res[Vec[u8], IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn write_bytes!(path: Path, xs: Vec[u8], links: LinkMode) -> Res[Unit, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn read_text!(path: Path, links: LinkMode) -> Res[Str, TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn write_text!(path: Path, s: Str, links: LinkMode) -> Res[Unit, TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn read_lines!(path: Path, links: LinkMode) -> Res[Seq[Str], TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn write_lines!(path: Path, xs: Seq[Str], links: LinkMode) -> Res[Unit, TextError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn list_paths!(path: Path) -> Res[Seq[Path], IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn list_files!(path: Path) -> Res[Seq[Path], IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn list_dirs!(path: Path) -> Res[Seq[Path], IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn exists!(path: Path) -> Res[Bool, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn stat!(path: Path) -> Res[PathStat, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn entry_exists!(path: Path) -> Res[Bool, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn entry_stat!(path: Path) -> Res[PathStat, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn create_dir!(path: Path, traversal: DirTraversal) -> Res[Unit, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn create_dir_all!(path: Path, traversal: DirTraversal) -> Res[Unit, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn remove_entry!(path: Path) -> Res[Unit, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn remove_dir!(path: Path) -> Res[Unit, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn remove_dir_all!(path: Path) -> Res[Unit, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn rename!( from: Path, to: Path, named destination: DestinationPolicy = DestinationPolicy::RejectExisting ) -> Res[Unit, IoError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn copy!( from: Path, to: Path, named source_links: LinkMode, named destination: DestinationPolicy = DestinationPolicy::RejectExisting ) -> Res[u64, IoError]'
+    own_summary: io
+    callbacks: {}
+  std::net:
+  - declaration: 'fn tcp_bind!(addr: NetAddr) -> Res[Own[TcpListener], NetError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn tcp_connect!(addr: NetAddr) -> Res[Own[TcpStream], NetError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn with_tcp_listener![T](addr: NetAddr, f: callback[scoped-resource](&mut Own[TcpListener]) -> Res[T, NetError]) -> Res[T, ScopedFailure[NetError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn with_tcp_stream![T](addr: NetAddr, f: callback[scoped-resource](&mut Own[TcpStream]) -> Res[T, NetError]) -> Res[T, ScopedFailure[NetError]]'
+    own_summary: io
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn Own[TcpListener].accept!(self: &mut Self) -> Res[Own[TcpStream], NetError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[TcpListener].accept_with![T](self: &mut Self, f: callback[scoped-resource](&mut Own[TcpStream]) -> Res[T, NetError]) -> Res[T, ScopedFailure[NetError]]'
+    own_summary: io-state-localizable
+    callbacks:
+      f: scoped-resource
+  - declaration: 'fn Own[TcpListener].close!(self: Self) -> Res[Unit, NetError]'
+    own_summary: io
+    callbacks: {}
+  - declaration: 'fn Own[TcpStream].read_chunk!(self: &mut Self, max_bytes: PositiveNat) -> Res[Opt[Vec[u8]], NetError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[TcpStream].write_all!(self: &mut Self, bytes: Vec[u8]) -> Res[Unit, NetError]'
+    own_summary: io-state-localizable
+    callbacks: {}
+  - declaration: 'fn Own[TcpStream].close!(self: Self) -> Res[Unit, NetError]'
+    own_summary: io
+    callbacks: {}
+  std::time:
+  - declaration: fn now!() -> Instant
+    own_summary: nondet
+    callbacks: {}
+  - declaration: 'fn sleep!(d: Duration) -> Unit'
+    own_summary: nondet
+    callbacks: {}
+  std::tensor:
+  - declaration: 'fn Tensor[T].with_names!(self: &mut Self, map: NameOverlay) -> Res[Unit, AxisError]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn Tensor[T].rename!(self: &mut Self, map: Map[AxisName, AxisName]) -> Res[Unit, AxisError]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'fn rand![f32](dims: Nat...) -> Tensor[f32]'
+    own_summary: nondet
+    callbacks: {}
+  std::tensor::index:
+  - declaration: 'overload fn set_at![T]( x: &mut Tensor[T], spec: IndexSpec, values: Tensor[T], mode: ScatterMode = ScatterMode::Assign, named profile: DeterminismProfile = DeterminismProfile::Default ) -> Res[Unit, Union[IndexError, ShapeError, DTypeError, DeterminismError, NumericError]]'
+    own_summary: state-localizable
+    callbacks: {}
+  - declaration: 'overload fn set_at![T]( x: &mut Tensor[T], spec: IndexSpec, values: TensorView[T], mode: ScatterMode = ScatterMode::Assign, named profile: DeterminismProfile = DeterminismProfile::Default ) -> Res[Unit, Union[IndexError, ShapeError, DTypeError, DeterminismError, NumericError]]'
+    own_summary: state-localizable
+    callbacks: {}
+  std::tensor::map_axis:
+  - declaration: 'transform map_axis( f: callback[pure], in_axes: InAxis | Vec[InAxis], out_axis: AxisIndex = axis(0), out_name: Opt[AxisName] = None ) -> callback[pure]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  std::tensor::grad:
+  - declaration: 'transform grad( f: callback[pure], argnum: Nat = 0 ) -> callback[pure]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  - declaration: 'transform value_and_grad( f: callback[pure], argnum: Nat = 0 ) -> callback[pure]'
+    own_summary: pure
+    callbacks:
+      f: pure
+  std::concurrency:
+  - declaration: 'fn spawn![T](f: callback[task-thunk]() -> T) -> Task[T]'
+    own_summary: state-nonlocal-nondet
+    callbacks:
+      f: task-thunk
+  - declaration: 'fn join![T](t: &Task[T]) -> Res[T, JoinError]'
+    own_summary: state-nonlocal-nondet
+    callbacks: {}
+  - declaration: 'fn Seq[T].par_map![U](self: Seq[T], f: callback[effectful](T) -> U, workers: PositiveNat) -> Seq[U]'
+    own_summary: nondet
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[T].par_traverse_res![U,E](self: Seq[T], f: callback[effectful](T) -> Res[U,E], workers: PositiveNat) -> Res[Seq[U],E]'
+    own_summary: nondet
+    callbacks:
+      f: effectful
+  - declaration: 'fn Seq[T].par_traverse_opt![U](self: Seq[T], f: callback[effectful](T) -> Opt[U], workers: PositiveNat) -> Opt[Seq[U]]'
+    own_summary: nondet
+    callbacks:
+      f: effectful
+  std::test:
+  - declaration: 'fn emit!(s: Str) -> Unit'
+    own_summary: state-nonlocal
+    callbacks: {}
+  - declaration: 'fn abort!(code: Str, message: Str) -> Never'
+    own_summary: unknown
+    callbacks: {}
+aliases:
+- module: std::prelude
+  name: concat
+  target: std::str::concat
+- module: std::prelude
+  name: format
+  target: std::str::format

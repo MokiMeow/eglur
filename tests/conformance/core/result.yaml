@@ -1,0 +1,587 @@
+tests:
+- id: RES-map-transforms-ok-and-preserves-err
+  category: result_direct
+  title: map transforms Ok and preserves Err
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let ok0: Res[i64, Str] = Ok(2)
+      let err0: Res[i64, Str] = Err("boom")
+      let mapped_ok = ok0.map { |x| wrapping_add(x, 3) }
+      let mapped_err = err0.map { |x| wrapping_add(x, 3) }
+      let ok = (mapped_ok.is_ok()
+        && mapped_ok.ok().unwrap_or(0) == 5
+        && mapped_err.is_err()
+        && mapped_err.err().unwrap_or("x") == "boom")
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RES-map-err-transforms-err-and-preserves-ok
+  category: result_direct
+  title: map_err transforms Err and preserves Ok
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let err0: Res[i64, Str] = Err("boom")
+      let ok0: Res[i64, Str] = Ok(4)
+      let mapped_err = err0.map_err { |e| concat([e, "!"]) }
+      let mapped_ok = ok0.map_err { |e| concat([e, "!"]) }
+      let ok = mapped_err.err().unwrap_or("x") == "boom!" && mapped_ok.ok().unwrap_or(0) == 4
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RES-or-else-and-unwrap-family-cover-ok-and-err
+  category: result_direct
+  title: or_else and unwrap family cover Ok and Err
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let err0: Res[i64, Str] = Err("missing")
+      let recovered = err0.or_else { |_e| Ok(9) }
+      let ok0: Res[i64, Str] = Ok(3)
+      let kept = ok0.or_else { |_e| Ok(99) }
+
+      let ok1: Res[i64, Str] = Ok(4)
+      let err1: Res[i64, Str] = Err("fallback")
+      let a = ok1.unwrap_or(0)
+      let b = err1.unwrap_or(8)
+
+      let ok2: Res[i64, Str] = Ok(5)
+      let err2: Res[i64, Str] = Err("fallback")
+      let c = ok2.unwrap_or_else { |_e| 0 }
+      let d = err2.unwrap_or_else { |_e| 11 }
+
+      let ok_recovered = recovered.ok().unwrap_or(0) == 9
+      let ok_kept = kept.ok().unwrap_or(0) == 3
+      let ok_unwrap = a == 4 && b == 8 && c == 5 && d == 11
+      let ok = ok_recovered && ok_kept && ok_unwrap
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RES-ok-and-err-project-to-opt
+  category: result_direct
+  title: ok and err project to Opt
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let ok0: Res[i64, Str] = Ok(7)
+      let err0: Res[i64, Str] = Err("no")
+      let ok_opt = ok0.ok()
+      let err_opt = err0.err()
+      let ok = ok_opt.unwrap_or(0) == 7 && err_opt.unwrap_or("x") == "no"
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RES-and-then-chains-ok-and-short-circuits-err
+  category: result_opt
+  title: and_then chains Ok and short-circuits Err
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let ok_res = Ok(2).and_then { |x| Ok(wrapping_add(x, 3)) }
+      let err_res: Res[i64, Str] = Err("boom").and_then { |x| Ok(wrapping_add(x, 3)) }
+      let ok = ok_res.is_ok() && (ok_res.ok().unwrap_or(0) == 5) && err_res.is_err() && (err_res.err().unwrap_or("x") == "boom")
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: RES-outside-result-block-is-forbidden
+  category: result_opt
+  title: '? outside result block is forbidden'
+  code: |
+    fn f() -> Res[i64, Str] = Ok(1)
+
+    fn invalid() -> Res[i64, Str] {
+      let x = f()?
+      yield Ok(x)
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: Q_OUTSIDE_RESULT
+      message_contains:
+      - '?'
+      - result
+      data_keys: []
+- id: RES-res-unwraps-ok
+  category: result_opt
+  title: Res ? unwraps Ok
+  code: |
+    fn f() -> Res[i64, Str] = Ok(7)
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = f()?
+        yield Ok(to_str(wrapping_add(x, 1)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"8"'
+- id: RES-res-propagates-err
+  category: result_opt
+  title: Res ? propagates Err
+  code: |
+    fn f() -> Res[i64, Str] = Err("boom")
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = f()?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"boom"'
+- id: RES-error-union-allows-question-mark-from-member-errors
+  category: result_opt
+  title: error union allows question-mark propagation from member errors
+  code: |
+    import std::json::{parse_json, JsonError}
+    import std::parse::{parse_i64, ParseError}
+
+    fn main!() -> Res[Str, Union[ParseError, JsonError]] =
+      result {
+        let n = parse_i64("41")?
+        _ = parse_json("{\"ok\":true}")?
+        yield Ok(to_str(wrapping_add(n, 1)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"42"'
+- id: RES-error-union-preserves-propagated-member-err-value
+  category: result_opt
+  title: error union preserves propagated member Err value
+  code: |
+    import std::json::JsonError
+    import std::parse::{parse_i64, ParseError}
+
+    fn main!() -> Res[Str, Union[JsonError, ParseError]] =
+      result {
+        _ = parse_i64("not-an-int")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError
+- id: RES-error-union-normalizes-duplicate-member-errors
+  category: result_opt
+  title: error union normalizes duplicate member errors
+  code: |
+    import std::parse::{parse_i64, ParseError}
+
+    fn main!() -> Res[Str, Union[ParseError, ParseError]] =
+      result {
+        _ = parse_i64("not-an-int")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError
+- id: RES-error-union-err-constructor-accepts-member-payload
+  category: result_opt
+  title: error union Err constructor accepts member payload
+  code: |
+    import std::parse::ParseError
+
+    fn main!() -> Res[Str, Str] {
+      let e: Res[i64, Union[Str, ParseError]] = Err("boom")
+      yield Ok(to_str(e.is_err()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: RES-error-union-err-constructor-rejects-non-member-payload
+  category: result_opt
+  title: error union Err constructor rejects non-member payload
+  code: |
+    import std::parse::ParseError
+
+    fn main!() -> Res[Str, Str] {
+      let e: Res[i64, Union[Str, ParseError]] = Err(1)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - parameter
+      - expected_type
+      data_equals:
+        reason: parameter_type
+- id: RES-question-mark-error-outside-declared-union-is-rejected
+  category: result_opt
+  title: question-mark error outside declared union is rejected
+  code: |
+    import std::json::JsonError
+    import std::parse::parse_i64
+
+    fn main!() -> Res[Str, JsonError] =
+      result {
+        _ = parse_i64("41")?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: RETURN_TYPE_MISMATCH
+      message_contains:
+      - return
+      - type
+      - mismatch
+      data_keys:
+      - expected_type
+      - actual_type
+- id: RES-opt-unwraps-some
+  category: result_opt
+  title: Opt ? unwraps Some
+  code: |
+    fn f() -> Opt[i64] = Some(2)
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let o = result {
+          let x = f()?
+          yield Some(wrapping_add(x, 3))
+        }
+        let y = o.ok_or("none")?
+        yield Ok(to_str(y))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"5"'
+- id: RES-opt-propagates-none
+  category: result_opt
+  title: Opt ? propagates None
+  code: |
+    fn f() -> Opt[i64] = None
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let o = result {
+          _ = f()?
+          yield Some(99)
+        }
+        _ = o.ok_or("none")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"none"'
+- id: RES-mixing-res-and-opt-in-one-result-block-is-forbidden
+  category: result_opt
+  title: Mixing Res-? and Opt-? in one result block is forbidden
+  code: |
+    fn a() -> Res[i64, Str] = Ok(1)
+    fn b() -> Opt[i64] = Some(2)
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = a()?
+        let y = b()?
+        yield Ok(to_str(wrapping_add(x, y)))
+      }
+  expect:
+    compile_error:
+      code: RESULT_BLOCK_MIXED_KINDS
+      message_contains:
+      - Res
+      - Opt
+      - mixed
+      data_keys: []
+- id: RES-mix-allowed-with-explicit-conversion-opt-res
+  category: result_opt
+  title: Mix allowed with explicit conversion opt->res
+  code: |
+    fn a() -> Res[i64, Str] = Ok(1)
+    fn b() -> Opt[i64] = Some(2)
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = a()?
+        let y = b().ok_or("none")?
+        yield Ok(to_str(wrapping_add(x, y)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: RES-result-block-requires-explicit-yield
+  category: result_opt
+  title: result block requires explicit yield
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = Ok(1)?
+        to_str(wrapping_add(x, 1))
+      }
+  expect:
+    compile_error:
+      code: RESULT_MISSING_YIELD
+      message_contains:
+      - yield
+      data_keys: []
+- id: RES-result-block-without-question-mark-uses-expected-res-context
+  category: result_opt
+  title: result block without question mark uses expected Res context
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: RES-result-block-without-question-mark-uses-expected-opt-context
+  category: result_opt
+  title: result block without question mark uses expected Opt context
+  code: |
+    fn maybe() -> Opt[i64] =
+      result {
+        yield Some(7)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(maybe().unwrap_or(0)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: RES-result-block-final-yield-does-not-auto-wrap-payload
+  category: result_opt
+  title: result block final yield does not auto-wrap payload
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        yield "x"
+      }
+  expect:
+    compile_error:
+      code: RETURN_TYPE_MISMATCH
+      message_contains:
+      - return
+      - type
+      - mismatch
+      data_keys:
+      - expected_type
+      - actual_type
+- id: RES-result-block-without-question-mark-requires-expected-context
+  category: result_opt
+  title: result block without question mark requires expected context
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = result {
+        yield None
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: BINDING_TYPE_UNDETERMINED
+      message_contains:
+      - binding
+      - type
+      - initializer
+      data_keys: []
+- id: RES-result-block-final-yield-family-must-match-question-mark-kind
+  category: result_opt
+  title: result block final yield family must match question-mark kind
+  code: |
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = Ok("x")?
+        yield Some(x)
+      }
+  expect:
+    compile_error:
+      code: RETURN_TYPE_MISMATCH
+      message_contains:
+      - return
+      - type
+      - mismatch
+      data_keys:
+      - expected_type
+      - actual_type
+- id: RES-mixing-remains-forbidden-even-when-res-and-opt-appear-in-different-if-branches
+  category: result_opt
+  title: mixing remains forbidden even when Res and Opt appear in different if branches
+  code: |
+    fn a() -> Res[i64, Str] = Ok(1)
+    fn b() -> Opt[i64] = Some(2)
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let y = if true { yield a()? } else { yield b()? }
+        yield Ok(to_str(y))
+      }
+  expect:
+    compile_error:
+      code: RESULT_BLOCK_MIXED_KINDS
+      message_contains:
+      - Res
+      - Opt
+      - mixed
+      data_keys: []
+- id: RES-mixing-remains-forbidden-even-when-res-and-opt-appear-in-different-match-arms
+  category: result_opt
+  title: mixing remains forbidden even when Res and Opt appear in different match arms
+  code: |
+    fn a() -> Res[i64, Str] = Ok(1)
+    fn b() -> Opt[i64] = Some(2)
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = Some(0)
+        let y = match x {
+          Some(_) => a()?,
+          None => b()?,
+        }
+        yield Ok(to_str(y))
+      }
+  expect:
+    compile_error:
+      code: RESULT_BLOCK_MIXED_KINDS
+      message_contains:
+      - Res
+      - Opt
+      - mixed
+      data_keys: []
+- id: RES-tap-ok-fires-only-on-ok-and-preserves-original-res
+  category: result_opt
+  title: tap_ok! fires only on Ok and preserves original Res
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let after: Res[i64, Str] = Ok(7)
+          .tap_ok! { |_| emit!("ok") }
+          .tap_err! { |_| emit!("err") }
+
+      let expected: Res[i64, Str] = Ok(7)
+      yield Ok(to_str(after == expected))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+    side_effects:
+    - ok
+- id: RES-tap-err-fires-only-on-err-and-preserves-original-res
+  category: result_opt
+  title: tap_err! fires only on Err and preserves original Res
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let after: Res[i64, Str] = Err("boom")
+          .tap_ok! { |_| emit!("ok") }
+          .tap_err! { |_| emit!("err") }
+
+      let expected: Res[i64, Str] = Err("boom")
+      yield Ok(to_str(after == expected))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+    side_effects:
+    - err
+- id: RES-never-ok-payload-question-mark-has-no-success-continuation
+  category: result_opt
+  title: Res Never E question mark can only propagate Err
+  code: |
+    fn fail() -> Res[Never, Str] = Err("boom")
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = fail()?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"boom"'
+- id: RES-never-error-payload-question-mark-has-no-err-edge
+  category: result_opt
+  title: Res T Never question mark follows only the Ok continuation
+  code: |
+    fn widen(value: Res[i64, Never]) -> Res[i64, Str] =
+      result {
+        let inner = value?
+        yield Ok(inner)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      let widened = widen(Ok(7))
+      yield Ok(to_str(widened.ok().unwrap_or(0)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: RES-never-expression-does-not-waive-explicit-yield
+  category: result_opt
+  title: Never expression does not waive result block explicit yield
+  code: |
+    import std::test::abort!
+
+    fn invalid!() -> Res[i64, Str] = result {
+      abort!("RUNTIME_ABORT", "not executed")
+    }
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    compile_error:
+      code: RESULT_MISSING_YIELD
+      message_contains:
+      - yield
+      data_keys: []
+- id: RES-never-final-yield-does-not-infer-result-family
+  category: result_opt
+  title: Never final yield does not infer a missing result family
+  code: |
+    import std::test::abort!
+
+    fn main!() -> Res[Str, Str] {
+      let unresolved = result {
+        yield abort!("RUNTIME_ABORT", "not executed")
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: BINDING_TYPE_UNDETERMINED
+      message_contains:
+      - binding
+      - type
+      - initializer
+      data_keys: []

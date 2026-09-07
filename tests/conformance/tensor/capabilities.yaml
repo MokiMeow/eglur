@@ -1,0 +1,244 @@
+# Suite: tensor/capabilities.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Diagnostics are matched by structured fields.
+
+tests:
+- id: TCP-readabletensor-is-prelude-visible-and-preserves-associated-element-type
+  category: tensor_capability
+  title: ReadableTensor is prelude-visible and preserves associated element type
+  code: |
+    import std::tensor::{IndexError, ones}
+
+    fn scalar[C: ReadableTensor](x: C) -> Res[C::Elem, IndexError] = x.item()
+
+    fn main!() -> Res[Str, IndexError] =
+      result {
+        let x = ones[i64]()
+        let value: i64 = scalar(x)?
+        yield Ok(to_str(value))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+
+- id: TCP-tensorview-implements-readable-queries-including-item
+  category: tensor_capability
+  title: TensorView implements readable queries including item
+  code: |
+    import std::tensor::{AxisError, IndexError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, IndexError, TransformError]] =
+      result {
+        let view = ones[f32]().then(view{ -> })?
+        let value: f32 = view.item()?
+        _ = view.device()
+        let ok = ((view.rank() == 0)
+          && (view.shape().len() == 0)
+          && (view.dtype().to_str() == "f32")
+          && (view.names().len() == 0)
+          && view.axis_of('missing).is_err()
+          && (value == 1.0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCP-affinetensor-supports-explicit-multiple-capability-bounds
+  category: tensor_capability
+  title: AffineTensor supports explicit multiple capability bounds
+  code: |
+    import std::tensor::{AffineTensor, TransformError, ones}
+
+    fn rank_affine[C: ReadableTensor + AffineTensor](x: C) -> Nat = x.rank()
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let owned = ones[f32](2,3)
+        let view = ones[f32](2,3).then(view{ row col -> row col })?
+        let ok = (rank_affine(owned) == 2) && (rank_affine(view) == 2)
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCP-stdlib-tensor-apis-accept-explicit-capability-generic-parameters
+  category: tensor_capability
+  title: stdlib tensor APIs accept explicit capability-generic source parameters
+  code: |
+    import std::tensor::{AffineTensor, AxisError, DTypeError, Tensor, TensorView, TransformError, ones}
+    import std::tensor::prim::{exp, unsqueeze}
+
+    fn evaluate[C: ReadableTensor](x: C) -> Res[Tensor[C::Elem], DTypeError] =
+      exp(x)
+
+    fn prepend_axis[C: ReadableTensor + AffineTensor](
+      x: C
+    ) -> Res[TensorView[C::Elem], AxisError] =
+      unsqueeze(x, #0)
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, TransformError]] =
+      result {
+        let owned = ones[f32](2,3)
+        let view = ones[f32](2,3).then(view{ row col -> row col })?
+        let evaluated_owned = evaluate(owned)?
+        let evaluated_view = evaluate(view)?
+        let moved_owned = prepend_axis(owned)?
+        let moved_view = prepend_axis(view)?
+        let ok = ((to_str(evaluated_owned.shape()) == "[2,3]")
+          && (to_str(evaluated_view.shape()) == "[2,3]")
+          && (to_str(moved_owned.shape()) == "[1,2,3]")
+          && (to_str(moved_view.shape()) == "[1,2,3]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCP-affinetensor-is-not-prelude-visible
+  category: tensor_capability
+  title: AffineTensor is not prelude-visible
+  code: |
+    import std::prelude::AffineTensor
+    fn main!() -> Unit = ()
+  expect:
+    compile_error:
+      code: IMPORT_NOT_FOUND
+      message_contains:
+      - import
+      - not found
+      data_keys: []
+
+- id: TCP-foreign-package-cannot-implement-readabletensor
+  category: tensor_capability
+  title: Foreign package cannot implement ReadableTensor
+  code: |
+    import std::tensor::ReadableTensor
+
+    struct Local {}
+
+    impl ReadableTensor for Local {
+      type Elem = f32
+    }
+
+    fn main!() -> Unit = ()
+  expect:
+    compile_error:
+      code: CLOSED_TRAIT_IMPL_FORBIDDEN
+      message_contains:
+      - closed
+      - trait
+      - impl
+      - package
+      data_keys: []
+
+- id: TCP-foreign-package-cannot-implement-affinetensor
+  category: tensor_capability
+  title: Foreign package cannot implement AffineTensor
+  code: |
+    import std::tensor::AffineTensor
+
+    struct Local {}
+    impl AffineTensor for Local {}
+
+    fn main!() -> Unit = ()
+  expect:
+    compile_error:
+      code: CLOSED_TRAIT_IMPL_FORBIDDEN
+      message_contains:
+      - closed
+      - trait
+      - impl
+      - package
+      data_keys: []
+
+- id: TCP-readabletensor-qualified-method-is-the-canonical-callable-reference
+  category: tensor_capability
+  title: ReadableTensor qualified method is the canonical callable reference
+  code: |
+    import std::tensor::{Tensor, ones}
+
+    fn invoke_rank(x: &Tensor[f32], ranker: Fn(&Tensor[f32]) -> Nat) -> Nat =
+      ranker(x)
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[f32](2,3)
+      let direct = ReadableTensor.rank(&x)
+      let referenced = invoke_rank(&x, ReadableTensor.rank)
+      yield Ok(to_str(direct == referenced && direct == 2))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCP-concrete-owner-does-not-own-readable-query-callable
+  category: tensor_capability
+  title: Concrete owner does not own readable query callable
+  code: |
+    import std::tensor::Tensor
+
+    fn main!() -> Unit {
+      let _ranker: Fn(&Tensor[f32]) -> Nat = Tensor.rank
+    }
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+
+- id: TCP-tensorview-item-rejects-non-rank-0-view
+  category: tensor_capability
+  title: TensorView item rejects non-rank-0 view
+  code: |
+    import std::tensor::{IndexError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[IndexError, TransformError]] =
+      result {
+        let view = ones[f32](2).then(view{ item -> item })?
+        _ = view.item()?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: IndexError
+    value_diagnostics:
+    - code: ITEM_REQUIRES_RANK0
+      message_contains:
+      - item
+      - rank
+      - '0'
+      data_keys:
+      - rank
+
+- id: TCP-readabletensor-does-not-imply-affinetensor
+  category: tensor_capability
+  title: ReadableTensor alone does not authorize affine view construction
+  code: |
+    import std::tensor::{AffineTensor, AxisError}
+    import std::tensor::prim::unsqueeze
+
+    fn move_readable[C: ReadableTensor](x: C) -> Res[Unit, AxisError] =
+      result {
+        _ = unsqueeze(x, #0)?
+        yield Ok(())
+      }
+
+    fn main!() -> Unit = ()
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type

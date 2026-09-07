@@ -1,0 +1,117 @@
+# Suite: tensor/determinism.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Numeric comparisons use the declared exact or approximate mode.
+# - Implementation certification repeats the returned f32 observation from the
+#   exact compiled artifact under one fixed activation/plan and compares its
+#   payload bits before applying cross-identity numeric tolerance.
+# - Result element 1 is +0.0 after strict success and 2^-30 after strict Err.
+#   Future interpreted evidence compares that marker with the active
+#   strict_unavailable_path precondition. The conditional suite repeats this
+#   exact operation and validates the unavailable error's code and data.
+
+tests:
+- id: TDM-default-schedule-sensitive-scatter-is-repeatable-and-strict-success-matches-baseline
+  category: tensor_determinism
+  title: default schedule-sensitive scatter is repeatable and strict success matches baseline
+  code: |
+    import std::tensor::{CastError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, Tensor, i32, ones, zeros}
+    import std::tensor::DeterminismProfile
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{add, bitcast, div, mul}
+
+    fn schedule_sensitive_values() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let one = ones[f32]()
+        let two = add(one, one)?
+        let four = mul(two, two)?
+        let sixteen = mul(four, four)?
+        let two_fifty_six = mul(sixteen, sixteen)?
+        let sixty_five_thousand_five_hundred_thirty_six = mul(two_fifty_six, two_fifty_six)?
+        let two_to_twenty_four = mul(sixty_five_thousand_five_hundred_thirty_six, two_fifty_six)?
+        let half_ulp_at_one = div(one, two_to_twenty_four)?
+        yield set_at(
+          ones[f32](3),
+          [IndexItem::Take([1,2])].to_vec(),
+          half_ulp_at_one,
+          mode=ScatterMode::Assign
+        )
+      }
+
+    fn strict_status(
+      outcome: Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]]
+    ) -> Res[i32, Union[CastError, IndexError, ShapeError]] =
+      result {
+        yield match outcome {
+          Ok(output) => {
+            let shape_matches = (output.rank() == 1) && (to_str(output.shape()) == "[1]")
+            let bits = get_at(bitcast(output, i32)?, [IndexItem::At(0)].to_vec())?.item()?
+            let status = if shape_matches && (bits == 1065353216) { yield 0 } else { yield 1 }
+            yield Ok(status)
+          }
+          Err(_) => Ok(2)
+        }
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[CastError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let values = schedule_sensitive_values()?
+        let spec = [IndexItem::Take([0,0,0])].to_vec()
+        let strict_outcome = set_at(
+          zeros[f32](1),
+          spec,
+          values,
+          mode=ScatterMode::Add,
+          profile=DeterminismProfile::Strict
+        )
+        let status = strict_status(strict_outcome)?
+        let default_output = set_at(
+          zeros[f32](1),
+          spec,
+          values,
+          mode=ScatterMode::Add,
+          profile=DeterminismProfile::Default
+        )?
+
+        let default_value = get_at(default_output, [IndexItem::At(0)].to_vec())?
+        let reported_value = if status == 1 {
+          yield add(ones[f32](), ones[f32]())?
+        } else {
+          yield default_value
+        }
+
+        let two = add(ones[f32](), ones[f32]())?
+        let four = mul(two, two)?
+        let sixteen = mul(four, four)?
+        let sixty_four = mul(four, sixteen)?
+        let half_ulp_at_one = get_at(values, [IndexItem::At(1)].to_vec())?
+        let unavailable_marker = div(half_ulp_at_one, sixty_four)?
+        let strict_marker = if status == 2 {
+          yield unavailable_marker
+        } else {
+          yield zeros[f32]()
+        }
+
+        let result_tensor = set_at(
+          zeros[f32](2),
+          [IndexItem::At(0)].to_vec(),
+          reported_value,
+          mode=ScatterMode::Assign
+        )?
+        yield set_at(
+          result_tensor,
+          [IndexItem::At(1)].to_vec(),
+          strict_marker,
+          mode=ScatterMode::Assign
+        )
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2]
+        expected: [1.0, 0.0]
+        mode: approx
+        rtol: 0.000001
+        atol: 0.00000001

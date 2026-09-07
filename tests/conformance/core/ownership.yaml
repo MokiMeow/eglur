@@ -1,0 +1,1746 @@
+tests:
+- id: OWN-shadowing-does-not-discharge-hidden-root
+  category: ownership
+  title: nested spelling shadow does not discharge a hidden ownership root
+  code: |
+    fn consume(root: Own[i64]) -> Unit {
+      {
+        let root = 1
+        _ = root
+      }
+      drop_own move root
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let value = 1
+      let root = own value
+      consume(move root)
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-move-operator-requires-own-operand
+  category: ownership
+  title: move operator requires Own operand
+  code: |
+    fn bad_move(x: i64) -> i64 {
+      let y = move x
+      yield y
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: MOVE_REQUIRES_OWN
+      message_contains:
+      - move
+      - Own
+      - operand
+      data_keys: []
+- id: OWN-own-operator-rejects-own-operand
+  category: ownership
+  title: own operator rejects Own operand
+  code: |
+    fn bad_own(x: Own[i64]) -> i64 {
+      let y = own x
+      drop_own move y
+      yield 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWN_REQUIRES_NON_OWN
+      message_contains:
+      - own
+      - Own
+      - non-Own
+      data_keys: []
+- id: OWN-drop-own-requires-explicit-move-operand-form
+  category: ownership
+  title: drop_own requires explicit move operand form
+  code: |
+    fn bad_drop(x: Own[i64]) -> i64 {
+      drop_own x
+      yield 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DROP_OWN_REQUIRES_MOVE
+      message_contains:
+      - drop_own
+      - move
+      - required
+      data_keys: []
+- id: OWN-drop-own-cannot-discharge-external-resource-root
+  category: ownership
+  title: drop_own cannot discharge external resource root
+  code: |
+    import std::io::ByteReader
+
+    fn bad_drop(reader: Own[ByteReader]) -> Unit {
+      drop_own move reader
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: RESOURCE_DROP_FORBIDDEN
+      message_contains:
+      - resource
+      - drop_own
+      - close!
+      data_keys: []
+- id: OWN-ownership-roots-must-discharge-exactly-once-on-every-typed-exit-path
+  category: ownership
+  title: function root must discharge exactly once on every function exit path
+  code: |
+    fn bad_paths(x: Own[i64], keep: Bool) -> i64 {
+      if keep {
+        drop_own move x
+        return 1
+      } else {
+        return 0
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+- id: OWN-balanced-ownership-discharge-across-return-paths-is-accepted
+  category: ownership
+  title: balanced ownership discharge across return paths is accepted
+  code: |
+    fn good_paths(x: Own[i64], keep: Bool) -> i64 {
+      if keep {
+        drop_own move x
+        return 1
+      } else {
+        drop_own move x
+        return 0
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-bang-functions-must-balance-own-parameters-on-every-typed-exit-path
+  category: ownership
+  title: bang function root must discharge on every function exit path
+  code: |
+    fn bad_bang_paths!(x: Own[i64], keep: Bool) -> i64 {
+      if keep {
+        drop_own move x
+        return 1
+      } else {
+        return 0
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+- id: OWN-local-root-introduced-by-own-must-be-discharged
+  category: ownership
+  title: local root introduced by own must be discharged
+  code: |
+    fn bad_local_own_root() -> i64 {
+      let n = 1
+      let y = own n
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+- id: OWN-local-root-receiving-move-must-be-discharged
+  category: ownership
+  title: local root receiving move must be discharged
+  code: |
+    fn bad_move_destination_root(x: Own[i64]) -> i64 {
+      let y = move x
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+- id: OWN-conditional-root-match-move-establishes-direct-root-in-some-arm
+  category: ownership
+  title: conditional root match move establishes direct root in Some arm
+  code: |
+    fn consume_opt(v: Opt[Own[i64]]) -> i64 {
+      match move v {
+        Some(x) => {
+          drop_own move x
+          return 1
+        }
+        None => {
+          return 0
+        }
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-move-free-match-arms-still-participate-in-global-ownership-discharge
+  category: ownership
+  title: move-free match arms still participate in function-region discharge
+  code: |
+    fn bad_match_paths(x: Own[i64], o: Opt[i64]) -> i64 {
+      match o {
+        Some(_v) => {
+          drop_own move x
+          return 1
+        }
+        None => {
+          return 0
+        }
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+- id: OWN-guarded-match-contributes-guard-true-and-guard-false-ownership-paths
+  category: ownership
+  title: guarded match contributes guard-true and guard-false ownership paths
+  code: |
+    fn bad_guard_paths(x: Own[i64], b: Bool) -> i64 {
+      match b {
+        true if true => {
+          drop_own move x
+          return 1
+        }
+        _ => {
+          return 0
+        }
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+- id: OWN-repeated-consuming-move-on-same-root-reports-ownership-double-move
+  category: ownership
+  title: repeated consuming move on same root reports ownership double move
+  code: |
+    fn bad_double_move(x: Own[i64]) -> i64 {
+      let y = move x
+      drop_own move y
+      let z = move x // @primary repeated-move
+      drop_own move z
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DOUBLE_MOVE
+      message_contains:
+      - ownership
+      - move
+      - already consumed
+      data_keys: []
+      primary_span:
+        marker: repeated-move
+- id: OWN-earliest-same-class-error-is-primary-within-one-function
+  category: ownership
+  title: earliest same-class ownership error is primary within one function
+  code: |
+    fn bad_two_double_moves(first: Own[i64], second: Own[i64]) -> i64 {
+      let first_moved = move first
+      drop_own move first_moved
+      let first_again = move first // @primary earliest-double-move
+      drop_own move first_again
+
+      let second_moved = move second
+      drop_own move second_moved
+      let second_again = move second
+      drop_own move second_again
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DOUBLE_MOVE
+      message_contains:
+      - ownership
+      - move
+      - already consumed
+      data_keys: []
+      primary_span:
+        marker: earliest-double-move
+- id: OWN-borrow-use-after-discharge-reports-ownership-use-after-discharge
+  category: ownership
+  title: borrow/use after discharge reports ownership use-after-discharge
+  code: |
+    fn peek(_x: &Own[i64]) -> i64 {
+      return 1
+    }
+
+    fn bad_use_after_discharge(x: Own[i64]) -> i64 {
+      let y = move x
+      let n = peek(&x)
+      drop_own move y
+      return n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+- id: OWN-derived-reference-use-after-root-move-is-rejected
+  category: ownership
+  title: derived reference use after root move is rejected
+  code: |
+    fn peek(_x: &Own[i64]) -> i64 {
+      return 1
+    }
+
+    fn bad_derived_reference(x: Own[i64]) -> i64 {
+      let r = &x
+      let y = move x
+      let n = peek(r)
+      drop_own move y
+      return n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+- id: OWN-copied-derived-reference-retains-root-provenance
+  category: ownership
+  title: copied derived reference retains root provenance
+  code: |
+    fn peek(_x: &Own[i64]) -> i64 {
+      return 1
+    }
+
+    fn bad_copied_reference(x: Own[i64]) -> i64 {
+      let first = &x
+      let second = first
+      let y = move x
+      let n = peek(second)
+      drop_own move y
+      return n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+- id: OWN-root-may-move-after-derived-reference-last-use
+  category: ownership
+  title: root may move after derived reference last use
+  code: |
+    fn peek(_x: &Own[i64]) -> i64 {
+      return 1
+    }
+
+    fn valid_reference_then_move(x: Own[i64]) -> i64 {
+      let r = &x
+      let n = peek(r)
+      drop_own move x
+      return n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-root-does-not-forward-clone-from-payload
+  category: ownership
+  title: ownership root does not forward Clone from payload
+  code: |
+    fn bad_clone(x: Own[i64]) -> i64 {
+      let _copy = x.clone()
+      drop_own move x
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+- id: OWN-path-sensitive-merge-rejects-maybe-consumed-ownership-use
+  category: ownership
+  title: path-sensitive merge rejects maybe-consumed ownership use
+  code: |
+    fn peek(_x: &Own[i64]) -> i64 {
+      return 1
+    }
+
+    fn bad_maybe_consumed(x: Own[i64], b: Bool) -> i64 {
+      if b {
+        drop_own move x
+      } else {
+      }
+
+      let n = peek(&x)
+
+      if b {
+        return n
+      } else {
+        drop_own move x
+        return n
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+- id: OWN-counted-loop-merge-rejects-maybe-consumed-ownership-use
+  category: ownership
+  title: counted loop merge rejects maybe-consumed ownership use
+  code: |
+    fn peek(_x: &Own[i64]) -> i64 {
+      return 1
+    }
+
+    fn bad_loop_merge(x: Own[i64]) -> i64 {
+      for i in 0 .. 2 {
+        if i == 0 {
+          drop_own move x
+        } else {
+        }
+      }
+
+      let n = peek(&x)
+      return n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+- id: OWN-named-root-call-transfer-requires-explicit-move
+  category: ownership
+  title: named root call transfer requires explicit move
+  code: |
+    fn take(x: Own[i64]) -> i64 {
+      drop_own move x
+      return 1
+    }
+
+    fn bad_transfer(x: Own[i64]) -> i64 {
+      return take(x)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TRANSFER_REQUIRES_MOVE
+      message_contains:
+      - ownership
+      - transfer
+      - move
+      data_keys: []
+- id: OWN-named-root-local-transfer-requires-explicit-move
+  category: ownership
+  title: named root local transfer requires explicit move
+  code: |
+    fn bad_local_transfer(x: Own[i64]) -> i64 {
+      let y = x
+      drop_own move x
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TRANSFER_REQUIRES_MOVE
+      message_contains:
+      - ownership
+      - transfer
+      - move
+      data_keys: []
+- id: OWN-named-root-return-requires-explicit-move
+  category: ownership
+  title: named root return requires explicit move
+  code: |
+    fn bad_return(x: Own[i64]) -> Own[i64] {
+      return x
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TRANSFER_REQUIRES_MOVE
+      message_contains:
+      - ownership
+      - transfer
+      - move
+      data_keys: []
+- id: OWN-named-root-carrier-construction-requires-explicit-move
+  category: ownership
+  title: named root carrier construction requires explicit move
+  code: |
+    fn bad_carrier(x: Own[i64]) -> Opt[Own[i64]] {
+      return Some(x)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TRANSFER_REQUIRES_MOVE
+      message_contains:
+      - ownership
+      - transfer
+      - move
+      data_keys: []
+- id: OWN-named-root-may-transfer-into-carrier-with-move
+  category: ownership
+  title: named root may transfer into carrier with move
+  code: |
+    fn wrap(x: Own[i64]) -> Opt[Own[i64]] {
+      return Some(move x)
+    }
+
+    fn consume(x: Own[i64]) -> i64 {
+      let carrier = wrap(move x)
+      drop_own move carrier
+      return 1
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-fresh-root-temporary-may-transfer-without-move
+  category: ownership
+  title: fresh root temporary may transfer without move
+  code: |
+    fn make(n: i64) -> Own[i64] {
+      return own n
+    }
+
+    fn take(x: Own[i64]) -> i64 {
+      drop_own move x
+      return 1
+    }
+
+    fn use_fresh(n: i64) -> i64 {
+      return take(make(n))
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-named-root-call-and-return-transfer-with-move-is-accepted
+  category: ownership
+  title: named root call and return transfer with move is accepted
+  code: |
+    fn pass(x: Own[i64]) -> Own[i64] {
+      return move x
+    }
+
+    fn consume(x: Own[i64]) -> i64 {
+      let y = pass(move x)
+      drop_own move y
+      return 1
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-own-consumes-source-binding
+  category: ownership
+  title: own consumes its ownership-free source binding
+  code: |
+    fn bad_source_use(n: i64) -> i64 {
+      let x = own n
+      let copied = n
+      drop_own move x
+      return copied
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_USE_AFTER_DISCHARGE
+      message_contains:
+      - ownership
+      - use
+      - discharged
+      data_keys: []
+- id: OWN-discard-target-cannot-consume-root-even-with-move
+  category: ownership
+  title: discard target cannot consume root even with move
+  code: |
+    fn bad_discard(x: Own[i64]) -> i64 {
+      _ = move x
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DISCARD_FORBIDDEN
+      message_contains:
+      - ownership
+      - discard
+      - forbidden
+      data_keys: []
+- id: OWN-overwriting-root-is-forbidden
+  category: ownership
+  title: overwriting root is forbidden
+  code: |
+    fn bad_overwrite(x: Own[i64], y: Own[i64]) -> i64 {
+      let mut slot = move x
+      slot = move y
+      drop_own move slot
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DISCARD_FORBIDDEN
+      message_contains:
+      - ownership
+      - discard
+      - forbidden
+      data_keys: []
+- id: OWN-unused-fresh-root-expression-is-forbidden
+  category: ownership
+  title: unused fresh root expression is forbidden
+  code: |
+    fn make(n: i64) -> Own[i64] {
+      return own n
+    }
+
+    fn bad_unused(n: i64) -> i64 {
+      make(n)
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_DISCARD_FORBIDDEN
+      message_contains:
+      - ownership
+      - discard
+      - forbidden
+      data_keys: []
+- id: OWN-named-conditional-root-question-requires-move
+  category: ownership
+  title: named conditional root question requires move
+  code: |
+    fn bad_question(r: Res[Own[i64], Str]) -> Res[i64, Str] =
+      result {
+        let x = r?
+        drop_own move x
+        yield Ok(1)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TRANSFER_REQUIRES_MOVE
+      message_contains:
+      - ownership
+      - transfer
+      - move
+      data_keys: []
+- id: OWN-moved-conditional-root-question-discharges-both-variants
+  category: ownership
+  title: moved conditional root question discharges both variants
+  code: |
+    fn consume_question(r: Res[Own[i64], Str]) -> Res[i64, Str] =
+      result {
+        let x = (move r)?
+        drop_own move x
+        yield Ok(1)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-unrelated-question-early-exit-must-discharge-live-root
+  category: ownership
+  title: question exit from expression body must discharge function root
+  code: |
+    fn bad_early_exit(x: Own[i64], r: Res[i64, Str]) -> Res[i64, Str] =
+      result {
+        let value = r?
+        drop_own move x
+        yield Ok(value)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+- id: OWN-outer-root-remains-live-across-nested-yield
+  category: ownership
+  title: outer root remains live across nested yield
+  code: |
+    fn retain_outer(x: Own[i64], choose_first: Bool) -> Own[i64] {
+      let selected = if choose_first {
+        yield 1
+      } else {
+        yield 2
+      }
+      _ = selected
+      yield move x
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let value = 7
+      let root = own value
+      let returned = retain_outer(move root, false)
+      drop_own move returned
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-inner-root-must-discharge-at-nested-yield
+  category: ownership
+  title: inner root must discharge at nested yield
+  code: |
+    fn bad_nested_yield(choose_first: Bool) -> i64 {
+      yield if choose_first {
+        let value = 1
+        let root = own value
+        yield 1 // @primary nested-yield
+      } else {
+        yield 2
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+      primary_span:
+        marker: nested-yield
+- id: OWN-inner-root-may-transfer-through-block-yield
+  category: ownership
+  title: inner root may transfer through block yield
+  code: |
+    fn transfer_inner() -> i64 {
+      let yielded: Own[i64] = {
+        let value = 7
+        let inner = own value
+        yield move inner
+      }
+      drop_own move yielded
+      yield 7
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(transfer_inner()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: OWN-outer-root-remains-live-across-inner-result-question-exit
+  category: ownership
+  title: outer root remains live across inner result question exit
+  code: |
+    fn retain_across_result(
+      x: Own[i64],
+      source: Res[i64, Str],
+    ) -> Bool {
+      let nested: Res[i64, Str] = result {
+        let value = source?
+        yield Ok(value)
+      }
+      drop_own move x
+      yield nested.is_err()
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let value = 7
+      let root = own value
+      let source: Res[i64, Str] = Err("stop")
+      yield Ok(to_str(retain_across_result(move root, source)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: OWN-result-region-root-must-discharge-before-question-exit
+  category: ownership
+  title: result region root must discharge before question exit
+  code: |
+    fn bad_result_exit(source: Res[i64, Str]) -> Res[i64, Str] =
+      result {
+        let owned_value = 7
+        let root = own owned_value
+        let value = source? // @primary result-question-exit
+        drop_own move root
+        yield Ok(value)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+      primary_span:
+        marker: result-question-exit
+- id: OWN-outer-root-remains-live-across-inner-checked-fault
+  category: ownership
+  title: outer root remains live across inner checked fault
+  code: |
+    fn retain_across_checked(x: Own[i64], value: i8) -> Bool {
+      let nested: Res[i8, NumericError] = checked {
+        yield value + value
+      }
+      drop_own move x
+      yield nested.is_err()
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let value = 7
+      let root = own value
+      yield Ok(to_str(retain_across_checked(move root, 64)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: OWN-checked-region-root-must-discharge-before-fault-edge
+  category: ownership
+  title: checked region root must discharge before fault edge
+  code: |
+    fn bad_checked_fault(value: i8) -> Res[i8, NumericError] =
+      checked {
+        let owned_value = 7
+        let root = own owned_value
+        let doubled = value + value // @primary checked-fault-edge
+        drop_own move root
+        yield doubled
+      }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+      primary_span:
+        marker: checked-fault-edge
+- id: OWN-return-exits-all-active-obligation-regions
+  category: ownership
+  title: return exits all active obligation regions
+  code: |
+    fn bad_nested_return(outer: Own[i64], stop: Bool) -> Unit {
+      if stop {
+        let value = 1
+        let inner = own value
+        return // @primary nested-return
+      }
+      drop_own move outer
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+      primary_span:
+        marker: nested-return
+- id: OWN-normal-block-completion-exits-local-obligation-region
+  category: ownership
+  title: normal block completion exits local obligation region
+  code: |
+    fn bad_normal_completion(create: Bool) -> Unit {
+      if create {
+        let value = 1
+        let root = own value
+      } // @primary normal-completion
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+      primary_span:
+        marker: normal-completion
+- id: OWN-maybe-consumed-root-is-unbalanced-at-region-exit
+  category: ownership
+  title: maybe consumed root is unbalanced at region exit
+  code: |
+    fn bad_merge_exit(x: Own[i64], consume: Bool) -> Unit {
+      if consume {
+        drop_own move x
+      }
+    } // @primary merged-region-exit
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+      primary_span:
+        marker: merged-region-exit
+- id: OWN-continue-exits-loop-body-obligation-region
+  category: ownership
+  title: continue exits loop body obligation region
+  code: |
+    fn bad_continue() -> Unit {
+      for value in [1] {
+        let root = own value
+        continue // @primary loop-continue
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+      primary_span:
+        marker: loop-continue
+- id: OWN-break-exits-loop-body-obligation-region
+  category: ownership
+  title: break exits loop body obligation region
+  code: |
+    fn bad_break() -> Unit {
+      for value in [1] {
+        let root = own value
+        break // @primary loop-break
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+      primary_span:
+        marker: loop-break
+- id: OWN-outer-root-remains-live-across-loop-control-edges
+  category: ownership
+  title: outer root remains live across loop control edges
+  code: |
+    fn retain_across_continue(x: Own[i64]) -> Unit {
+      for value in [1] {
+        _ = value
+        continue
+      }
+      drop_own move x
+    }
+
+    fn retain_across_break(x: Own[i64]) -> Unit {
+      for value in [1] {
+        _ = value
+        break
+      }
+      drop_own move x
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let first_value = 1
+      let first = own first_value
+      retain_across_continue(move first)
+
+      let second_value = 2
+      let second = own second_value
+      retain_across_break(move second)
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-drop-own-may-explicitly-discard-complete-conditional-root
+  category: ownership
+  title: drop_own may explicitly discard complete conditional root
+  code: |
+    fn discard_result(r: Res[Own[i64], Str]) -> i64 {
+      drop_own move r
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-conditional-root-borrow-query-does-not-transfer
+  category: ownership
+  title: conditional root borrow query does not transfer
+  code: |
+    fn inspect_carrier(r: Opt[Own[i64]]) -> Bool {
+      let present = r.is_some()
+      drop_own move r
+      return present
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-conditional-root-must-be-discharged-on-typed-exit
+  category: ownership
+  title: conditional root must be discharged on typed exit
+  code: |
+    fn bad_conditional_root(_r: Opt[Own[i64]]) -> i64 {
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PATH_UNBALANCED
+      message_contains:
+      - ownership
+      - path
+      - exactly once
+      data_keys: []
+- id: OWN-user-aggregate-field-cannot-store-own-root
+  category: ownership
+  title: user aggregate field cannot store Own root
+  code: |
+    struct Holder {
+      field value: Own[i64]
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-tuple-elements-cannot-store-own-root
+  category: ownership
+  title: tuple elements cannot store Own root
+  code: |
+    fn bad_tuple(x: (Own[i64], i64)) -> i64 {
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-ordinary-generic-cannot-be-instantiated-with-root-type
+  category: ownership
+  title: ordinary generic cannot be instantiated with root type
+  code: |
+    fn id[T](x: T) -> T {
+      return x
+    }
+
+    fn bad_generic(x: Own[i64]) -> i64 {
+      let y = id(move x)
+      drop_own move y
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-explicit-own-wrapper-may-abstract-ownership-free-generic-payload
+  category: ownership
+  title: explicit Own wrapper may abstract ownership-free generic payload
+  code: |
+    fn pass[T](x: Own[T]) -> Own[T] {
+      return move x
+    }
+
+    fn consume(x: Own[i64]) -> i64 {
+      let y = pass(move x)
+      drop_own move y
+      return 1
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-nested-conditional-carrier-is-forbidden
+  category: ownership
+  title: nested conditional carrier is forbidden
+  code: |
+    fn bad_nested(x: Opt[Opt[Own[i64]]]) -> i64 {
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-sequence-elements-cannot-be-ownership-roots
+  category: ownership
+  title: sequence elements cannot be ownership roots
+  code: |
+    fn bad_sequence(xs: Seq[Own[i64]]) -> i64 {
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-res-error-payload-cannot-be-ownership-root
+  category: ownership
+  title: Res error payload cannot be ownership root
+  code: |
+    fn bad_error(r: Res[i64, Own[Str]]) -> i64 {
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-box-payload-cannot-be-ownership-root
+  category: ownership
+  title: Box payload cannot be ownership root
+  code: |
+    fn bad_box(x: Box[Own[i64]]) -> i64 {
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-forbidden-aggregate-position-precedes-recursive-layout-analysis
+  category: ownership
+  title: forbidden aggregate position precedes recursive layout analysis
+  code: |
+    enum Node {
+      Next(Own[Node])
+      End
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-own-requires-consumable-local-or-parameter-binding
+  category: ownership
+  title: own requires consumable local or parameter binding
+  code: |
+    const N: i64 = 1
+
+    fn bad_const_source() -> i64 {
+      let x = own N
+      drop_own move x
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWN_REQUIRES_LOCAL_BINDING
+      message_contains:
+      - own
+      - local binding
+      - required
+      data_keys: []
+- id: OWN-transparent-alias-cannot-hide-root-type
+  category: ownership
+  title: transparent alias cannot hide root type
+  code: |
+    type HiddenRoot = Own[i64]
+
+    fn bad_alias(x: HiddenRoot) -> i64 {
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-callable-types-cannot-carry-ownership-roots
+  category: ownership
+  title: callable types cannot carry ownership roots
+  code: |
+    fn bad_callback(f: Fn(Own[i64]) -> i64) -> i64 {
+      return 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-closure-cannot-capture-ownership-root
+  category: ownership
+  title: closure cannot capture ownership root
+  code: |
+    fn inspect(_x: &Own[i64]) -> i64 {
+      return 1
+    }
+
+    fn run(f: Fn(i64) -> i64) -> i64 {
+      return f(0)
+    }
+
+    fn bad_capture(x: Own[i64]) -> i64 {
+      let n = run { |_ignored| inspect(&x) }
+      drop_own move x
+      return n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-mutable-root-capture-keeps-ownership-diagnostic-primary
+  category: ownership
+  title: mutable root capture keeps ownership diagnostic primary
+  code: |
+    fn inspect(_x: &Own[i64]) -> i64 {
+      return 1
+    }
+
+    fn run(f: Fn(i64) -> i64) -> i64 {
+      return f(0)
+    }
+
+    fn bad_capture(value: i64) -> i64 {
+      let mut root = own value
+      let n = run { |_ignored| inspect(&root) }
+      drop_own move root
+      return n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-derived-root-reference-capture-keeps-ownership-diagnostic-primary
+  category: ownership
+  title: derived root reference capture keeps ownership diagnostic primary
+  code: |
+    fn inspect(_x: &Own[i64]) -> i64 {
+      return 1
+    }
+
+    fn run(f: Fn(i64) -> i64) -> i64 {
+      return f(0)
+    }
+
+    fn bad_capture(x: Own[i64]) -> i64 {
+      let reference: &Own[i64] = &x
+      let n = run { |_ignored| inspect(reference) }
+      drop_own move x
+      return n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-guard-false-preserves-moved-carrier-payload-for-later-arm
+  category: ownership
+  title: guard false preserves moved carrier payload for later arm
+  code: |
+    fn consume_guarded(v: Opt[Own[i64]], first: Bool) -> i64 {
+      match move v {
+        Some(x) if first => {
+          drop_own move x
+          return 1
+        }
+        Some(x) => {
+          drop_own move x
+          return 2
+        }
+        None => {
+          return 0
+        }
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-guard-may-shared-borrow-tentative-root
+  category: ownership
+  title: guard may shared-borrow tentative root
+  code: |
+    fn inspect(_x: &Own[i64]) -> Bool {
+      return false
+    }
+
+    fn consume_guarded(v: Opt[Own[i64]]) -> i64 {
+      match move v {
+        Some(x) if inspect(&x) => {
+          drop_own move x
+          return 1
+        }
+        Some(x) => {
+          drop_own move x
+          return 2
+        }
+        None => {
+          return 0
+        }
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: OWN-guard-cannot-consume-tentative-root
+  category: ownership
+  title: guard cannot consume tentative root
+  code: |
+    fn reject(x: Own[i64]) -> Bool {
+      drop_own move x
+      return false
+    }
+
+    fn bad_guard(v: Opt[Own[i64]]) -> i64 {
+      match move v {
+        Some(x) if reject(move x) => {
+          return 1
+        }
+        Some(x) => {
+          drop_own move x
+          return 2
+        }
+        None => {
+          return 0
+        }
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_GUARD_CONSUME_FORBIDDEN
+      message_contains:
+      - ownership
+      - guard
+      - consume
+      - forbidden
+      data_keys: []
+- id: OWN-associated-type-binding-cannot-hide-own-root
+  category: ownership
+  title: associated type binding cannot hide Own root
+  code: |
+    trait Hidden {
+      type Item
+    }
+
+    struct Carrier {}
+    impl Hidden for Carrier {
+      type Item = Own[i64]
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-reference-bearing-root-payload-fails-ownership-validation-first
+  category: ownership
+  title: reference-bearing root payload fails ownership validation first
+  code: |
+    fn reject(value: Own[&i64]) -> Unit {
+      drop_own move value
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-associated-binding-cannot-use-conditional-ownership-carrier
+  category: ownership
+  title: associated binding cannot use conditional ownership carrier
+  code: |
+    trait Hidden {
+      type Item
+    }
+
+    struct Carrier {}
+    impl Hidden for Carrier {
+      type Item = Opt[Own[i64]]
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: OWN-roots-are-not-equality-comparable
+  category: ownership
+  title: Own roots are not equality-comparable
+  code: |
+    fn same(a: Own[i64], b: Own[i64]) -> Bool {
+      let equal = a == b
+      drop_own move a
+      drop_own move b
+      yield equal
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: COMPARISON_TYPE_MISMATCH
+      message_contains:
+      - comparison
+      - type
+      data_keys:
+      - operation
+      - left_type
+      - right_type
+- id: OWN-never-path-needs-no-root-discharge-edge
+  category: ownership
+  title: ownership root needs no discharge on a no-normal-continuation path
+  code: |
+    import std::test::abort!
+
+    fn consume_or_abort!(root: Own[i64], consume: Bool) -> Unit {
+      if consume {
+        drop_own move root
+      } else {
+        abort!("RUNTIME_ABORT", "not executed")
+      }
+    }
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'

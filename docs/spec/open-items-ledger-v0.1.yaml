@@ -1,0 +1,181 @@
+version: '0.1'
+release_history_root: repository-root
+release: v0.1.0
+status: released
+
+purpose: >-
+  Machine-checkable classification ledger for stable-ID OPEN items listed in
+  docs/spec/open-items/language.md and docs/spec/open-items/stdlib.md.
+
+classification_keys:
+  - baseline_must_close
+  - deferred_nonbaseline
+
+sources:
+  - path: docs/spec/open-items/language.md
+    item_count: 26
+  - path: docs/spec/open-items/stdlib.md
+    item_count: 25
+
+items:
+  - id: LANG-OI-001
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-002
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-003
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-004
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-005
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-006
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-007
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-008
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-009
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-010
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-011
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-012
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-013
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-014
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-015
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-016
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-017
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-018
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-019
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-020
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-021
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-022
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-023
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-024
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-025
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+  - id: LANG-OI-026
+    source_path: docs/spec/open-items/language.md
+    classification: deferred_nonbaseline
+
+  - id: STDLIB-OI-001
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-002
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-003
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-004
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-005
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-006
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-007
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-008
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-009
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-010
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-011
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-012
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-013
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-014
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-015
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-016
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-017
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-018
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-019
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-020
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-021
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-022
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-023
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-024
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+  - id: STDLIB-OI-025
+    source_path: docs/spec/open-items/stdlib.md
+    classification: deferred_nonbaseline
+
+summary:
+  total_items: 51
+  baseline_must_close_count: 0
+  deferred_nonbaseline_count: 51
+  unclassified_count: 0
+  baseline_must_close_open_count: 0

@@ -1,0 +1,290 @@
+# Suite: core/json.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - std::json parse/build failures are value-channel `Res::Err` outcomes in baseline paths.
+
+tests:
+- id: JSN-json-null-constructs-null-value
+  category: json
+  title: json_null constructs null value
+  code: |
+    import std::json::{json_null, stringify_json}
+
+    fn main!() -> Res[Str, Str] {
+      let j = json_null()
+      yield Ok(to_str(j.is_null() && stringify_json(&j) == "null"))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: JSN-parse-json-supports-object-array-bool-null-number-and-accessors
+  category: json
+  title: parse_json supports object array bool null number and accessors
+  code: |
+    import std::json::parse_json
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let j = parse_json("{\"a\":1,\"b\":[true,null]}").map_err { |_| "parse" }?
+        let obj = j.as_object().ok_or("obj")?
+        let a = obj.get(&"a").ok_or("a")?.as_number().ok_or("num")?
+        let arr = obj.get(&"b").ok_or("b")?.as_array().ok_or("arr")?.to_vec()
+        let b0 = arr.get(0).ok_or("b0")?.as_bool().ok_or("bool")?
+        let b1 = arr.get(1).ok_or("b1")?.is_null()
+        yield Ok(to_str((a == 1.0) && b0 && b1))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: JSN-parse-json-rejects-trailing-comma-in-value-channel
+  category: json
+  title: parse_json rejects trailing comma in value channel
+  code: |
+    import std::json::{parse_json, JsonError}
+
+    fn main!() -> Res[Str, JsonError] =
+      result {
+        _ = parse_json("{\"a\":1,}")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: JsonError
+
+- id: JSN-parse-json-rounds-inexact-number-to-nearest-ties-even
+  category: json
+  title: parse_json rounds inexact number to nearest ties even
+  code: |
+    import std::json::{parse_json, stringify_json}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let j = parse_json("9007199254740993").map_err { |_| "parse" }?
+        yield Ok(stringify_json(&j))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"9007199254740992"'
+
+- id: JSN-parse-json-accepts-finite-boundary-subnormal-and-signed-zero-underflow
+  category: json
+  title: parse_json accepts finite boundary subnormal and signed zero underflow
+  code: |
+    import std::json::{parse_json, stringify_json}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let largest = parse_json("1.7976931348623157e308").map_err { |_| "largest" }?
+        let subnormal = parse_json("5e-324").map_err { |_| "subnormal" }?
+        let positive_underflow = parse_json("1e-4000").map_err { |_| "positive_underflow" }?
+        let negative_underflow = parse_json("-1e-4000").map_err { |_| "negative_underflow" }?
+        let negative_zero = parse_json("-0").map_err { |_| "negative_zero" }?
+        let ok = stringify_json(&largest) == "1.7976931348623157e308" &&
+          stringify_json(&subnormal) == "5e-324" &&
+          stringify_json(&positive_underflow) == "0" &&
+          stringify_json(&negative_underflow) == "-0" &&
+          stringify_json(&negative_zero) == "-0"
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: JSN-parse-json-rejects-number-overflow-in-value-channel
+  category: json
+  title: parse_json rejects number overflow in value channel
+  code: |
+    import std::json::{parse_json, JsonError}
+
+    fn main!() -> Res[Str, JsonError] =
+      result {
+        _ = parse_json("1e400")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: JsonError
+
+- id: JSN-stringify-json-is-deterministic-and-emits-compact-form
+  category: json
+  title: stringify_json is deterministic and emits compact form
+  code: |
+    import std::json::{parse_json, stringify_json}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let j = parse_json("{ \"b\" : true , \"a\" : \"x\" }").map_err { |_| "parse" }?
+        let s1 = stringify_json(&j)
+        let s2 = stringify_json(&j)
+        yield Ok(to_str(s1 == "{\"b\":true,\"a\":\"x\"}" && s1 == s2))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: JSN-json-object-rejects-duplicate-keys
+  category: json
+  title: json_object rejects duplicate keys
+  code: |
+    import std::json::{json_bool, json_object, JsonError}
+
+    fn main!() -> Res[Str, JsonError] =
+      result {
+        _ = json_object([("k", json_bool(true)), ("k", json_bool(false))])?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: JsonError
+
+- id: JSN-json-object-preserves-entry-order-when-stringified
+  category: json
+  title: json_object preserves entry order when stringified
+  code: |
+    import std::json::{json_bool, json_number, json_object, json_str, stringify_json}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let one = json_number(1.0).map_err { |_| "num" }?
+        let j = json_object([
+          ("b", json_bool(false)),
+          ("a", one),
+          ("s", json_str("x"))
+        ]).map_err { |_| "object" }?
+        yield Ok(to_str(stringify_json(&j) == "{\"b\":false,\"a\":1,\"s\":\"x\"}"))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: JSN-parse-json-rejects-duplicate-object-keys
+  category: json
+  title: parse_json rejects duplicate object keys
+  code: |
+    import std::json::{parse_json, JsonError}
+
+    fn main!() -> Res[Str, JsonError] =
+      result {
+        _ = parse_json("{\"k\":true,\"k\":false}")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: JsonError
+
+- id: JSN-json-number-rejects-nan
+  category: json
+  title: json_number rejects NaN
+  code: |
+    import std::json::{json_number, JsonError}
+    import std::parse::{parse_f64, ParseError}
+
+    fn main!() -> Res[Str, Union[JsonError, ParseError]] =
+      result {
+        let nan = parse_f64("nan")?
+        _ = json_number(nan)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: JsonError
+
+- id: JSN-json-number-rejects-infinity
+  category: json
+  title: json_number rejects infinity
+  code: |
+    import std::json::{json_number, JsonError}
+    import std::parse::{parse_f64, ParseError}
+
+    fn main!() -> Res[Str, Union[JsonError, ParseError]] =
+      result {
+        let inf = parse_f64("inf")?
+        _ = json_number(inf)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: JsonError
+
+- id: JSN-json-constructors-and-projections-compose-in-pure-value-channel
+  category: json
+  title: json constructors and projections compose in pure value channel
+  code: |
+    import std::json::{json_array, json_number, json_str}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let n = json_number(2.5).map_err { |_| "num" }?
+        let j = json_array([json_str("x"), n])
+        let arr = j.as_array().ok_or("arr")?.to_vec()
+        let s = arr.get(0).ok_or("i0")?.as_str().ok_or("s")?
+        let x = arr.get(1).ok_or("i1")?.as_number().ok_or("x")?
+        yield Ok(to_str((s == "x") && (x == 2.5)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: JSN-json-projections-return-none-for-nonmatching-kinds
+  category: json
+  title: json projections return None for nonmatching kinds
+  code: |
+    import std::json::{json_array, json_bool, json_null, json_number, json_object, json_str}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let n = json_number(1.0).map_err { |_| "num" }?
+        let obj = json_object([("k", json_bool(true))]).map_err { |_| "object" }?
+        let ok0 = !json_bool(false).is_null()
+        let ok1 = json_null().as_bool().is_none()
+        let ok2 = n.as_str().is_none()
+        let ok3 = json_str("x").as_array().is_none()
+        let ok4 = json_array([]).as_object().is_none()
+        let ok5 = obj.as_number().is_none()
+        let ok = ok0 && ok1 && ok2 && ok3 && ok4 && ok5
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: JSN-stringify-json-canonicalizes-numbers-and-string-escapes
+  category: json
+  title: stringify_json canonicalizes numbers and string escapes
+  code: |
+    import std::json::{json_array, json_number, json_str, stringify_json}
+    import std::parse::parse_f64
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let minus_zero = parse_f64("-0.0").map_err { |_| "mz" }?
+        let xs = json_array([
+          json_number(1.0).map_err { |_| "n1" }?,
+          json_number(4.50).map_err { |_| "n2" }?,
+          json_number(0.002).map_err { |_| "n3" }?,
+          json_number(minus_zero).map_err { |_| "n4" }?,
+          json_str("€/\n")
+        ])
+        let s = stringify_json(&xs)
+        yield Ok(to_str(s == "[1,4.5,0.002,-0,\"€/\\n\"]"))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

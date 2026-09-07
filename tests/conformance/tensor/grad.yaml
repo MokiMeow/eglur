@@ -1,0 +1,873 @@
+# Suite: tensor/grad.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: TGD-tensorview-parameter-is-preserved-and-gradient-is-owning
+  category: tensor_grad
+  title: grad preserves a TensorView parameter and returns its logical owning gradient
+  code: |
+    import std::tensor::{AxisError, ContractError, GradError, ShapeError, Tensor, TensorView, grad, ones}
+    import std::tensor::prim::permute
+
+    fn f(x: TensorView[f32]) -> Res[Tensor[f32], ContractError] {
+      let op = contract{ i j, i j -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, GradError, ShapeError]] =
+      result {
+        let view = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let g = grad(f)
+        let dx = g(view)?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3, 2]
+        expected: [2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+        mode: exact
+
+- id: TGD-grad-of-contract-based-scalar-objective-returns-input-shaped-gradient
+  category: tensor_grad
+  title: grad of contract-based scalar objective returns input-shaped gradient
+  code: |
+    import std::tensor::{AxisError, DTypeError, DeterminismError, GradError, IndexError, MapAxisError, NumericError, ShapeError, TransformError, grad, ones, zeros}
+    import std::tensor::{ContractError, Tensor}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], ContractError] {
+      let op = contract{ i, i -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, DTypeError, DeterminismError, GradError, IndexError, MapAxisError, NumericError, ShapeError, TransformError]] =
+      result {
+        let x = set_at(
+          ones[f32](3),
+          [IndexItem::At(0)].to_vec(),
+          zeros[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let g = grad(f)
+        let dx = g(x)?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3]
+        expected: [0.0, 2.0, 2.0]
+        mode: exact
+
+- id: TGD-direct-mul-and-sum-core-path-is-supported
+  category: tensor_grad
+  title: direct mul and sum Core path is supported
+  code: |
+    import std::tensor::{AxisError, DTypeError, GradError, ShapeError, Tensor, grad, ones}
+    import std::tensor::prim::{mul, sum}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], Union[AxisError, DTypeError, ShapeError]] =
+      result {
+        let squared = mul(x, x)?
+        yield sum(squared, #0)
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, DTypeError, GradError, ShapeError]] =
+      result {
+        let g = grad(f)
+        let dx = g(ones[f32](3))?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3]
+        expected: [2.0, 2.0, 2.0]
+        mode: exact
+
+- id: TGD-elementwise-max-tie-distributes-gradient-uniformly
+  category: tensor_grad
+  title: elementwise max tie distributes gradient uniformly
+  code: |
+    import std::tensor::{AxisError, DTypeError, GradError, ShapeError, Tensor, grad, ones}
+    import std::tensor::prim::{max, sum}
+
+    fn f(x: Tensor[f32], ceiling: Tensor[f32]) -> Res[Tensor[f32], Union[AxisError, DTypeError, ShapeError]] =
+      result {
+        let y = max(x, ceiling)?
+        yield sum(y, #0)
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, DTypeError, GradError, ShapeError]] =
+      result {
+        let g = grad(f)
+        let dx = g(ones[f32](3), ones[f32](3))?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3]
+        expected: [0.5, 0.5, 0.5]
+        mode: exact
+
+- id: TGD-value-and-grad-api-is-available-for-scalar-objective
+  category: tensor_grad
+  title: value_and_grad API is available for scalar objective
+  code: |
+    import std::tensor::{ones, value_and_grad}
+    import std::tensor::{ContractError, Tensor}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], ContractError] {
+      let op = contract{ i, i -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      _ = ones[f32](3)
+      _ = value_and_grad(f)
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: TGD-value-and-grad-invocation-returns-primal-and-input-shaped-gradient
+  category: tensor_grad
+  title: value_and_grad invocation returns primal and input-shaped gradient
+  code: |
+    import std::tensor::{AxisError, DTypeError, GradError, IndexError, ShapeError, TransformError, MapAxisError, ones, value_and_grad}
+    import std::tensor::{ContractError, Tensor}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], ContractError] {
+      let op = contract{ i, i -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, Str, TransformError, MapAxisError]] =
+      result {
+        let x = ones[f32](3)
+        let vg = value_and_grad(f)
+        let (primal, dx) = vg(x)?
+        let primal_value = primal.item()?
+        let ok = ((primal.rank() == 0)
+          && (primal_value == 3.0)
+          && (to_str(primal.dtype()) == "f32")
+          && (to_str(dx.shape()) == "[3]")
+          && (to_str(dx.dtype()) == "f32"))
+        yield if ok { yield Ok(dx) } else { yield Err("bad_primal_or_gradient_metadata") }
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3]
+        expected: [2.0, 2.0, 2.0]
+        mode: exact
+
+- id: TGD-grad-propagates-err-from-primal-without-ad-execution
+  category: tensor_grad
+  title: grad propagates Err from primal without AD execution
+  code: |
+    import std::tensor::{AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, TransformError, MapAxisError, ones, grad}
+    import std::tensor::Tensor
+
+    fn f(_x: Tensor[f32]) -> Res[Tensor[f32], Str] = Err("boom")
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, Str, TransformError, MapAxisError]] =
+      result {
+        let x = ones[f32](3)
+        let g = grad(f)
+        _ = g(x)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"boom"'
+
+- id: TGD-grad-over-opt-short-circuits-none-as-ok-none
+  category: tensor_grad
+  title: grad over Opt short-circuits None as Ok(None)
+  code: |
+    import std::tensor::{AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, TransformError, MapAxisError, ones, grad}
+    import std::tensor::Tensor
+
+    fn f(_x: Tensor[f32]) -> Opt[Tensor[f32]] = None
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, Str, TransformError, MapAxisError]] =
+      result {
+        let x = ones[f32](3)
+        let g = grad(f)
+        let r = g(x)?
+        yield Ok(to_str(r.is_none()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TGD-passive-bitcast-does-not-poison-an-empty-source-active-graph
+  category: tensor_grad
+  title: passive bitcast does not poison an empty source-active graph
+  code: |
+    import std::tensor::{CastError, ContractError, GradError, Tensor, f32, grad, i32, ones}
+    import std::tensor::prim::bitcast
+
+    fn f(_x: Tensor[f32], constant: Tensor[f32]) -> Res[Tensor[f32], Union[CastError, ContractError]] =
+      result {
+        let bits = bitcast(constant, i32)?
+        let restored = bitcast(bits, f32)?
+        let op = contract{ i, i -> }
+        yield op(restored, restored)
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[CastError, ContractError, GradError]] =
+      result {
+        let g = grad(f)
+        let dx = g(ones[f32](3), ones[f32](3))?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3]
+        expected: [0.0, 0.0, 0.0]
+        mode: exact
+
+- id: TGD-passive-bitcast-sibling-does-not-poison-a-nonempty-source-active-graph
+  category: tensor_grad
+  title: passive bitcast sibling does not poison a nonempty source-active graph
+  code: |
+    import std::tensor::{CastError, ContractError, GradError, Tensor, f32, grad, i32, ones}
+    import std::tensor::prim::bitcast
+
+    fn f(x: Tensor[f32], constant: Tensor[f32]) -> Res[Tensor[f32], Union[CastError, ContractError]] =
+      result {
+        let bits = bitcast(constant, i32)?
+        let restored = bitcast(bits, f32)?
+        let op = contract{ i, i -> }
+        yield op(x, restored)
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[CastError, ContractError, GradError]] =
+      result {
+        let g = grad(f)
+        let dx = g(ones[f32](3), ones[f32](3))?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3]
+        expected: [1.0, 1.0, 1.0]
+        mode: exact
+
+- id: TGD-grad-argnum-must-be-within-callable-arity
+  category: tensor_grad
+  title: grad argnum must be within callable arity
+  code: |
+    import std::tensor::grad
+    import std::tensor::{ContractError, Tensor}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], ContractError] {
+      let op = contract{ i, i -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      _ = grad(f, argnum=2)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_ARGNUM_OUT_OF_RANGE
+      message_contains:
+      - argnum
+      - range
+      data_keys:
+      - argnum
+
+- id: TGD-effectful-callback-precedes-argnum-validation
+  category: tensor_grad
+  title: effectful callback rejection precedes grad argnum validation
+  code: |
+    import std::tensor::{Tensor, grad}
+
+    fn f!(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      _ = grad(
+        f!, // @primary effectful-before-grad-validation
+        argnum=2,
+      )
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+      primary_span:
+        marker: effectful-before-grad-validation
+
+- id: TGD-grad-differentiated-argument-must-be-tensor
+  category: tensor_grad
+  title: grad differentiated argument must be tensor
+  code: |
+    import std::tensor::{ones, grad}
+    import std::tensor::{ContractError, Tensor}
+
+    fn f(x: Tensor[f32], scale: i64) -> Res[Tensor[f32], ContractError] {
+      let op = contract{ i, i -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[f32](3)
+      let g = grad(f, argnum=1)
+      _ = g(x, 2)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_NON_TENSOR_ARG
+      message_contains:
+      - grad
+      - non-tensor
+      data_keys: []
+
+- id: TGD-grad-differentiated-dtype-must-be-floating
+  category: tensor_grad
+  title: grad differentiated dtype must be floating
+  code: |
+    import std::tensor::{zeros, grad}
+    import std::tensor::Tensor
+
+    fn f(_x: Tensor[i32]) -> Res[Tensor[i32], Str] = Err("unused")
+
+    fn main!() -> Res[Str, Str] {
+      let x = zeros[i32](3)
+      let g = grad(f)
+      _ = g(x)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_NON_FLOAT_DTYPE
+      message_contains:
+      - grad
+      - non-float
+      - dtype
+      data_keys: []
+
+- id: TGD-grad-scalar-mode-rejects-non-scalar-primal-output
+  category: tensor_grad
+  title: grad scalar mode rejects non-scalar primal output
+  code: |
+    import std::tensor::{ones, grad}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[f32](3)
+      let g = grad(f)
+      _ = g(x)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_PRIMAL_NOT_SCALAR
+      message_contains:
+      - scalar
+      - primal
+      data_keys: []
+
+- id: TGD-grad-returns-dtype-equal-to-primal-differentiated-dtype
+  category: tensor_grad
+  title: grad returns dtype equal to primal differentiated dtype
+  code: |
+    import std::tensor::{AxisError, DTypeError, GradError, IndexError, ShapeError, TransformError, MapAxisError, ones, grad}
+    import std::tensor::{ContractError, Tensor}
+
+    fn f(x: Tensor[f16]) -> Res[Tensor[f16], ContractError] {
+      let op = contract{ i, i -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Tensor[f16], Union[AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, Str, TransformError, MapAxisError]] =
+      result {
+        let x = ones[f16](3)
+        let g = grad(f)
+        let dx = g(x)?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f16
+        shape: [3]
+        expected: [2.0, 2.0, 2.0]
+        mode: exact
+
+- id: TGD-map_axis-grad-f-preserves-batch-leading-shape-deterministically
+  category: tensor_grad
+  title: map_axis(grad(f)) preserves batch-leading shape deterministically
+  code: |
+    import std::tensor::{AxisError, DTypeError, GradError, IndexError, ShapeError, TransformError, MapAxisError, ones, grad, map_axis, axis}
+    import std::tensor::{ContractError, Tensor}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], ContractError] {
+      let op = contract{ i, i -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, Str, TransformError, MapAxisError]] =
+      result {
+        let x = ones[f32](4,3)
+        let g = grad(f)
+        let vg = map_axis(g, in_axes=axis(0), out_axis=axis(0))
+        let dx = vg(x)?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [4, 3]
+        expected: [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+        mode: exact
+
+- id: TGD-grad-propagates-through-rearrange-lowering-path
+  category: tensor_grad
+  title: grad propagates through rearrange lowering path
+  code: |
+    import std::tensor::{AxisError, DTypeError, GradError, IndexError, ShapeError, MapAxisError, ones, grad}
+    import std::tensor::{ContractError, Tensor, TransformError}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], Union[ContractError, TransformError]] =
+      result {
+        let y = x.then(rearrange{ b c -> (b*c) }.with_sizes(["b": 2, "c": 3]))?
+        let op = contract{ i, i -> }
+        let s = op(y, y)?
+        yield Ok(s)
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, Str, TransformError, MapAxisError]] =
+      result {
+        let x = ones[f32](2,3)
+        let g = grad(f)
+        let dx = g(x)?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2, 3]
+        expected: [2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+        mode: exact
+
+- id: TGD-grad-propagates-through-inflate-lowering-path
+  category: tensor_grad
+  title: grad propagates through inflate lowering path
+  code: |
+    import std::tensor::{AxisError, DTypeError, GradError, IndexError, ShapeError, MapAxisError, ones, grad}
+    import std::tensor::{ContractError, Tensor, TransformError}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], Union[ContractError, TransformError]] =
+      result {
+        let y = x.then(inflate{ i -> (i*2) }.with_sizes(["i": 3]))?
+        let op = contract{ i, i -> }
+        let s = op(y, y)?
+        yield Ok(s)
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, Str, TransformError, MapAxisError]] =
+      result {
+        let x = ones[f32](3)
+        let g = grad(f)
+        let dx = g(x)?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3]
+        expected: [4.0, 4.0, 4.0]
+        mode: exact
+
+- id: TGD-grad-over-indexing-path-returns-base-shape-cotangent
+  category: tensor_grad
+  title: grad over indexing path returns base-shape cotangent
+  code: |
+    import std::tensor::{AxisError, DTypeError, GradError, TransformError, MapAxisError, ones, grad}
+    import std::tensor::index::{get_at, IndexItem}
+    import std::tensor::{ContractError, IndexError, ShapeError, Tensor}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], Union[ContractError, IndexError, ShapeError]] =
+      result {
+        let y = get_at(x, [IndexItem::At(0), IndexItem::All].to_vec())?
+        let op = contract{ i, i -> }
+        let s = op(y, y)?
+        yield Ok(s)
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, Str, TransformError, MapAxisError]] =
+      result {
+        let x = ones[f32](2,5)
+        let g = grad(f)
+        let dx = g(x)?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2, 5]
+        expected: [2.0, 2.0, 2.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        mode: exact
+
+- id: TGD-duplicate-passive-gather-indices-accumulate-into-the-base-cotangent
+  category: tensor_grad
+  title: duplicate passive gather indices accumulate into the base cotangent
+  code: |
+    import std::tensor::{ContractError, GradError, IndexError, ShapeError, Tensor, grad, ones}
+    import std::tensor::index::{get_at, IndexItem}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], Union[ContractError, IndexError, ShapeError]] =
+      result {
+        let y = get_at(x, [IndexItem::Take([0,0])].to_vec())?
+        let op = contract{ i, i -> }
+        yield op(y, y)
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[ContractError, GradError, IndexError, ShapeError]] =
+      result {
+        let g = grad(f)
+        let dx = g(ones[f32](2))?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2]
+        expected: [4.0, 0.0]
+        mode: exact
+
+- id: TGD-grad-over-reduce-max-objective-is-supported-in-scalar-mode
+  category: tensor_grad
+  title: grad over reduce-max objective is supported in scalar mode
+  code: |
+    import std::tensor::{ContractError, GradError, IndexError, TransformError, MapAxisError, ones, grad}
+    import std::tensor::prim::max
+    import std::tensor::{AxisError, DTypeError, ShapeError, Tensor}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], Union[AxisError, ShapeError, DTypeError]] = max(x, #0)
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, DTypeError, GradError, IndexError, ShapeError, Str, TransformError, MapAxisError]] =
+      result {
+        let x = ones[f32](4)
+        let g = grad(f)
+        let dx = g(x)?
+        yield Ok(dx)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [4]
+        expected: [0.25, 0.25, 0.25, 0.25]
+        mode: exact
+
+- id: TGD-grad-lowering-fails-for-non-graph-recursive-tensor-program
+  category: tensor_grad
+  title: grad lowering fails for non-graph recursive tensor program
+  code: |
+    import std::tensor::{ones, grad}
+    import std::tensor::{ContractError, Tensor}
+
+    fn recur(n: i64, x: Tensor[f32]) -> Tensor[f32] {
+      yield if n == 0 { yield x } else { yield recur(wrapping_sub(n, 1), x) }
+    }
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], ContractError] {
+      let y = recur(1, x)
+      let op = contract{ i, i -> }
+      yield op(y, y)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[f32](3)
+      let g = grad(f)
+      _ = g(x)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_LOWERING_FAILED
+      message_contains:
+      - grad
+      - lowering
+      - failed
+      data_keys: []
+
+- id: TGD-grad-rejects-unsupported-primitive-in-differentiable-path
+  category: tensor_grad
+  title: grad rejects unsupported primitive in differentiable path
+  code: |
+    import std::tensor::{f32, i32, ones, grad}
+    import std::tensor::prim::bitcast
+    import std::tensor::{CastError, ContractError, Tensor}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], Union[CastError, ContractError]] =
+      result {
+        let xi = bitcast(x, i32)?
+        let xf = bitcast(xi, f32)?
+        let op = contract{ i, i -> }
+        let s = op(xf, xf)?
+        yield Ok(s)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[f32](3)
+      let g = grad(f)
+      _ = g(x)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_UNSUPPORTED_PRIMITIVE
+      message_contains:
+      - grad
+      - unsupported
+      - primitive
+      data_keys: []
+
+- id: TGD-source-active-numeric-cast-is-unsupported-even-though-reverse-execution-may-use-cast
+  category: tensor_grad
+  title: source-active numeric cast is unsupported even though reverse execution may use cast
+  code: |
+    import std::tensor::{CastError, ContractError, Tensor, f64, grad, ones}
+    import std::tensor::prim::astype
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f64], Union[CastError, ContractError]] =
+      result {
+        let y = astype(x, f64)?
+        let op = contract{ i, i -> }
+        yield op(y, y)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      let g = grad(f)
+      _ = g(ones[f32](3))
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_UNSUPPORTED_PRIMITIVE
+      message_contains:
+      - grad
+      - unsupported
+      - primitive
+      data_keys: []
+
+- id: TGD-source-active-add-is-unsupported-even-though-reverse-execution-may-use-add
+  category: tensor_grad
+  title: source-active add is unsupported even though reverse execution may use add
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, Tensor, grad, ones}
+    import std::tensor::prim::{add, sum}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], Union[AxisError, DTypeError, ShapeError]] =
+      result {
+        let y = add(x, x)?
+        yield sum(y, #0)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      let g = grad(f)
+      _ = g(ones[f32](3))
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_UNSUPPORTED_PRIMITIVE
+      message_contains:
+      - grad
+      - unsupported
+      - primitive
+      data_keys: []
+
+- id: TGD-source-active-scatter-is-unsupported-even-though-reverse-execution-may-use-scatter-add
+  category: tensor_grad
+  title: source-active scatter is unsupported even though reverse execution may use scatter add
+  code: |
+    import std::tensor::{ContractError, DTypeError, DeterminismError, IndexError, ShapeError, Tensor, grad, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], Union[ContractError, DTypeError, DeterminismError, IndexError, ShapeError]] =
+      result {
+        let y = set_at(
+          x,
+          [IndexItem::At(0)].to_vec(),
+          zeros[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let op = contract{ i, i -> }
+        yield op(y, y)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      let g = grad(f)
+      _ = g(ones[f32](3))
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_UNSUPPORTED_PRIMITIVE
+      message_contains:
+      - grad
+      - unsupported
+      - primitive
+      data_keys: []
+
+- id: TGD-higher-order-grad-is-unsupported-in-v0-1
+  category: tensor_grad
+  title: higher-order grad is unsupported in v0.1
+  code: |
+    import std::tensor::{ContractError, Tensor, grad, ones}
+
+    fn f(x: Tensor[f32]) -> Res[Tensor[f32], ContractError] {
+      let op = contract{ i, i -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let g = grad(f)
+      let gg = grad(g)
+      _ = gg(ones[f32](3))
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: GRAD_UNSUPPORTED_PRIMITIVE
+      message_contains:
+      - grad
+      - unsupported
+      - primitive
+      data_keys: []
+
+- id: TGD-value-and-grad-preserves-tensorview-parameter-and-returns-owning-results
+  category: tensor_grad
+  title: value_and_grad preserves a TensorView parameter and returns owning primal and gradient tensors
+  code: |
+    import std::tensor::{AxisError, ContractError, GradError, ShapeError, Tensor, TensorView, ones, value_and_grad}
+    import std::tensor::prim::permute
+
+    fn f(x: TensorView[f32]) -> Res[Tensor[f32], ContractError] {
+      let op = contract{ i j, i j -> }
+      yield op(x, x)
+    }
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, GradError, IndexError, ShapeError, Str]] =
+      result {
+        let view = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let vg = value_and_grad(f)
+        let (primal, gradient) = vg(view)?
+        let ok = ((primal.rank() == 0)
+          && (primal.item()? == 6.0)
+          && (to_str(gradient.shape()) == "[3,2]"))
+        yield if ok { yield Ok(gradient) } else { yield Err("bad_primal_or_gradient_shape") }
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3, 2]
+        expected: [2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+        mode: exact
+
+- id: TGD-grad-rejects-tensorview-primal-result-family
+  category: tensor_grad
+  title: grad rejects a TensorView primal result family
+  code: |
+    import std::tensor::{TensorView, grad}
+
+    fn view_primal(x: TensorView[f32]) -> TensorView[f32] = x
+
+    fn main!() -> Unit {
+      _ = grad(view_primal)
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - parameter
+      - expected_type
+      data_equals:
+        reason: parameter_type
+
+- id: TGD-value-and-grad-rejects-tensorview-primal-result-family
+  category: tensor_grad
+  title: value_and_grad rejects a TensorView primal result family
+  code: |
+    import std::tensor::{TensorView, value_and_grad}
+
+    fn view_primal(x: TensorView[f32]) -> TensorView[f32] = x
+
+    fn main!() -> Unit {
+      _ = value_and_grad(view_primal)
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - parameter
+      - expected_type
+      data_equals:
+        reason: parameter_type

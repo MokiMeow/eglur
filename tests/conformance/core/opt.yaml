@@ -1,0 +1,165 @@
+tests:
+- id: OPT-map-transforms-some-and-preserves-none
+  category: opt_direct
+  title: map transforms Some and preserves None
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let mapped = Some(2).map { |x| wrapping_add(x, 3) }
+      let none: Opt[i64] = None
+      let mapped_none = none.map { |x| wrapping_add(x, 3) }
+      let ok = mapped.is_some() && mapped.unwrap_or(0) == 5 && mapped_none.is_none()
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: OPT-unwrap-or-and-ok-or-cover-some-and-none
+  category: opt_direct
+  title: unwrap_or and ok_or cover Some and None
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let some_v = Some(4).unwrap_or(9)
+      let none_for_default: Opt[i64] = None
+      let none_v = none_for_default.unwrap_or(9)
+      let ok_res = Some(7).ok_or("missing")
+      let none_for_err: Opt[i64] = None
+      let err_res = none_for_err.ok_or("missing")
+      let ok = (some_v == 4) && (none_v == 9) && ok_res.is_ok() && err_res.is_err()
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: OPT-and-then-chains-some-and-short-circuits-none
+  category: opt_fallback
+  title: and_then chains Some and short-circuits None
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let some = Some(2).and_then { |x| Some(wrapping_add(x, 3)) }
+      let none: Opt[i64] = None.and_then { |x| Some(wrapping_add(x, 3)) }
+      let ok = (some.unwrap_or(0) == 5) && none.is_none()
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: OPT-or-else-fallback-thunk-is-not-invoked-on-some-path
+  category: opt_fallback
+  title: or_else fallback thunk is not invoked on Some path
+  code: |
+    fn never() -> i64 = never()
+
+    fn main!() -> Res[Str, Str] {
+      let r = Some(2).or_else { |_|
+        Some(never())
+      }
+
+      let ok = r.is_some() && (r.unwrap_or(0) == 2)
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: OPT-or-else-invokes-fallback-thunk-on-none-path
+  category: opt_fallback
+  title: or_else invokes fallback thunk on None path
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = None.or_else { |_| Some(9) }
+      let ok = r.is_some() && (r.unwrap_or(0) == 9)
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: OPT-unwrap-or-else-fallback-thunk-is-not-invoked-on-some-path
+  category: opt_fallback
+  title: unwrap_or_else fallback thunk is not invoked on Some path
+  code: |
+    fn never() -> i64 = never()
+
+    fn main!() -> Res[Str, Str] {
+      let v = Some(4).unwrap_or_else { |_|
+        never()
+      }
+
+      yield Ok(to_str(v == 4))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: OPT-unwrap-or-else-invokes-fallback-thunk-on-none-path
+  category: opt_fallback
+  title: unwrap_or_else invokes fallback thunk on None path
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let v = None.unwrap_or_else { |_| 11 }
+      yield Ok(to_str(v == 11))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: OPT-ok-or-else-fallback-thunk-is-not-invoked-on-some-path
+  category: opt_fallback
+  title: ok_or_else fallback thunk is not invoked on Some path
+  code: |
+    fn never_error() -> Str = never_error()
+
+    fn main!() -> Res[Str, Str] {
+      let r = Some(7).ok_or_else { |_|
+        never_error()
+      }
+
+      let ok = r.is_ok() && (r.ok().unwrap_or(-1) == 7)
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: OPT-ok-or-else-invokes-fallback-thunk-on-none-path-and-returns-err
+  category: opt_fallback
+  title: ok_or_else invokes fallback thunk on None path and returns Err
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let r = None.ok_or_else { |_| "missing" }
+      let ok = r.is_err() && (r.err().unwrap_or("x") == "missing")
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: OPT-never-payload-question-mark-has-no-success-continuation
+  category: opt_fallback
+  title: Opt Never question mark can only propagate None
+  code: |
+    fn propagate(value: Opt[Never]) -> Opt[i64] =
+      result {
+        _ = value?
+        yield Some(1)
+      }
+
+    fn main!() -> Res[Str, Str] {
+      let outcome = propagate(None)
+      yield Ok(to_str(outcome.is_none()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

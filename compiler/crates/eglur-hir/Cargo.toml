@@ -1,0 +1,17 @@
+[package]
+name = "eglur-hir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+eglur-source = { path = "../eglur-source" }
+eglur-syntax = { path = "../eglur-syntax" }
+
+[dev-dependencies]
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+
+[lints]
+workspace = true

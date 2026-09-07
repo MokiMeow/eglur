@@ -1,0 +1,419 @@
+{
+  "version": "0.1",
+  "cases": [
+    {
+      "id": "numeric-decimal-and-exponent-floats",
+      "entrypoint": "tokens",
+      "source": "1.0 1e3 1_000.25e-2",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "numeric-compact-ranges-and-ellipsis",
+      "entrypoint": "tokens",
+      "source": "0..3 0..=3 0...tail",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "numeric-integer-and-float-member-access",
+      "entrypoint": "tokens",
+      "source": "1.to_str() 1.0.to_str()",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "tuple-index-context-preserves-chains-and-trivia",
+      "entrypoint": "tokens",
+      "source": "pair.0.1 tree.0.1.2 pair . 0 . 1 pair./*keep*/0_1.2",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "tuple-index-context-ends-at-newline",
+      "entrypoint": "tokens",
+      "source": "pair./*split\n*/0.1",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "tuple-index-context-rejects-exponent",
+      "entrypoint": "tokens",
+      "source": "pair.0e1",
+      "expectation": {
+        "kind": "lexical_failure",
+        "diagnostic_code": "LEX_INVALID_NUMBER"
+      }
+    },
+    {
+      "id": "numeric-second-dot-is-lexical-error",
+      "entrypoint": "tokens",
+      "source": "1.2.3",
+      "expectation": {
+        "kind": "lexical_failure",
+        "diagnostic_code": "LEX_INVALID_NUMBER"
+      }
+    },
+    {
+      "id": "numeric-trailing-dot-is-incomplete-postfix",
+      "entrypoint": "expression",
+      "source": "1.",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN"
+      }
+    },
+    {
+      "id": "grouped-leading-continuation-covers-every-binary-operator",
+      "entrypoint": "expression_sequence",
+      "source": "(left1\n|| right1)\n(left2\n&& right2)\n(left3\n== right3)\n(left4\n!= right4)\n(left5\n< right5)\n(left6\n<= right6)\n(left7\n> right7)\n(left8\n>= right8)\n(left9\n.. right9)\n(left10\n..= right10)\n(left11\n+ right11)\n(left12\n- right12)\n(left13\n* right13)\n(left14\n/ right14)\n(left15\n/. right15)\n(left16\n% right16)",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "trailing-continuation-covers-every-binary-operator",
+      "entrypoint": "expression_sequence",
+      "source": "left1 ||\nright1\nleft2 &&\nright2\nleft3 ==\nright3\nleft4 !=\nright4\nleft5 <\nright5\nleft6 <=\nright6\nleft7 >\nright7\nleft8 >=\nright8\nleft9 ..\nright9\nleft10 ..=\nright10\nleft11 +\nright11\nleft12 -\nright12\nleft13 *\nright13\nleft14 /\nright14\nleft15 /.\nright15\nleft16 %\nright16",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "ordinary-leading-logical-operator-is-not-continuation",
+      "entrypoint": "expression",
+      "source": "left\n&& right",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN"
+      }
+    },
+    {
+      "id": "ordinary-leading-comparison-operator-is-not-continuation",
+      "entrypoint": "expression",
+      "source": "left\n== right",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN"
+      }
+    },
+    {
+      "id": "ordinary-leading-range-operator-is-not-continuation",
+      "entrypoint": "expression",
+      "source": "left\n.. right",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN"
+      }
+    },
+    {
+      "id": "ordinary-leading-additive-operator-is-not-continuation",
+      "entrypoint": "expression",
+      "source": "left\n+ right",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN"
+      }
+    },
+    {
+      "id": "ordinary-leading-multiplicative-operator-is-not-continuation",
+      "entrypoint": "expression",
+      "source": "left\n/ right",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN"
+      }
+    },
+    {
+      "id": "line-leading-minus-and-star-are-new-unary-statements",
+      "entrypoint": "expression_sequence",
+      "source": "left\n-2\n*pointer",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "call-delimiter-does-not-inherit-grouped-leading-continuation",
+      "entrypoint": "expression",
+      "source": "add(1\n+ 2, 3)",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN"
+      }
+    },
+    {
+      "id": "nested-group-inside-call-owns-leading-continuation",
+      "entrypoint": "expression",
+      "source": "add((1\n+ 2), 3)",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "dot-led-member-crosses-newline",
+      "entrypoint": "expression",
+      "source": "left\n.member",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "dot-led-projection-crosses-newline",
+      "entrypoint": "expression",
+      "source": "pair\n.0.1",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "dot-led-bang-member-crosses-newline",
+      "entrypoint": "expression",
+      "source": "worker\n.run!",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "grouped-chained-range-has-dedicated-diagnostic",
+      "entrypoint": "expression",
+      "source": "(left\n.. middle\n.. right)",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_INVALID_RANGE_SYNTAX"
+      }
+    },
+    {
+      "id": "block-comment-newline-obeys-grouped-continuation",
+      "entrypoint": "expression",
+      "source": "(true/* grouped\n*/&& false)",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "block-comment-newline-cannot-hide-ordinary-leading-operator",
+      "entrypoint": "expression",
+      "source": "true/* ordinary\n*/&& false",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN"
+      }
+    },
+    {
+      "id": "control-ordinary-if-body-boundary",
+      "entrypoint": "control_head",
+      "source": "if ready {}",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "control-grouped-struct-literal",
+      "entrypoint": "control_head",
+      "source": "if (FlagBox{ value: 1 }) {}",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "control-nested-call-may-contain-struct-literal",
+      "entrypoint": "control_head",
+      "source": "if check(Point{ x: 1 }) {}",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "control-grouped-while-trailing-closure",
+      "entrypoint": "control_head",
+      "source": "while (run { |x| x }) {}",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "control-grouped-for-trailing-closure",
+      "entrypoint": "control_head",
+      "source": "for value in (build { |v| v }) {}",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "control-grouped-match-named-variant",
+      "entrypoint": "control_head",
+      "source": "match (Token::Number { value: 1 }) {}",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "control-brace-led-block-primary",
+      "entrypoint": "control_head",
+      "source": "if { yield true } {}",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "control-ungrouped-struct-literal-gets-dedicated-diagnostic",
+      "entrypoint": "control_head",
+      "source": "if FlagBox{ value: 1 } {}",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING"
+      }
+    },
+    {
+      "id": "control-ungrouped-empty-struct-gets-dedicated-diagnostic",
+      "entrypoint": "control_head",
+      "source": "if Empty{} {}",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING"
+      }
+    },
+    {
+      "id": "control-ungrouped-struct-postfix-gets-dedicated-diagnostic",
+      "entrypoint": "control_head",
+      "source": "if Point{ x: 1 }.is_valid() {}",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING"
+      }
+    },
+    {
+      "id": "control-ungrouped-placeholder-closure-gets-dedicated-diagnostic",
+      "entrypoint": "control_head",
+      "source": "while run { ready(_) } {}",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING"
+      }
+    },
+    {
+      "id": "control-ungrouped-while-closure-gets-dedicated-diagnostic",
+      "entrypoint": "control_head",
+      "source": "while run { |x| x } {}",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING"
+      }
+    },
+    {
+      "id": "control-ungrouped-for-closure-gets-dedicated-diagnostic",
+      "entrypoint": "control_head",
+      "source": "for value in build { |v| v } {}",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING"
+      }
+    },
+    {
+      "id": "control-ungrouped-named-variant-gets-dedicated-diagnostic",
+      "entrypoint": "control_head",
+      "source": "match Token::Number { value: 1 } {}",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING"
+      }
+    },
+    {
+      "id": "reduce-canonical-single-selects-special-candidate",
+      "entrypoint": "expression",
+      "source": "schema\n.reduce_by(f)",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "reduce-canonical-one-phase-tuple-prefers-phase",
+      "entrypoint": "expression",
+      "source": "schema.reduce_by((h, f))",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "reduce-noncanonical-tuple-keeps-ordinary-call",
+      "entrypoint": "expression",
+      "source": "counter.reduce_by((h, f))",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "reduce-canonical-axis-set-selects-phase",
+      "entrypoint": "expression",
+      "source": "schema.reduce_by(((h w), f))",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "reduce-noncanonical-axis-set-has-no-ordinary-fallback",
+      "entrypoint": "expression",
+      "source": "counter.reduce_by(((h w), f))",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "reduce-canonical-empty-call-cannot-fall-back",
+      "entrypoint": "expression",
+      "source": "schema.reduce_by()",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "reduce-noncanonical-empty-call-remains-ordinary",
+      "entrypoint": "expression",
+      "source": "counter.reduce_by()",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "reduce-canonical-multiple-phases-selects-phase-list",
+      "entrypoint": "expression",
+      "source": "schema.reduce_by((h, f), (w, g))",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    }
+  ]
+}

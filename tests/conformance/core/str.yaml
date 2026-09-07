@@ -1,0 +1,400 @@
+# Suite: core/str.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - String helpers are pure (`std::str` baseline).
+
+tests:
+- id: STR-len-bytes-reports-ascii-byte-length
+  category: str
+  title: len_bytes reports ASCII byte length
+  code: |
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str("abc".len_bytes()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+
+- id: STR-is-empty-distinguishes-empty-and-nonempty-strings
+  category: str
+  title: is_empty distinguishes empty and non-empty strings
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let empty = "".is_empty()
+      let nonempty = "x".is_empty()
+      yield Ok(concat([to_str(empty), "|", to_str(nonempty)]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true|false"'
+
+- id: STR-contains-starts-with-ends-with-core-predicates
+  category: str
+  title: contains starts_with ends_with core predicates
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let s = "a-b-c"
+      let ok = s.contains(&"b") && s.starts_with(&"a-") && s.ends_with(&"-c")
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: STR-trim-family-removes-ascii-boundary-whitespace
+  category: str
+  title: trim family removes ASCII boundary whitespace
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let s = "  hi  "
+      let all = s.trim()
+      let left = s.trim_start()
+      let right = s.trim_end()
+      yield Ok(concat([all, "|", left, "|", right]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"hi|hi  |  hi"'
+
+- id: STR-replace-substitutes-all-non-overlapping-matches
+  category: str
+  title: replace substitutes all non-overlapping matches
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let s = "ababa".replace(&"a", &"x")
+      yield Ok(s)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"xbxbx"'
+
+- id: STR-split-preserves-empty-tokens
+  category: str
+  title: split preserves empty tokens
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let xs = ",a,,b,".split(&",")
+      yield Ok(to_str(xs))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[\"\",\"a\",\"\",\"b\",\"\"]"'
+
+- id: STR-lines-uses-crlf-aware-text-line-semantics-without-trailing-empty-line
+  category: str
+  title: lines uses CRLF-aware text-line semantics without trailing empty line
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let a = "".lines()
+      let b = "alpha\r\nbeta\n".lines()
+      yield Ok(concat([to_str(a), "|", to_str(b)]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[]|[\"alpha\",\"beta\"]"'
+
+- id: STR-split-nonempty-drops-empty-tokens
+  category: str
+  title: split_nonempty drops empty tokens
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let xs = ",a,,b,".split_nonempty(&",")
+      yield Ok(to_str(xs))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[\"a\",\"b\"]"'
+
+- id: STR-empty-separator-returns-singleton-original-string
+  category: str
+  title: empty separator returns singleton original string
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let a = "ab".split(&"")
+      let b = "ab".split_nonempty(&"")
+      yield Ok(concat([to_str(a), "|", to_str(b)]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[\"ab\"]|[\"ab\"]"'
+
+- id: STR-ascii-case-helpers-transform-letters-only
+  category: str
+  title: ASCII case helpers transform letters only
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let lo = "AbC1".to_lower_ascii()
+      let up = "AbC1".to_upper_ascii()
+      yield Ok(concat([lo, "|", up]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"abc1|ABC1"'
+
+- id: STR-strip-prefix-and-strip-suffix-return-opt-remainder
+  category: str
+  title: strip_prefix and strip_suffix return Opt remainder
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let p = "prefix_name".strip_prefix(&"prefix_").unwrap_or("none")
+      let s = "report.txt".strip_suffix(&".txt").unwrap_or("none")
+      let ok = "abc".strip_prefix(&"x").is_none() && "abc".strip_suffix(&"x").is_none()
+      yield Ok(concat([p, "|", s, "|", to_str(ok)]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"name|report|true"'
+
+- id: STR-concat-preserves-part-order
+  category: str
+  title: concat preserves part order
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let s = concat(["a", "-", "b", "-", "c"])
+      yield Ok(s)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"a-b-c"'
+
+- id: STR-to-str-formats-finite-floats-with-float-cue
+  category: str
+  title: to_str formats finite floats with float cue
+  code: |
+    import std::parse::{parse_f32, parse_f64}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let one = parse_f64("1.0").map_err { |_| "one" }?
+        let trailing_zero = parse_f64("4.50").map_err { |_| "trailing_zero" }?
+        let fixed_small = parse_f64("0.002").map_err { |_| "fixed_small" }?
+        let minus_zero = parse_f64("-0.0").map_err { |_| "minus_zero" }?
+        let f32_value = parse_f32("1.25e+2").map_err { |_| "f32" }?
+        let out = concat([
+          to_str(one),
+          "|",
+          to_str(trailing_zero),
+          "|",
+          to_str(fixed_small),
+          "|",
+          to_str(minus_zero),
+          "|",
+          to_str(f32_value)
+        ])
+        yield Ok(out)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1.0|4.5|0.002|-0.0|125.0"'
+
+- id: STR-to-str-formats-floating-special-values-canonically
+  category: str
+  title: to_str formats floating special values canonically
+  code: |
+    import std::parse::{parse_f32, parse_f64}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let nan = parse_f64("nan").map_err { |_| "nan" }?
+        let inf = parse_f64("+inf").map_err { |_| "inf" }?
+        let neg_inf = parse_f32("-inf").map_err { |_| "neg_inf" }?
+        yield Ok(concat([to_str(nan), "|", to_str(inf), "|", to_str(neg_inf)]))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"nan|inf|-inf"'
+
+- id: STR-display-method-and-free-adapter-agree-for-baseline-scalars
+  category: str
+  title: Display method and free adapter agree for baseline scalars
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let signed: i8 = -7
+      let unsigned: u16 = 42
+      let natural: Nat = 2
+      let positive: PositiveNat = 3
+      let single: f32 = 1.5
+      let double: f64 = 2.0
+      let text = "x"
+      let via_method = concat([
+        signed.to_str(), "|", unsigned.to_str(), "|",
+        natural.to_str(), "|", positive.to_str(), "|",
+        single.to_str(), "|", double.to_str(), "|",
+        true.to_str(), "|", text.to_str()
+      ])
+      let via_free = concat([
+        to_str(signed), "|", to_str(unsigned), "|",
+        to_str(natural), "|", to_str(positive), "|",
+        to_str(single), "|", to_str(double), "|",
+        to_str(true), "|", to_str(text)
+      ])
+      yield Ok(to_str(via_method == via_free))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: STR-scoped-failure-display-preserves-primary-and-close-order
+  category: str
+  title: ScopedFailure Display preserves primary and close order
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let primary: ScopedFailure[Str] = ScopedFailure::Primary("body")
+      let dual: ScopedFailure[Str] = ScopedFailure::PrimaryAndClose {
+        primary: "body",
+        close: "close",
+      }
+      yield Ok(concat([primary.to_str(), "|", dual.to_str()]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"body|scoped body failed: body; close also failed: close"'
+
+- id: STR-user-display-implementation-drives-method-free-and-format
+  category: str
+  title: User Display implementation drives method, free adapter, and format
+  code: |
+    import std::str::FormatError
+
+    struct Label {
+      field value: i64
+    }
+
+    impl Display for Label {
+      fn to_str(self: &Self) -> Str = concat(["label:", to_str(self.value)])
+    }
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        let label = Label { value: 7 }
+        let via_method = label.to_str()
+        let via_free = to_str(label)
+        let via_format = format("{label}", label=label)?
+        yield Ok(concat([via_method, "|", via_free, "|", via_format]))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"label:7|label:7|label:7"'
+
+- id: STR-inherent-to-str-does-not-replace-display-adapter
+  category: str
+  title: inherent to_str wins method lookup without replacing the Display adapter
+  code: |
+    struct Label {
+      field value: i64
+
+      fn to_str(self: &Self) -> Str = "inherent"
+    }
+
+    impl Display for Label {
+      fn to_str(self: &Self) -> Str = "display"
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let label = Label{ value: 7 }
+      let via_method = label.to_str()
+      let via_free = to_str(label)
+      let via_qualified = Display.to_str(&label)
+      yield Ok(concat([via_method, "|", via_free, "|", via_qualified]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"inherent|display|display"'
+
+- id: STR-format-supports-repeated-named-placeholder-binding
+  category: str
+  title: format supports repeated named placeholder binding
+  code: |
+    import std::str::FormatError
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        let s = format("{x}-{x}", x=7)?
+        yield Ok(s)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7-7"'
+
+- id: STR-format-supports-debug-placeholder
+  category: str
+  title: format supports debug placeholder
+  code: |
+    import std::str::FormatError
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        let s = format("x={x:?}", x=7)?
+        yield Ok(s)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x=7"'
+
+- id: STR-format-mismatch-returns-err-in-value-channel
+  category: str
+  title: format mismatch returns Err in value channel
+  code: |
+    import std::str::FormatError
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        _ = format("x={x}", y=1)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: FormatError
+
+- id: STR-format-supports-doubled-literal-braces
+  category: str
+  title: format supports doubled literal braces
+  code: |
+    import std::str::FormatError
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        let s = format("{{x}}={x}", x=7)?
+        yield Ok(s)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"{x}=7"'
+
+- id: STR-unmatched-format-brace-returns-err-in-value-channel
+  category: str
+  title: unmatched format brace returns Err in value channel
+  code: |
+    import std::str::FormatError
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        _ = format("{", x=7)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: FormatError

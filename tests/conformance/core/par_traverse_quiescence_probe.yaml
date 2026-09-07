@@ -1,0 +1,111 @@
+# Suite: core/par_traverse_quiescence_probe.yaml
+# This suite is conditionally required only when precondition
+# `par_traverse_quiescence_probe` is active in the conformance harness.
+# The harness supplies the deterministic callback schedule defined by
+# docs/spec/CONFORMANCE.md.
+
+tests:
+- id: CON-par-traverse-res-fail-fast-return-is-quiescent-and-suppresses-unstarted-work
+  category: concurrency
+  title: par_traverse_res fail-fast return is quiescent and suppresses unstarted work
+  code: |
+    import std::test::emit!
+
+    fn work!(x: i64) -> Res[i64, Str] {
+      yield if x == 0 {
+        yield Err("stop")
+      } else if x == 1 {
+        emit!("res-in-flight-started")
+        emit!("res-in-flight-finished")
+        yield Ok(x)
+      } else {
+        emit!("res-queued-started")
+        yield Ok(x)
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let outcome = [0,1,2].par_traverse_res!({ work!(_) }, workers=2)
+      emit!("res-after-return")
+      let selected = outcome.is_err() && (outcome.err().unwrap_or("other") == "stop")
+      yield Ok(to_str(selected))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+    value_diagnostics:
+    - code: TRAVERSE_RES_FAIL
+      message_contains:
+      - index 0
+      data_keys:
+      - index
+    side_effects:
+    - res-in-flight-started
+    - res-in-flight-finished
+    - res-after-return
+
+- id: CON-par-traverse-opt-fail-fast-return-is-quiescent-and-suppresses-unstarted-work
+  category: concurrency
+  title: par_traverse_opt fail-fast return is quiescent and suppresses unstarted work
+  code: |
+    import std::test::emit!
+
+    fn work!(x: i64) -> Opt[i64] {
+      yield if x == 0 {
+        yield None
+      } else if x == 1 {
+        emit!("opt-in-flight-started")
+        emit!("opt-in-flight-finished")
+        yield Some(x)
+      } else {
+        emit!("opt-queued-started")
+        yield Some(x)
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let outcome = [0,1,2].par_traverse_opt!({ work!(_) }, workers=2)
+      emit!("opt-after-return")
+      yield Ok(to_str(outcome.is_none()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+    side_effects:
+    - opt-in-flight-started
+    - opt-in-flight-finished
+    - opt-after-return
+
+- id: CON-par-traverse-res-in-flight-runtime-abort-precedes-decisive-typed-error
+  category: concurrency
+  title: par_traverse_res in-flight runtime abort precedes decisive typed error
+  code: |
+    import std::test::{abort!, emit!}
+
+    fn work!(x: i64) -> Res[i64, Str] {
+      yield if x == 0 {
+        yield Err("stop")
+      } else {
+        emit!("fatal-in-flight-started")
+        abort!("RUNTIME_ABORT", "in-flight callback failed")
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      _ = [0,1].par_traverse_res!({ work!(_) }, workers=2)
+      emit!("fatal-after-return")
+      yield Ok("unreachable")
+    }
+  expect:
+    runtime_error:
+      code: RUNTIME_ABORT
+      message_contains:
+      - abort
+      data_keys:
+      - source
+      data_equals:
+        source: std::test::abort!
+    side_effects:
+    - fatal-in-flight-started

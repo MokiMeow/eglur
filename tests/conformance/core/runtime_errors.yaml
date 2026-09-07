@@ -1,0 +1,67 @@
+tests:
+- id: RTE-std-test-abort-terminates-execution-with-runtime-error-channel
+  category: runtime_errors
+  title: std::test abort! terminates execution with runtime_error channel
+  code: |
+    import std::test::abort!
+
+    fn main!() -> Res[Str, Str] {
+      abort!("RUNTIME_ABORT", "forced abort for conformance")
+      yield Ok("unreachable")
+    }
+  expect:
+    runtime_error:
+      code: RUNTIME_ABORT
+      message_contains:
+      - abort
+      data_keys:
+      - source
+      data_equals:
+        source: std::test::abort!
+
+- id: RTE-runtime-abort-is-fail-fast-and-preserves-prior-side-effects-only
+  category: runtime_errors
+  title: runtime abort is fail-fast and preserves prior side effects only
+  code: |
+    import std::test::emit!
+    import std::test::abort!
+
+    fn main!() -> Res[Str, Str] {
+      emit!("before")
+      abort!("RUNTIME_ABORT", "stop now")
+      emit!("after")
+      yield Ok("unreachable")
+    }
+  expect:
+    runtime_error:
+      code: RUNTIME_ABORT
+      message_contains:
+      - abort
+      data_keys:
+      - source
+      data_equals:
+        source: std::test::abort!
+    side_effects:
+    - before
+
+- id: RTE-compile-time-failures-take-precedence-over-potential-runtime-abort-paths
+  category: runtime_errors
+  title: compile-time failures take precedence over potential runtime abort paths
+  code: |
+    import std::test::abort!
+
+    fn helper() -> Unit = abort!("RUNTIME_ABORT", "x")
+
+    fn main!() -> Res[Str, Str] {
+      helper()
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []

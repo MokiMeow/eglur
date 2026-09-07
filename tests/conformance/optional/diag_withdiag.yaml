@@ -1,0 +1,79 @@
+tests:
+- id: DGD-with-diag-and-value-access-work-for-preview-withdiag-alias
+  category: diag_withdiag
+  title: with_diag and value access work for preview WithDiag alias
+  code: |
+    import std::diag::{WithDiag, with_diag, value}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let wd: WithDiag[i64] = with_diag(3)
+        let v = value(&wd)
+        yield Ok(to_str(v))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+
+- id: DGD-zip-diag-preserves-left-to-right-append-order-and-duplicate-diagnostics
+  category: diag_withdiag
+  title: zip_diag preserves left-to-right append order and duplicate diagnostics
+  code: |
+    import std::diag::{with_diag, warn, append_diag, zip_diag, diags, diag_code}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let a0 = with_diag(1)
+        let a1 = append_diag(a0, warn("W_DUP", "a1"))
+        let a2 = append_diag(a1, warn("W_DUP", "a2"))
+
+        let b0 = with_diag(2)
+        let b1 = append_diag(b0, warn("W_TAIL", "b1"))
+
+        let z = zip_diag(a2, b1)
+
+        let codes = diags(&z).map { |d| diag_code(&d) }.to_vec()
+
+        let ok = codes.len() == 3 &&
+          codes.get(0).unwrap_or("x") == "W_DUP" &&
+          codes.get(1).unwrap_or("x") == "W_DUP" &&
+          codes.get(2).unwrap_or("x") == "W_TAIL"
+
+        yield if ok { yield Ok("ok") } else { yield Err("bad_order") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: DGD-dedupe-diags-is-explicit-opt-in-utility
+  category: diag_withdiag
+  title: dedupe_diags is explicit opt-in utility
+  code: |
+    import std::diag::{with_diag, warn, append_diag, zip_diag, diags, diag_code, dedupe_diags}
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let a0 = with_diag(1)
+        let a1 = append_diag(a0, warn("W_DUP", "a1"))
+        let a2 = append_diag(a1, warn("W_DUP", "a2"))
+
+        let b0 = with_diag(2)
+        let b1 = append_diag(b0, warn("W_TAIL", "b1"))
+
+        let z = zip_diag(a2, b1)
+        let z2 = dedupe_diags(z)
+
+        let codes = diags(&z2).map { |d| diag_code(&d) }.to_vec()
+
+        let ok = codes.len() == 2 &&
+          codes.get(0).unwrap_or("x") == "W_DUP" &&
+          codes.get(1).unwrap_or("x") == "W_TAIL"
+
+        yield if ok { yield Ok("ok") } else { yield Err("bad_dedupe") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'

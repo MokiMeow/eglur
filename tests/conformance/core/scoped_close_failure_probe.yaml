@@ -1,0 +1,70 @@
+# Suite: core/scoped_close_failure_probe.yaml
+# This suite is conditionally required only when precondition
+# `scoped_close_failure_probe` is active in the conformance harness.
+# The harness routes the reserved target paths through the deterministic
+# close-failure adapter defined by docs/spec/CONFORMANCE.md.
+
+tests:
+- id: IOT-scoped-close-only-failure-uses-primary-carrier
+  category: io_time
+  title: Scoped callback success and close failure use Primary
+  code: |
+    import std::io::{IoError, IoErrorKind, LinkMode, Path, with_writer!}
+
+    fn main!() -> Res[Str, ScopedFailure[IoError]] {
+      let path = Path.from_str("__eglur_conformance_scoped_close_failure_only.bin")
+      let outcome = with_writer!(path, LinkMode::Reject) { |writer|
+        result {
+          _ = writer.write_all!([1, 2, 3])?
+          yield Ok(())
+        }
+      }
+      let observed = match outcome {
+        Err(ScopedFailure::Primary(error)) =>
+          (error.kind() == IoErrorKind::Other) &&
+            (error.to_str() == "I/O error: other"),
+        Err(ScopedFailure::PrimaryAndClose { .. }) => false,
+        Ok(_) => false,
+      }
+      yield Ok(to_str(observed))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: IOT-scoped-body-and-close-failures-preserve-both-errors
+  category: io_time
+  title: Scoped callback and close failures preserve primary and close errors
+  code: |
+    import std::io::{IoError, IoErrorKind, LinkMode, Path, read_bytes!, with_writer!}
+
+    fn main!() -> Res[Str, ScopedFailure[IoError]] {
+      let target = Path.from_str("__eglur_conformance_scoped_close_failure_dual.bin")
+      let missing = Path.from_str("__eglur_conformance_scoped_close_failure_missing.bin")
+      let outcome = with_writer!(target, LinkMode::Reject) { |writer|
+        result {
+          _ = writer.write_all!([4, 5, 6])?
+          _ = read_bytes!(missing, LinkMode::Reject)?
+          yield Ok(())
+        }
+      }
+      let observed = match outcome {
+        Err(failure) => {
+          let display = failure.to_str()
+          match failure {
+            ScopedFailure::PrimaryAndClose { primary, close } =>
+              (primary.kind() == IoErrorKind::NotFound) &&
+                (close.kind() == IoErrorKind::Other) &&
+                (display == "scoped body failed: I/O error: not found; close also failed: I/O error: other"),
+            ScopedFailure::Primary(_) => false,
+          }
+        }
+        Ok(_) => false,
+      }
+      yield Ok(to_str(observed))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

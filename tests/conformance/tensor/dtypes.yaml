@@ -1,0 +1,278 @@
+# Suite: tensor/dtypes.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: DTP-tensor-constructors-support-required-bool-integer-and-float-dtypes
+  category: tensor_dtype
+  title: Tensor constructors support required bool, integer and float dtypes
+  code: |
+    import std::tensor::zeros
+
+    fn main!() -> Res[Str, Str] {
+      _ = zeros[bool](1)
+      _ = zeros[i8](1)
+      _ = zeros[i16](1)
+      _ = zeros[i32](1)
+      _ = zeros[i64](1)
+      _ = zeros[u8](1)
+      _ = zeros[u16](1)
+      _ = zeros[u32](1)
+      _ = zeros[u64](1)
+      _ = zeros[f16](1)
+      _ = zeros[bf16](1)
+      _ = zeros[f32](1)
+      _ = zeros[f64](1)
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: DTP-tensor-constructors-support-required-complex-dtypes
+  category: tensor_dtype
+  title: Tensor constructors support required complex dtypes
+  code: |
+    import std::tensor::zeros
+
+    fn main!() -> Res[Str, Str] {
+      _ = zeros[complex64](1)
+      _ = zeros[complex128](1)
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: DTP-rand-constructor-exposes-stable-shape-dtype-and-device-introspection
+  category: tensor_dtype
+  title: rand! constructor exposes stable shape, dtype and device introspection
+  code: |
+    import std::tensor::{DType, rand!}
+
+    fn accepts_f32_dtype(_dtype: DType[f32]) -> Unit = ()
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = rand![f32](2,3)
+        _ = x.device()
+        let dtype = x.dtype()
+        accepts_f32_dtype(dtype)
+        let ok = ((to_str(x.shape()) == "[2,3]")
+          && (dtype.to_str() == "f32")
+          && (to_str(dtype) == "f32"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: DTP-bare-tensor-type-is-rejected
+  category: tensor_dtype
+  title: Bare Tensor type is rejected
+  code: |
+    import std::tensor::Tensor
+
+    fn bad(_x: Tensor) -> Unit = ()
+    fn main!() -> Unit = ()
+  expect:
+    compile_error:
+      code: TYPE_ARG_ARITY_MISMATCH
+      message_contains:
+      - type argument
+      - arity
+      data_keys:
+      - expected_count
+      - actual_count
+
+- id: DTP-bare-dtype-type-is-rejected
+  category: tensor_dtype
+  title: Bare DType type is rejected
+  code: |
+    import std::tensor::DType
+
+    fn bad(_dtype: DType) -> Unit = ()
+    fn main!() -> Unit = ()
+  expect:
+    compile_error:
+      code: TYPE_ARG_ARITY_MISMATCH
+      message_contains:
+      - type argument
+      - arity
+      data_keys:
+      - expected_count
+      - actual_count
+
+- id: DTP-explicit-descriptor-import-provides-value-witness
+  category: tensor_dtype
+  title: Explicit descriptor import provides a same-spelled value witness
+  code: |
+    import std::tensor::{DType, f64}
+
+    fn accepts_f64(_dtype: DType[f64]) -> Unit = ()
+
+    fn main!() -> Res[Str, Str] {
+      accepts_f64(f64)
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: DTP-omitted-descriptor-import-reports-name-not-found
+  category: tensor_dtype
+  title: Omitted descriptor import reports name not found
+  code: |
+    import std::tensor::DType
+
+    fn accepts_f64(_dtype: DType[f64]) -> Unit = ()
+
+    fn main!() -> Res[Str, Str] {
+      accepts_f64(f64)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: NAME_NOT_FOUND
+      message_contains:
+      - name
+      - not found
+      data_keys: []
+
+- id: DTP-constructor-import-alias-preserves-dtype-bracket-identity
+  category: tensor_dtype
+  title: Constructor import alias preserves dtype bracket identity
+  code: |
+    import std::tensor::ones as filled
+
+    fn main!() -> Res[Str, Str] {
+      let x = filled[f32](2, 3)
+      yield Ok(to_str(x.shape()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,3]"'
+
+- id: DTP-constructor-reexport-preserves-dtype-bracket-identity
+  category: tensor_dtype
+  title: Constructor re-export preserves dtype bracket identity
+  file_set_root: .
+  files:
+    app/tensor_api.eglur: |
+      module app::tensor_api
+
+      pub import std::tensor::ones as filled
+    app/main.eglur: |
+      module app::main
+
+      import app::tensor_api::filled
+
+      fn main!() -> Res[Str, Str] {
+        let x = filled[f32](2, 3)
+        yield Ok(to_str(x.shape()))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,3]"'
+
+- id: DTP-local-shadowing-removes-dtype-bracket-identity
+  category: tensor_dtype
+  title: Local shadowing removes imported constructor dtype bracket identity
+  code: |
+    import std::tensor::ones
+
+    fn ones(_dim: Nat) -> i64 = 1
+
+    fn main!() -> Res[Str, Str] {
+      _ = ones[f32](1)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: TYPE_ARG_BRACKET_SYNTAX_FORBIDDEN
+      message_contains:
+      - type argument
+      - bracket
+      - forbidden
+      data_keys: []
+
+- id: DTP-transparent-type-alias-is-valid-constructor-dtype
+  category: tensor_dtype
+  title: Transparent type alias is valid as a constructor dtype
+  code: |
+    import std::tensor::ones
+
+    type Real = f32
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[Real](2)
+      yield Ok(to_str(x.dtype()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"f32"'
+
+- id: DTP-unsupported-normalized-constructor-dtype-is-rejected
+  category: tensor_dtype
+  title: Unsupported normalized constructor dtype is rejected
+  code: |
+    import std::tensor::ones
+
+    type Flag = Tri
+
+    fn main!() -> Res[Str, Str] {
+      _ = ones[Flag](1)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - expected_family
+      data_equals:
+        reason: type_family
+        actual_type: Tri
+        expected_family: constructor_dtype
+
+- id: DTP-fixed-dtype-constructor-rejects-other-supported-dtype
+  category: tensor_dtype
+  title: Fixed dtype constructor rejects another otherwise supported dtype
+  code: |
+    import std::tensor::nan
+
+    fn main!() -> Res[Str, Str] {
+      _ = nan[f64](1)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - parameter
+      - expected_type
+      data_equals:
+        reason: parameter_type

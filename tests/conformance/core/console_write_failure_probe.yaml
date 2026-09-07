@@ -1,0 +1,40 @@
+# Suite: core/console_write_failure_probe.yaml
+# This suite is conditionally required only when precondition
+# `console_write_failure_probe` is active in the conformance harness.
+# The harness connects stdout and stderr to deterministic write-failure sinks
+# while observing returned values out of band.
+
+tests:
+- id: IOT-print-write-failure-returns-text-error-io
+  category: io_time
+  title: print! write failure returns TextError Io
+  code: |
+    import std::io::{TextError, print!}
+
+    fn main!() -> Res[Str, TextError] =
+      result {
+        _ = print!("stdout failure probe")?
+        yield Ok("unexpected success")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TextError
+      error_variant: TextError::Io
+
+- id: IOT-eprint-write-failure-returns-text-error-io
+  category: io_time
+  title: eprint! write failure returns TextError Io
+  code: |
+    import std::io::{TextError, eprint!}
+
+    fn main!() -> Res[Str, TextError] =
+      result {
+        _ = eprint!("stderr failure probe")?
+        yield Ok("unexpected success")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TextError
+      error_variant: TextError::Io

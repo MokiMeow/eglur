@@ -1,0 +1,259 @@
+tests:
+- id: PRG-unit-entry-maps-to-zero
+  category: program
+  title: Unit entry maps to zero
+  code: |
+    fn main!() -> Unit = ()
+  expect:
+    value:
+      kind: Unit
+    process_exit: 0
+
+- id: PRG-ok-entry-maps-to-zero-and-preserves-value
+  category: program
+  title: Ok entry maps to zero and preserves value
+  code: |
+    fn main!() -> Res[Str, Str] = Ok("ok")
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+    process_exit: 0
+
+- id: PRG-err-entry-maps-to-one-and-preserves-value
+  category: program
+  title: Err entry maps to one and preserves value
+  code: |
+    fn main!() -> Res[Str, Str] = Err("boom")
+  expect:
+    value:
+      kind: Err
+      repr: '"boom"'
+    process_exit: 1
+
+- id: PRG-runtime-abort-maps-to-one
+  category: program
+  title: Runtime abort maps to one
+  code: |
+    import std::test::abort!
+
+    fn main!() -> Unit {
+      abort!("RUNTIME_ABORT", "forced abort for program projection")
+    }
+  expect:
+    runtime_error:
+      code: RUNTIME_ABORT
+      message_contains:
+      - abort
+      data_keys:
+      - source
+      data_equals:
+        source: std::test::abort!
+    process_exit: 1
+
+- id: PRG-non-bang-main-does-not-satisfy-entry-contract
+  category: program
+  title: Non-bang main does not satisfy entry contract
+  code: |
+    fn main() -> Unit = ()
+  expect:
+    compile_error:
+      code: PROGRAM_ENTRY_MISSING
+      message_contains:
+      - program
+      - entry
+      - missing
+      data_keys: []
+      primary_span:
+        source: code
+        bytes: {start: 0, end: 0}
+
+- id: PRG-entry-parameters-are-rejected
+  category: program
+  title: Entry parameters are rejected
+  code: |
+    fn main!(value: i64) -> Unit = () // @primary parameterized-entry
+  expect:
+    compile_error:
+      code: PROGRAM_ENTRY_SIGNATURE_INVALID
+      message_contains:
+      - program
+      - entry
+      - signature
+      - invalid
+      data_keys: []
+      primary_span:
+        marker: parameterized-entry
+
+- id: PRG-generic-entry-is-rejected
+  category: program
+  title: Generic entry is rejected
+  code: |
+    fn main![T]() -> Unit = () // @primary generic-entry
+  expect:
+    compile_error:
+      code: PROGRAM_ENTRY_SIGNATURE_INVALID
+      message_contains:
+      - program
+      - entry
+      - signature
+      - invalid
+      data_keys: []
+      primary_span:
+        marker: generic-entry
+
+- id: PRG-arbitrary-entry-result-is-rejected
+  category: program
+  title: Arbitrary entry result is rejected
+  code: |
+    fn main!() -> i64 = 0 // @primary scalar-entry-result
+  expect:
+    compile_error:
+      code: PROGRAM_ENTRY_SIGNATURE_INVALID
+      message_contains:
+      - program
+      - entry
+      - signature
+      - invalid
+      data_keys: []
+      primary_span:
+        marker: scalar-entry-result
+
+- id: PRG-ownership-bearing-entry-result-is-rejected
+  category: program
+  title: Ownership-bearing entry result is rejected
+  code: |
+    fn main!() -> Res[Own[i64], Str] { // @primary ownership-entry-result
+      let value = 1
+      yield Ok(own value)
+    }
+  expect:
+    compile_error:
+      code: PROGRAM_ENTRY_SIGNATURE_INVALID
+      message_contains:
+      - program
+      - entry
+      - signature
+      - invalid
+      data_keys: []
+      primary_span:
+        marker: ownership-entry-result
+
+- id: PRG-duplicate-entry-is-rejected
+  category: program
+  title: Duplicate entry is rejected
+  code: |
+    fn main!() -> Unit = ()
+    fn main!() -> Res[Str, Str] = Ok("x") // @primary second-entry
+  expect:
+    compile_error:
+      code: PROGRAM_ENTRY_DUPLICATE
+      message_contains:
+      - program
+      - entry
+      - duplicate
+      data_keys: []
+      primary_span:
+        marker: second-entry
+
+- id: PRG-transparent-result-alias-is-accepted
+  category: program
+  title: Transparent result alias is accepted
+  code: |
+    type AppResult[T] = Res[T, Str]
+
+    fn main!() -> AppResult[Str] = Ok("ok")
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+    process_exit: 0
+
+- id: PRG-file-set-entry-source-selects-main
+  category: program
+  title: File-set entry source selects main
+  mode: file-set
+  files:
+    app/start.eglur: |
+      module app::start
+
+      fn main!() -> Res[Str, Str] = Ok("selected")
+    lib/other.eglur: |
+      module lib::other
+
+      fn main!() -> Res[Str, Str] = Ok("not selected")
+  entry: app/start.eglur
+  file_set_root: .
+  expect:
+    value:
+      kind: Ok
+      repr: '"selected"'
+    process_exit: 0
+
+- id: PRG-package-entry-source-selects-main
+  category: program
+  title: Package entry source selects main
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+    src/start.eglur: |
+      module start
+
+      fn main!() -> Res[Str, Str] = Ok("selected")
+    src/other.eglur: |
+      module other
+
+      fn main!() -> Res[Str, Str] = Ok("not selected")
+  entry: src/start.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"selected"'
+    process_exit: 0
+
+- id: PRG-source-error-precedes-entry-missing
+  category: program
+  title: Source error precedes entry missing
+  code: |
+    fn helper() -> i64 {
+      let value =
+      yield value
+    }
+  expect:
+    compile_error:
+      code: PARSE_EXPECTED_EXPRESSION
+      message_contains:
+      - parse
+      - expected
+      - expression
+      data_keys: []
+
+- id: PRG-never-entry-is-valid-and-has-no-normal-result-projection
+  category: program
+  title: Never entry is valid and terminates only through its fatal path
+  code: |
+    import std::test::abort!
+
+    fn main!() -> Never = abort!("RUNTIME_ABORT", "never entry")
+  expect:
+    runtime_error:
+      code: RUNTIME_ABORT
+      message_contains:
+      - abort
+      data_keys:
+      - source
+      data_equals:
+        source: std::test::abort!
+    process_exit: 1

@@ -1,0 +1,76 @@
+profile: registry-cache-v1
+requires_capability: shared_registry_cache
+fixture_manifest: tests/conformance/manifest.yaml
+observations:
+- cache_lookup_result
+- cache_publication_result
+- provider_requests
+- invocation_result
+- committed_snapshot_visibility
+cases:
+- id: RCACHE-cold-miss-then-warm-hit
+  title: cold miss publishes and warm hit avoids provider acquisition
+  scenario: cold_then_warm
+  fixture:
+    suite_id: core-modules
+    test_id: MOD-qualified-registry-dependency-resolves-from-canonical-tree
+- id: RCACHE-complete-coordinate-isolation
+  title: cache reuse requires the complete registry source coordinate
+  scenario: complete_coordinate_isolation
+  priming_fixture:
+    suite_id: core-modules
+    test_id: MOD-qualified-registry-dependency-resolves-from-canonical-tree
+  package_fixture:
+    suite_id: core-modules
+    test_id: MOD-distinct-registry-package-id-can-resolve-the-same-canonical-tree
+  version_fixture:
+    suite_id: core-modules
+    test_id: MOD-registry-release-version-must-match-target-package-metadata
+  integrity_fixture:
+    suite_id: core-modules
+    test_id: MOD-registry-canonical-tree-integrity-mismatch-is-rejected
+- id: RCACHE-failed-acquisition-not-published
+  title: failed acquisition leaves no committed snapshot
+  scenario: failed_acquisition_not_published
+  fixture:
+    suite_id: core-modules
+    test_id: MOD-registry-transport-failure-is-a-closed-outcome
+- id: RCACHE-invalid-package-not-published
+  title: invalid target package leaves no committed snapshot
+  scenario: invalid_package_not_published
+  fixture:
+    suite_id: core-modules
+    test_id: MOD-registry-valid-tree-without-manifest-retains-package-diagnostic
+- id: RCACHE-lookup-unavailable-fallback
+  title: unavailable cache lookup falls back to verified acquisition
+  scenario: cache_lookup_unavailable_fallback
+  fixture:
+    suite_id: core-modules
+    test_id: MOD-qualified-registry-dependency-resolves-from-canonical-tree
+- id: RCACHE-lookup-unavailable-preserves-provider-failure
+  title: unavailable cache lookup preserves the provider failure
+  scenario: cache_lookup_unavailable_preserves_provider_failure
+  fixture:
+    suite_id: core-modules
+    test_id: MOD-registry-transport-failure-is-a-closed-outcome
+- id: RCACHE-publication-unavailable-fallback
+  title: unavailable cache publication preserves the private verified result
+  scenario: cache_publication_unavailable_fallback
+  fixture:
+    suite_id: core-modules
+    test_id: MOD-qualified-registry-dependency-resolves-from-canonical-tree
+- id: RCACHE-recovered-incomplete-is-a-miss
+  title: recovered incomplete cache state is a miss
+  scenario: recovered_incomplete_is_miss
+  fixture:
+    suite_id: core-modules
+    test_id: MOD-qualified-registry-dependency-resolves-from-canonical-tree
+- id: RCACHE-concurrent-publication-converges
+  title: concurrent same-coordinate publication converges without partial visibility
+  scenario: concurrent_same_coordinate_converges
+  fixture:
+    suite_id: core-modules
+    test_id: MOD-qualified-registry-dependency-resolves-from-canonical-tree
+  participants: 2
+  publication_pause: before_logical_commit
+  lookup_rendezvous: second_lookup_entered

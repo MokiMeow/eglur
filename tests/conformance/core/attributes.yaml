@@ -1,0 +1,1245 @@
+tests:
+- id: ATR-non-derive-attribute-is-parse-valid-but-semantically-unsupported
+  category: attributes
+  title: non-derive attribute is parse-valid but semantically unsupported
+  code: |
+    #[meta::custom(flag = true, mode::fast(3), key = foo::bar)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ATTRIBUTE_UNSUPPORTED
+      message_contains:
+      - attribute
+      - unsupported
+      data_keys: []
+- id: ATR-derive-on-fn-target-is-unsupported-in-v0-1
+  category: attributes
+  title: derive on fn target is unsupported in v0.1
+  code: |
+    #[derive(LocalTrait)]
+    fn f() -> i64 = 1
+
+    trait LocalTrait {
+      fn show(self: &Self) -> Str
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(f()))
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TARGET_UNSUPPORTED
+      message_contains:
+      - derive
+      - target
+      - struct
+      - enum
+      data_keys: []
+- id: ATR-duplicate-derive-entry-is-rejected
+  category: attributes
+  title: duplicate derive entry is rejected
+  code: |
+    trait LocalTrait {
+      fn show(self: &Self) -> Str
+    }
+
+    #[derive(LocalTrait, LocalTrait)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_DUPLICATE_ENTRY
+      message_contains:
+      - derive
+      - duplicate
+      - trait
+      data_keys: []
+- id: ATR-repeated-derive-attributes-remain-distinct-coherence-candidates
+  category: attributes
+  title: repeated derive attributes remain distinct candidates for duplicate impl checking
+  code: |
+    #[derive(Eq)]
+    #[derive(Eq)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_DUPLICATE
+      message_contains:
+      - impl
+      - duplicate
+      data_keys: []
+- id: ATR-derive-path-must-resolve-to-trait-symbol
+  category: attributes
+  title: derive path must resolve to trait symbol
+  code: |
+    struct NotTrait {}
+
+    #[derive(NotTrait)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_RESOLUTION_FAILED
+      message_contains:
+      - derive
+      - trait
+      - resolve
+      - failed
+      data_keys: []
+- id: ATR-unresolved-derive-trait-path-is-rejected
+  category: attributes
+  title: unresolved derive trait path is rejected
+  code: |
+    #[derive(no::such::Trait)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_RESOLUTION_FAILED
+      message_contains:
+      - derive
+      - trait
+      - resolve
+      - failed
+      data_keys: []
+- id: ATR-resolved-trait-without-derive-support-is-rejected
+  category: attributes
+  title: resolved trait without derive support is rejected
+  code: |
+    trait Printable {
+      fn show(self: &Self) -> Str
+    }
+
+    #[derive(Printable)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_UNSUPPORTED
+      message_contains:
+      - derive
+      - trait
+      - unsupported
+      data_keys: []
+- id: ATR-attributes-must-appear-before-pub
+  category: attributes
+  title: attributes must appear before pub
+  code: |
+    pub #[derive(LocalTrait)]
+    struct S {
+      field x: i64
+    }
+
+    trait LocalTrait {
+      fn show(self: &Self) -> Str
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: ATR-derive-on-impl-target-is-unsupported-in-v0-1
+  category: attributes
+  title: derive on impl target is unsupported in v0.1
+  code: |
+    trait T {
+      fn f(self: &Self) -> i64
+    }
+
+    struct S {}
+
+    #[derive(T)]
+    impl T for S {
+      fn f(self: &Self) -> i64 = 1
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TARGET_UNSUPPORTED
+      message_contains:
+      - derive
+      - target
+      - struct
+      - enum
+      data_keys: []
+- id: ATR-built-in-debug-clone-order-default-derive-set-is-accepted
+  category: attributes
+  title: built-in debug/clone/order/default derive set is accepted
+  code: |
+    #[derive(Debug, Clone, Eq, Hash, Ord, Default)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: ATR-derived-debug-uses-canonical-struct-output
+  category: attributes
+  title: derived Debug uses canonical struct output
+  code: |
+    import std::str::FormatError
+
+    #[derive(Debug)]
+    struct Point {
+      field x: i64
+      field y: i64
+    }
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        let p = Point{ x: 1, y: 2 }
+        let s = format("{p:?}", p=p)?
+        yield Ok(s)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"Point { x: 1, y: 2 }"'
+- id: ATR-derived-clone-is-source-callable-and-non-consuming
+  category: attributes
+  title: derived Clone is source-callable and non-consuming
+  code: |
+    #[derive(Clone)]
+    struct Point {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let p = Point{ x: 7 }
+      let q = p.clone()
+      yield Ok(to_str((p.x == 7) && (q.x == 7)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: ATR-derived-eq-compares-struct-fields
+  category: attributes
+  title: derived Eq compares struct fields
+  code: |
+    #[derive(Eq)]
+    struct Point {
+      field x: i64
+      field y: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a = Point{ x: 1, y: 2 }
+      let b = Point{ x: 1, y: 2 }
+      let c = Point{ x: 1, y: 3 }
+      yield Ok(to_str((a == b) && (a != c)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: ATR-derived-hash-is-source-callable-without-eq
+  category: attributes
+  title: derived Hash is source-callable without Eq
+  code: |
+    #[derive(Hash)]
+    struct Token {
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let token = Token{ id: 7 }
+      yield Ok(to_str(Hash.hash(&token, 9) == Hash.hash(&token, 9)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: ATR-derived-eq-and-hash-enable-map-key-use
+  category: attributes
+  title: derived Eq and Hash enable Map key use
+  code: |
+    import std::map::Map
+
+    #[derive(Eq, Hash)]
+    struct Key {
+      field id: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let key = Key{ id: 3 }
+      let map = Map[Key,Str].new().insert(key, "value")
+      yield Ok(to_str(map.get(&Key{ id: 3 }).is_some()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: ATR-derived-hash-rejects-field-without-hash
+  category: attributes
+  title: derived Hash rejects field without Hash
+  code: |
+    struct NoHash {}
+
+    #[derive(Hash)]
+    struct Wrapper {
+      field value: NoHash
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_ELIGIBILITY_FAILED
+      message_contains:
+      - derive
+      - eligibility
+      - failed
+      data_keys: []
+- id: ATR-partialeq-is-not-a-v0-1-prelude-trait
+  category: attributes
+  title: PartialEq is not a v0.1 prelude trait
+  code: |
+    #[derive(PartialEq)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_RESOLUTION_FAILED
+      message_contains:
+      - derive
+      - trait
+      - resolve
+      - failed
+      data_keys: []
+- id: ATR-partialord-is-not-a-v0-1-prelude-trait
+  category: attributes
+  title: PartialOrd is not a v0.1 prelude trait
+  code: |
+    #[derive(PartialOrd)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_RESOLUTION_FAILED
+      message_contains:
+      - derive
+      - trait
+      - resolve
+      - failed
+      data_keys: []
+- id: ATR-derived-ord-defines-lexicographic-relational-operators
+  category: attributes
+  title: derived Ord defines lexicographic relational operators
+  code: |
+    #[derive(Ord, Eq)]
+    struct Version {
+      field major: i64
+      field minor: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a = Version{ major: 1, minor: 9 }
+      let b = Version{ major: 2, minor: 0 }
+      let c = Version{ major: 2, minor: 0 }
+      yield Ok(to_str((a < b) && (b <= c) && (c >= b)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: ATR-derived-ord-requires-eq
+  category: attributes
+  title: derived Ord requires Eq
+  code: |
+    #[derive(Ord)]
+    struct Version {
+      field major: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_ELIGIBILITY_FAILED
+      message_contains:
+      - derive
+      - eligibility
+      - failed
+      data_keys: []
+- id: ATR-display-is-not-in-v0-1-built-in-derive-surface
+  category: attributes
+  title: Display is not in v0.1 built-in derive surface
+  code: |
+    #[derive(Display)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_UNSUPPORTED
+      message_contains:
+      - derive
+      - trait
+      - unsupported
+      data_keys: []
+- id: ATR-from-is-not-in-v0-1-built-in-derive-surface
+  category: attributes
+  title: From is not in v0.1 built-in derive surface
+  code: |
+    #[derive(From)]
+    struct UserId {
+      field v: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_UNSUPPORTED
+      message_contains:
+      - derive
+      - trait
+      - unsupported
+      data_keys: []
+- id: ATR-tryfrom-is-not-in-v0-1-built-in-derive-surface
+  category: attributes
+  title: TryFrom is not in v0.1 built-in derive surface
+  code: |
+    #[derive(TryFrom)]
+    struct UserId {
+      field v: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_UNSUPPORTED
+      message_contains:
+      - derive
+      - trait
+      - unsupported
+      data_keys: []
+- id: ATR-error-is-not-in-v0-1-built-in-derive-surface
+  category: attributes
+  title: Error is not in v0.1 built-in derive surface
+  code: |
+    #[derive(Error)]
+    enum ParseErr {
+      BadToken(Str)
+      Eof
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_UNSUPPORTED
+      message_contains:
+      - derive
+      - trait
+      - unsupported
+      data_keys: []
+- id: ATR-into-is-not-in-v0-1-built-in-derive-surface
+  category: attributes
+  title: Into is not in v0.1 built-in derive surface
+  code: |
+    trait Into {
+      fn into(self: &Self) -> i64
+    }
+
+    #[derive(Into)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_UNSUPPORTED
+      message_contains:
+      - derive
+      - trait
+      - unsupported
+      data_keys: []
+- id: ATR-tryinto-is-not-in-v0-1-built-in-derive-surface
+  category: attributes
+  title: TryInto is not in v0.1 built-in derive surface
+  code: |
+    trait TryInto {
+      fn try_into(self: &Self) -> Res[i64, Str]
+    }
+
+    #[derive(TryInto)]
+    struct S {
+      field x: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_TRAIT_UNSUPPORTED
+      message_contains:
+      - derive
+      - trait
+      - unsupported
+      data_keys: []
+- id: ATR-derive-default-on-enum-requires-exactly-one-unit-default-variant-and-accepts-valid-case
+  category: attributes
+  title: derive Default on enum requires exactly one unit #[default] variant and accepts valid case
+  code: |
+    #[derive(Default)]
+    enum Mode {
+      #[default]
+      Train
+      Eval
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: ATR-derive-default-on-enum-fails-when-default-variant-is-missing
+  category: attributes
+  title: derive Default on enum fails when #[default] variant is missing
+  code: |
+    #[derive(Default)]
+    enum Mode {
+      Train
+      Eval
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_ELIGIBILITY_FAILED
+      message_contains:
+      - derive
+      - eligibility
+      - failed
+      data_keys: []
+- id: ATR-derive-default-on-enum-fails-when-multiple-default-variants-exist
+  category: attributes
+  title: derive Default on enum fails when multiple #[default] variants exist
+  code: |
+    #[derive(Default)]
+    enum Mode {
+      #[default]
+      Train
+      #[default]
+      Eval
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_ELIGIBILITY_FAILED
+      message_contains:
+      - derive
+      - eligibility
+      - failed
+      data_keys: []
+- id: ATR-derive-default-on-enum-fails-when-default-marks-non-unit-variant
+  category: attributes
+  title: derive Default on enum fails when #[default] marks non-unit variant
+  code: |
+    #[derive(Default)]
+    enum Mode {
+      #[default]
+      Train(i64)
+      Eval
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_ELIGIBILITY_FAILED
+      message_contains:
+      - derive
+      - eligibility
+      - failed
+      data_keys: []
+- id: ATR-derive-eq-and-hash-families-are-accepted-for-float-payloads-under-unified-total-order-policy
+  category: attributes
+  title: derive Eq and Hash families are accepted for float payloads under unified total order policy
+  code: |
+    #[derive(Eq, Ord, Hash)]
+    struct F {
+      field x: f32
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: ATR-built-in-derive-rejects-unconstrained-generic-payload-bound
+  category: attributes
+  title: built-in derive rejects unconstrained generic payload bound
+  code: |
+    #[derive(Clone)]
+    struct Wrapper[T] {
+      field value: T
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_ELIGIBILITY_FAILED
+      message_contains:
+      - derive
+      - eligibility
+      - failed
+      data_keys: []
+- id: ATR-built-in-derive-accepts-required-explicit-generic-bound
+  category: attributes
+  title: built-in derive accepts required explicit generic bound
+  code: |
+    #[derive(Clone)]
+    struct Wrapper[T: Clone] {
+      field value: T
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let original = Wrapper { value: 7 }
+      let copied = original.clone()
+      yield Ok(to_str(copied.value))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: ATR-recursive-eq-hash-derive-accepts-positive-self-cycle
+  category: attributes
+  title: recursive Eq and Hash derive accept a positive self cycle
+  code: |
+    #[derive(Eq, Hash)]
+    struct Tree {
+      field value: i64
+      field children: Seq[Tree]
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a = Tree{ value: 1, children: [Tree{ value: 2, children: [] }] }
+      let b = Tree{ value: 1, children: [Tree{ value: 2, children: [] }] }
+      let same_hash = Hash.hash(&a, 9) == Hash.hash(&b, 9)
+      yield Ok(to_str((a == b) && same_hash))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: ATR-mutual-recursive-eq-derive-accepts-positive-scc
+  category: attributes
+  title: mutually recursive Eq derives accept a positive candidate component
+  code: |
+    #[derive(Eq)]
+    struct Left {
+      field rights: Seq[Right]
+    }
+
+    #[derive(Eq)]
+    struct Right {
+      field lefts: Seq[Left]
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a = Left{ rights: [Right{ lefts: [Left{ rights: [] }] }] }
+      let b = Left{ rights: [Right{ lefts: [Left{ rights: [] }] }] }
+      yield Ok(to_str(a == b))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: ATR-mutual-recursive-derive-propagates-external-failure
+  category: attributes
+  title: recursive derive propagates an external field failure through its component
+  code: |
+    struct NoEq {}
+
+    #[derive(Eq)]
+    struct Left {
+      field rights: Seq[Right]
+    }
+
+    #[derive(Eq)]
+    struct Right {
+      field lefts: Seq[Left]
+      field payload: NoEq
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_ELIGIBILITY_FAILED
+      message_contains:
+      - derive
+      - eligibility
+      - failed
+      data_keys: []
+- id: ATR-recursive-derive-allows-generic-parameter-permutation
+  category: attributes
+  title: recursive derive allows bare generic parameters to be permuted
+  code: |
+    #[derive(Eq)]
+    struct Flip[A: Eq, B: Eq] {
+      field left: A
+      field right: B
+      field children: Seq[Flip[B, A]]
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a: Flip[i64, Str] = Flip{
+        left: 1,
+        right: "x",
+        children: [Flip{ left: "y", right: 2, children: [] }],
+      }
+      let b: Flip[i64, Str] = Flip{
+        left: 1,
+        right: "x",
+        children: [Flip{ left: "y", right: 2, children: [] }],
+      }
+      yield Ok(to_str(a == b))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: ATR-recursive-derive-allows-closed-type-replacement
+  category: attributes
+  title: recursive derive allows a generic parameter to be replaced by a closed type
+  code: |
+    #[derive(Eq)]
+    struct Reset[T: Eq] {
+      field value: T
+      field children: Seq[Reset[i64]]
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a: Reset[Str] = Reset{
+        value: "x",
+        children: [Reset{ value: 2, children: [] }],
+      }
+      let b: Reset[Str] = Reset{
+        value: "x",
+        children: [Reset{ value: 2, children: [] }],
+      }
+      yield Ok(to_str(a == b))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: ATR-recursive-derive-rejects-type-argument-growth
+  category: attributes
+  title: recursive derive rejects a source parameter nested in a recursive target argument
+  code: |
+    #[derive(Eq)]
+    struct Grow[T: Eq] {
+      field children: Seq[Grow[Opt[T]]]
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: DERIVE_ELIGIBILITY_FAILED
+      message_contains:
+      - derive
+      - eligibility
+      - failed
+      data_keys:
+      - trait
+      - reason
+      data_equals:
+        reason: recursive_type_argument_growth
+- id: ATR-enum-variant-attributes-other-than-default-are-unsupported-in-v0-1
+  category: attributes
+  title: enum variant attributes other than #[default] are unsupported in v0.1
+  code: |
+    enum Mode {
+      #[meta::note]
+      Train
+      Eval
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ATTRIBUTE_UNSUPPORTED
+      message_contains:
+      - attribute
+      - unsupported
+      data_keys: []
+- id: ATR-default-attribute-on-function-target-is-unsupported
+  category: attributes
+  title: "#[default] on function target is unsupported"
+  code: |
+    #[default]
+    fn f() -> Unit {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ATTRIBUTE_TARGET_UNSUPPORTED
+      message_contains:
+      - attribute
+      - target
+      - unsupported
+      data_keys: []
+- id: ATR-top-level-test-function-with-unit-return-is-accepted
+  category: attributes
+  title: top-level #[test] function with Unit return is accepted
+  code: |
+    #[test]
+    fn t() -> Unit {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: ATR-effectful-test-function-requires-bang-marker
+  category: attributes
+  title: effectful #[test] function requires bang marker
+  code: |
+    import std::test::emit!
+
+    #[test]
+    fn t() -> Unit = emit!("x")
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: ATR-bang-test-function-may-perform-effects
+  category: attributes
+  title: bang #[test] function may perform effects
+  code: |
+    import std::test::emit!
+
+    #[test]
+    fn t!() -> Unit = emit!("x")
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: ATR-test-target-must-be-top-level-function
+  category: attributes
+  title: "#[test] target must be top-level function"
+  code: |
+    struct S {
+      #[test]
+      fn t(self: &Self) -> Unit {}
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TEST_ATTRIBUTE_TARGET_UNSUPPORTED
+      message_contains:
+      - test
+      - attribute
+      - target
+      - top-level
+      - function
+      data_keys: []
+- id: ATR-attribute-before-public-struct-method-reaches-semantic-validation
+  category: attributes
+  title: attribute before public struct method reaches semantic validation
+  code: |
+    struct S {
+      #[test]
+      pub fn t(self: &Self) -> Unit {}
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TEST_ATTRIBUTE_TARGET_UNSUPPORTED
+      message_contains:
+      - test
+      - attribute
+      - target
+      - top-level
+      - function
+      data_keys: []
+- id: ATR-public-struct-method-cannot-place-attribute-after-visibility
+  category: attributes
+  title: public struct method cannot place attribute after visibility
+  code: |
+    struct S {
+      pub #[test]
+      fn t(self: &Self) -> Unit {}
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: ATR-test-function-must-have-zero-parameters
+  category: attributes
+  title: "#[test] function must have zero parameters"
+  code: |
+    #[test]
+    fn t(x: i64) -> Unit {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TEST_FUNCTION_INVALID_SIGNATURE
+      message_contains:
+      - test
+      - signature
+      - Unit
+      - Res
+      data_keys: []
+- id: ATR-test-function-must-not-be-generic
+  category: attributes
+  title: "#[test] function must not be generic"
+  code: |
+    #[test]
+    fn t[T]() -> Unit {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TEST_FUNCTION_INVALID_SIGNATURE
+      message_contains:
+      - test
+      - signature
+      - Unit
+      - Res
+      data_keys: []
+- id: ATR-test-return-type-must-be-unit-or-res-unit-e
+  category: attributes
+  title: "#[test] return type must be Unit or Res[Unit, E]"
+  code: |
+    #[test]
+    fn t() -> i64 = 1
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TEST_FUNCTION_INVALID_SIGNATURE
+      message_contains:
+      - test
+      - signature
+      - Unit
+      - Res
+      data_keys: []
+- id: ATR-ignore-requires-same-function-test
+  category: attributes
+  title: "#[ignore] requires same-function #[test]"
+  code: |
+    #[ignore]
+    fn t() -> Unit {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TEST_IGNORE_REQUIRES_TEST
+      message_contains:
+      - ignore
+      - requires
+      - test
+      data_keys: []
+- id: ATR-ignore-with-test-on-same-function-is-accepted
+  category: attributes
+  title: "#[ignore] with #[test] on same function is accepted"
+  code: |
+    #[ignore]
+    #[test]
+    fn t() -> Unit {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: ATR-ignore-with-test-on-method-target-uses-test-target-diagnostic
+  category: attributes
+  title: "#[ignore] with #[test] on method target uses test target diagnostic"
+  code: |
+    struct S {
+      #[ignore]
+      #[test]
+      fn t(self: &Self) -> Unit {}
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TEST_ATTRIBUTE_TARGET_UNSUPPORTED
+      message_contains:
+      - test
+      - attribute
+      - target
+      - top-level
+      - function
+      data_keys: []
+- id: ATR-test-function-may-return-res-unit-e
+  category: attributes
+  title: "#[test] function may return Res[Unit, E]"
+  code: |
+    #[test]
+    fn t() -> Res[Unit, Str] = Err("fail")
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+
+- id: ATR-test-runner-reports-package-discovery-order-and-ignore-state
+  category: attributes
+  title: test runner reports package discovery order and ignore state
+  mode: package
+  runner: test
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+    src/a_first.eglur: |
+      module a_first
+
+      #[test]
+      fn alpha() -> Unit {}
+
+      #[ignore]
+      #[test]
+      fn ignored() -> Unit {}
+    src/b_second.eglur: |
+      module b_second
+
+      #[test]
+      fn beta() -> Unit {}
+  entry: src/a_first.eglur
+  expect:
+    test_run:
+      order:
+      - module: a_first
+        name: alpha
+      - module: a_first
+        name: ignored
+      - module: b_second
+        name: beta
+      passed:
+      - module: a_first
+        name: alpha
+      - module: b_second
+        name: beta
+      skipped:
+      - module: a_first
+        name: ignored
+      failed: []
+
+- id: ATR-test-runner-res-unit-err-fails-with-rendered-error
+  category: attributes
+  title: test runner Res Unit Err fails with rendered error
+  runner: test
+  files:
+    res_failure.eglur: |
+      module res_failure
+
+      #[test]
+      fn fails() -> Res[Unit, Str] = Err("boom")
+  entry: res_failure.eglur
+  expect:
+    test_run:
+      order:
+      - module: res_failure
+        name: fails
+      passed: []
+      skipped: []
+      failed:
+      - module: res_failure
+        name: fails
+        kind: returned_err
+        message_contains:
+        - boom
+
+- id: ATR-test-runner-runtime-abort-fails-test-case
+  category: attributes
+  title: test runner runtime abort fails test case
+  runner: test
+  files:
+    abort_failure.eglur: |
+      module abort_failure
+
+      import std::test::abort!
+
+      #[test]
+      fn aborts!() -> Unit {
+        abort!("RUNTIME_ABORT", "abort from test")
+      }
+  entry: abort_failure.eglur
+  expect:
+    test_run:
+      order:
+      - module: abort_failure
+        name: aborts!
+      passed: []
+      skipped: []
+      failed:
+      - module: abort_failure
+        name: aborts!
+        kind: runtime_abort
+        runtime_code: RUNTIME_ABORT
+        message_contains:
+        - abort
+        - test
+
+- id: ATR-test-return-type-does-not-accept-never
+  category: attributes
+  title: "#[test] return type does not accept Never"
+  code: |
+    #[test]
+    fn diverges() -> Never = diverges()
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    compile_error:
+      code: TEST_FUNCTION_INVALID_SIGNATURE
+      message_contains:
+      - test
+      - signature
+      - Unit
+      - Res
+      data_keys: []

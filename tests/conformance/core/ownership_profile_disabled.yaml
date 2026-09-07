@@ -1,0 +1,62 @@
+tests:
+- id: OWD-ownership-disabled-profile-rejects-own-type-constructor-usage
+  category: ownership_profile_disabled
+  title: ownership-disabled profile rejects Own type constructor usage
+  code: |
+    fn takes(x: Own[i64]) -> i64 {
+      yield 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PROFILE_DISABLED
+      message_contains:
+      - ownership
+      - profile
+      - disabled
+      help_contains:
+      - enable ownership profile for Own surface
+      related_contains:
+      - Own type usage
+      data_keys: []
+- id: OWD-ownership-disabled-profile-rejects-own-and-move-operators
+  category: ownership_profile_disabled
+  title: ownership-disabled profile rejects own and move operators
+  code: |
+    fn consume(v: i64) -> i64 {
+      let x = own v
+      let y = move x
+      drop_own move y
+      yield 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_PROFILE_DISABLED
+      message_contains:
+      - ownership
+      - profile
+      - disabled
+      help_contains:
+      - enable ownership profile for ownership operators
+      related_contains:
+      - own operator
+      data_keys: []
+- id: OWD-ownership-disabled-profile-keeps-box-layout-surface
+  category: ownership_profile_disabled
+  title: ownership-disabled profile keeps Box layout surface
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let boxed = Box.new(7)
+      yield Ok(to_str(boxed.get()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'

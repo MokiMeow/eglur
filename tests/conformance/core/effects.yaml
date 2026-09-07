@@ -1,0 +1,1008 @@
+tests:
+- id: EFF-non-bang-function-cannot-call-print
+  category: effects
+  title: Non-bang function cannot call print!
+  code: |
+    import std::io::print!
+
+    fn f(x: i64) -> i64 {
+      print!("hi")
+      yield x
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-bang-function-may-call-print
+  category: effects
+  title: Bang function may call print!
+  code: |
+    import std::io::print!
+
+    fn f!(x: i64) -> i64 {
+      print!("hi")
+      yield x
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let r = f!(1)
+      yield Ok(to_str(r))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: EFF-non-bang-method-cannot-take-mut-self
+  category: effects
+  title: Non-bang method cannot take &mut self
+  code: |
+    struct C {
+      field mut n: i64
+      fn inc(self: &mut Self) -> i64 = self.n
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: EFFECT_SIGNATURE
+      message_contains:
+      - '&mut Self'
+      data_keys: []
+- id: EFF-bang-method-must-take-mut-self
+  category: effects
+  title: Bang method must take &mut self
+  code: |
+    struct C {
+      field mut n: i64
+      fn inc!(self: &Self) -> i64 = 1
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: EFFECT_SIGNATURE
+      message_contains:
+      - '&mut Self'
+      data_keys: []
+- id: EFF-legacy-sorted-should-not-exist-use-sort
+  category: effects
+  title: Legacy sorted() should not exist; use sort()
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let v = Vec[i64].new().push(3).push(1)
+      v.sorted()   // legacy name is not part of v0.1
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+- id: EFF-tap-returns-original-value-unchanged
+  category: effects
+  title: tap! returns original value unchanged
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      let x = (3).tap! { |_| emit!("seen") }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+    side_effects:
+    - seen
+- id: EFF-non-bang-function-cannot-read-time
+  category: effects
+  title: Non-bang function cannot read time
+  code: |
+    import std::time::now!
+
+    fn f() -> i64 {
+      _ = now!()
+      yield 0
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-bang-function-may-read-time
+  category: effects
+  title: Bang function may read time
+  code: |
+    import std::time::now!
+
+    fn f!() -> i64 {
+      _ = now!()
+      yield 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(f!()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"0"'
+- id: EFF-pure-traverse-res-rejects-effectful-callback
+  category: effects
+  title: Pure traverse_res rejects effectful callback
+  code: |
+    fn f!(x: i64) -> Res[i64, Str] = Ok(x)
+
+    fn main!() -> Res[Str, Str] {
+      _ = [1,2,3].traverse_res { f!(_) }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: EFF-then-desugars-to-call-and-cannot-hide-bang-call-in-non-bang-context
+  category: effects
+  title: then desugars to call and cannot hide bang call in non-bang context
+  code: |
+    fn bump!(x: i64) -> i64 = wrapping_add(x, 1)
+
+    fn g(x: i64) -> i64 = x.then(bump!)
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-then-desugars-to-call-and-works-in-bang-context
+  category: effects
+  title: then desugars to call and works in bang context
+  code: |
+    fn bump!(x: i64) -> i64 = wrapping_add(x, 1)
+
+    fn g!(x: i64) -> i64 = x.then(bump!)
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(g!(1)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: EFF-apply-desugars-to-call-and-cannot-hide-bang-call-in-non-bang-context
+  category: effects
+  title: apply desugars to call and cannot hide bang call in non-bang context
+  code: |
+    fn add!(a: i64, b: i64) -> i64 = wrapping_add(a, b)
+
+    fn g() -> i64 = (1, 2).apply(add!)
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-apply-desugars-to-one-visible-call-in-bang-context
+  category: effects
+  title: apply desugars to one call of its visible bang target in bang context
+  code: |
+    import std::test::emit!
+
+    fn add!(left: i64, right: i64) -> i64 {
+      emit!("add")
+      yield wrapping_add(left, right)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let value = (1, 2).apply(add!)
+      yield Ok(to_str(value))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+    side_effects:
+    - add
+- id: EFF-pure-map-rejects-effectful-callback-that-uses-then
+  category: effects
+  title: Pure map rejects effectful callback that uses then
+  code: |
+    fn bump!(x: i64) -> i64 = wrapping_add(x, 1)
+
+    fn main!() -> Res[Str, Str] {
+      _ = [1,2,3].map { |x| x.then(bump!) }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: EFF-pure-opt-map-rejects-effectful-callback
+  category: effects
+  title: Pure Opt map rejects effectful callback
+  code: |
+    fn bump!(x: i64) -> i64 = wrapping_add(x, 1)
+
+    fn main!() -> Res[Str, Str] {
+      _ = Some(1).map { |x| bump!(x) }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: EFF-pure-res-map-err-rejects-effectful-callback
+  category: effects
+  title: Pure Res map_err rejects effectful callback
+  code: |
+    fn decorate!(e: Str) -> Str = concat([e, "!"])
+
+    fn main!() -> Res[Str, Str] {
+      let r: Res[i64, Str] = Err("boom")
+      _ = r.map_err { |e| decorate!(e) }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: EFF-partial-application-captures-non-hole-args-in-enclosing-context
+  category: effects
+  title: Partial application captures non-hole args in enclosing context
+  code: |
+    fn add(a: i64, b: i64) -> i64 = wrapping_add(a, b)
+    fn tick!() -> i64 = 1
+
+    fn g() -> i64 {
+      let f = add(tick!(), _)
+      yield f(2)
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-partial-application-with-pure-captured-args-is-valid-in-non-bang
+  category: effects
+  title: Partial application with pure captured args is valid in non-bang
+  code: |
+    fn add(a: i64, b: i64) -> i64 = wrapping_add(a, b)
+
+    fn g() -> i64 {
+      let f = add(1, _)
+      yield f(2)
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok(to_str(g())) }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: EFF-fn-type-rejects-effectful-closure-value
+  category: effects
+  title: Fn type rejects effectful closure value
+  code: |
+    import std::test::emit!
+
+    fn run(f: Fn(i64) -> i64) -> i64 {
+      yield f(1)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let y = run { |x|
+        emit!("seen")
+        x
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-fn-type-rejects-effectful-hole-partial-application
+  category: effects
+  title: Fn type rejects effectful hole partial application
+  code: |
+    fn bump!(x: i64) -> i64 = wrapping_add(x, 1)
+
+    fn run(f: Fn(i64) -> i64) -> i64 {
+      yield f(1)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let y = run(bump!(_))
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-non-bang-may-call-local-state-only-bang-mutator-on-non-escaping-local-value
+  category: effects
+  title: Non-bang may call local-state-only bang mutator on non-escaping local value
+  code: |
+    struct Counter {
+      field mut n: i64
+
+      fn inc!(self: &mut Self) -> Unit {
+        self.n = wrapping_add(self.n, 1)
+      }
+
+      fn get(self: &Self) -> i64 = self.n
+    }
+
+    fn run() -> i64 {
+      let mut c = Counter{ n: 0 }
+      c.inc!()
+      yield c.get()
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(run()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: EFF-non-bang-function-cannot-declare-non-receiver-mut-parameter
+  category: effects
+  title: Non-bang function cannot declare non-receiver &mut parameter
+  code: |
+    struct Counter {
+      field mut n: i64
+    }
+
+    fn touch(c: &mut Counter) -> i64 = c.n
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: NON_BANG_MUT_PARAM_FORBIDDEN
+      message_contains:
+      - non-bang
+      - '&mut'
+      - forbidden
+      data_keys: []
+- id: EFF-explicit-property-setter-call-cannot-hide-non-local-effect-in-non-bang-context
+  category: effects
+  title: Explicit property setter call cannot hide non-local effect in non-bang context
+  code: |
+    import std::test::emit!
+
+    struct Counter {
+      field mut n: i64
+
+      prop mut count: i64 {
+        fn get_count(self: &Self) -> i64 = self.n
+
+        fn set_count!(self: &mut Self, value: i64) -> Unit {
+          emit!("set")
+          self.n = value
+        }
+      }
+    }
+
+    fn run() -> i64 {
+      let mut c = Counter{ n: 0 }
+      c.set_count!(1)
+      yield c.count
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(run()))
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-bang-context-may-call-explicit-property-setter-with-side-effects
+  category: effects
+  title: Bang context may call explicit property setter with side effects
+  code: |
+    import std::test::emit!
+
+    struct Counter {
+      field mut n: i64
+
+      prop mut count: i64 {
+        fn get_count(self: &Self) -> i64 = self.n
+
+        fn set_count!(self: &mut Self, value: i64) -> Unit {
+          emit!("set")
+          self.n = value
+        }
+      }
+    }
+
+    fn run!() -> i64 {
+      let mut c = Counter{ n: 0 }
+      c.set_count!(1)
+      yield c.count
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(run!()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+    side_effects:
+    - set
+- id: EFF-value-assignment-preserves-independence
+  category: effects
+  title: value assignment preserves independence
+  code: |
+    struct Counter {
+      field mut n: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let mut a = Counter{ n: 1 }
+      let mut b = a
+      b.n = 2
+      yield Ok(to_str(a.n))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: EFF-non-bang-cannot-mutate-external-state-through-explicit-mut-parameter
+  category: effects
+  title: non-bang cannot mutate external state through explicit &mut parameter
+  code: |
+    struct Counter {
+      field mut n: i64
+    }
+
+    fn touch(c: &mut Counter) -> Unit {
+      c.n = wrapping_add(c.n, 1)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let mut c = Counter{ n: 0 }
+      touch(&mut c)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: NON_BANG_MUT_PARAM_FORBIDDEN
+      message_contains:
+      - non-bang
+      - '&mut'
+      - forbidden
+      data_keys: []
+- id: EFF-non-bang-dead-if-branch-cannot-hide-effectful-call
+  category: effects
+  title: non-bang dead if branch cannot hide effectful call
+  code: |
+    import std::io::print!
+
+    fn f() -> i64 {
+      if false {
+        print!("dead")
+      } else {
+        _ = 0
+      }
+      yield 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(f()))
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-non-bang-zero-iteration-loop-body-cannot-hide-effectful-call
+  category: effects
+  title: non-bang zero-iteration loop body cannot hide effectful call
+  code: |
+    import std::io::print!
+
+    fn f() -> i64 {
+      for i in 0 .. 0 {
+        print!("dead")
+      }
+      yield 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(f()))
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-bang-sleep-can-consume-composed-duration-from-baseline-constructors-and-arithmetic
+  category: effects
+  title: bang sleep! can consume composed Duration from baseline constructors and arithmetic
+  code: |
+    import std::time::{sleep!, Duration, TimeError}
+
+    fn main!() -> Res[Str, TimeError] =
+      result {
+        let d0 = Duration.millis(2)?
+        let d1 = d0.add(Duration.nanos(500_000)?)?
+        let d2 = d1.mul(2)?
+        let d3 = d2.div(2)?
+        let d4 = d3.scale(1.0)?
+        sleep!(d4)
+        yield Ok(to_str(d4.as_nanos()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2500000"'
+- id: EFF-read-text-accepts-path-from-str-constructor-result
+  category: effects
+  title: read_text! accepts Path.from_str constructor result
+  code: |
+    import std::io::{LinkMode, read_text!, Path}
+
+    fn main!() -> Res[Str, Str] {
+      let r = read_text!(Path.from_str("__eglur_conformance_missing_file__"), LinkMode::Follow)
+      let ok = r.is_ok() || r.is_err()
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: EFF-path-lexical-helpers-remain-usable-in-non-bang-context
+  category: effects
+  title: Path lexical helpers remain usable in non-bang context
+  code: |
+    import std::io::Path
+
+    fn build() -> Str {
+      let base = Path.from_str("/tmp")
+      let child = Path.from_str("x.txt")
+      let p = base.join(&child)
+      let par = p.parent().map { _.to_str() }.unwrap_or("none")
+      let ext = p.extension().unwrap_or("none")
+      yield concat([par, "|", ext])
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(build())
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"/tmp|txt"'
+- id: EFF-non-bang-function-cannot-call-process-snapshot-helper
+  category: effects
+  title: Non-bang function cannot call process snapshot helper
+  code: |
+    import std::io::process_snapshot!
+
+    fn f() -> i64 {
+      _ = process_snapshot!()
+      yield 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(f()))
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-snapshot-accessors-are-pure-after-bang-capture
+  category: effects
+  title: Snapshot accessors are pure after bang capture
+  code: |
+    import std::io::{process_snapshot!, ProcessSnapshot, IoError}
+
+    fn read_snapshot(ps: &ProcessSnapshot) -> Res[Str, IoError] =
+      result {
+        let args = ps.args()?
+        let cwd = ps.cwd()?
+        yield Ok(concat([to_str(args.len()), "|", cwd.to_str()]))
+      }
+
+    fn main!() -> Res[Str, IoError] =
+      result {
+        let ps = process_snapshot!()
+        let out = read_snapshot(&ps)?
+        yield Ok(to_str(out != ""))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: EFF-non-bang-function-cannot-open-byte-reader
+  category: effects
+  title: Non-bang function cannot open byte reader
+  code: |
+    import std::io::{ByteReader, IoError, LinkMode, Path, open_reader!}
+
+    fn f() -> Res[Own[ByteReader], IoError] =
+      open_reader!(Path.from_str("__eglur_conformance_missing_stream.txt"), LinkMode::Follow)
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-tap-returns-original-value-unchanged-in-non-bang-context
+  category: effects
+  title: tap returns original value unchanged in non-bang context
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = (3).tap { |_|
+        _ = to_str(3)
+      }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: EFF-pure-tap-rejects-effectful-callback
+  category: effects
+  title: Pure tap rejects effectful callback
+  code: |
+    import std::test::emit!
+
+    fn main!() -> Res[Str, Str] {
+      _ = (3).tap { |_| emit!("seen") }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: EFF-imported-localizable-state-summary-allows-non-bang-local-call
+  category: effects
+  title: Imported localizable state summary allows non-bang local call
+  file_set_root: .
+  files:
+    app/state.eglur: |
+      module app::state
+
+      pub struct Counter {
+        field mut n: i64
+      }
+
+      pub fn counter() -> Counter = Counter{ n: 0 }
+
+      pub fn increment!(counter: &mut Counter) -> Unit {
+        counter.n = wrapping_add(counter.n, 1)
+      }
+
+      pub fn read(counter: &Counter) -> i64 = counter.n
+    app/main.eglur: |
+      module app::main
+      import app::state::{counter, increment!, read}
+
+      fn run() -> i64 {
+        let mut value = counter()
+        increment!(&mut value)
+        yield read(&value)
+      }
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(run()))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: EFF-imported-transitive-io-summary-rejects-non-bang-local-call
+  category: effects
+  title: Imported transitive IO summary rejects non-bang local call
+  file_set_root: .
+  files:
+    app/state.eglur: |
+      module app::state
+      import std::test::emit!
+
+      pub struct Counter {
+        field mut n: i64
+      }
+
+      pub fn counter() -> Counter = Counter{ n: 0 }
+
+      fn record!(counter: &mut Counter) -> Unit {
+        emit!("increment")
+        counter.n = wrapping_add(counter.n, 1)
+      }
+
+      pub fn increment!(counter: &mut Counter) -> Unit {
+        record!(counter)
+      }
+    app/main.eglur: |
+      module app::main
+      import app::state::{counter, increment!}
+
+      fn run() -> i64 {
+        let mut value = counter()
+        increment!(&mut value)
+        yield 1
+      }
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(run()))
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-re-export-preserves-localizable-state-summary
+  category: effects
+  title: Re-export preserves localizable state summary
+  file_set_root: .
+  files:
+    app/state.eglur: |
+      module app::state
+
+      pub struct Counter {
+        field mut n: i64
+      }
+
+      pub fn counter() -> Counter = Counter{ n: 0 }
+
+      pub fn increment!(counter: &mut Counter) -> Unit {
+        counter.n = wrapping_add(counter.n, 1)
+      }
+
+      pub fn read(counter: &Counter) -> i64 = counter.n
+    app/prelude.eglur: |
+      module app::prelude
+      pub import app::state::{counter, increment! as bump!, read}
+    app/main.eglur: |
+      module app::main
+      import app::prelude::{counter, bump!, read}
+
+      fn run() -> i64 {
+        let mut value = counter()
+        bump!(&mut value)
+        yield read(&value)
+      }
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(run()))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: EFF-concrete-trait-dispatch-uses-localizable-impl-summary
+  category: effects
+  title: Concrete trait dispatch uses localizable impl summary
+  code: |
+    trait Step {
+      fn step!(self: &mut Self) -> Unit
+    }
+
+    struct Counter {
+      field mut n: i64
+    }
+
+    impl Step for Counter {
+      fn step!(self: &mut Self) -> Unit {
+        self.n = wrapping_add(self.n, 1)
+      }
+    }
+
+    fn run() -> i64 {
+      let mut counter = Counter{ n: 0 }
+      counter.step!()
+      yield counter.n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(run()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: EFF-bounded-generic-bang-trait-call-has-unknown-summary
+  category: effects
+  title: Bounded generic bang trait call has unknown summary
+  code: |
+    trait Step {
+      fn step!(self: &mut Self) -> Unit
+    }
+
+    struct Counter {
+      field mut n: i64
+    }
+
+    impl Step for Counter {
+      fn step!(self: &mut Self) -> Unit {
+        self.n = wrapping_add(self.n, 1)
+      }
+    }
+
+    fn step_once![T: Step](value: &mut T) -> Unit {
+      value.step!()
+    }
+
+    fn run() -> i64 {
+      let mut counter = Counter{ n: 0 }
+      step_once!::[Counter](&mut counter)
+      yield counter.n
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(run()))
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-effectful-catalog-call-with-pure-callback-remains-localizable
+  category: effects
+  title: Effectful catalog call with pure callback remains localizable
+  code: |
+    import std::vec::Vec
+
+    fn retained_count() -> Nat {
+      let mut values = Vec[i64].new().extend([1, -1, 2])
+      values.retain! { _ > 0 }
+      yield values.len()
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(retained_count()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: EFF-effectful-callback-io-propagates-through-localizable-wrapper
+  category: effects
+  title: Effectful callback IO propagates through localizable wrapper
+  code: |
+    import std::test::emit!
+    import std::vec::Vec
+
+    fn retain_seen!(values: &mut Vec[i64]) -> Unit {
+      values.retain! { |value|
+        emit!(to_str(value))
+        value > 0
+      }
+    }
+
+    fn retained_count() -> Nat {
+      let mut values = Vec[i64].new().extend([1, -1, 2])
+      retain_seen!(&mut values)
+      yield values.len()
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(retained_count()))
+    }
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []
+- id: EFF-never-path-does-not-hide-later-effectful-source
+  category: effects
+  title: no-normal continuation does not hide a later effectful call
+  code: |
+    import std::io::print!
+
+    enum Empty {}
+
+    fn absurd(value: Empty) -> Never = match value {}
+
+    fn invalid(value: Empty) -> Never {
+      _ = absurd(value)
+      print!("still checked")
+    }
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    compile_error:
+      code: EFFECT_VIOLATION
+      message_contains: []
+      message_contains_any:
+      - - non-bang
+        - Fn
+        - pure
+      data_keys: []

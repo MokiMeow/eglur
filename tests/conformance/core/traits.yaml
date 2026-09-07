@@ -1,0 +1,3256 @@
+tests:
+- id: TRT-no-implementation-inheritance
+  category: traits
+  title: No implementation inheritance
+  code: |
+    struct A {}
+    struct B : A {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: INHERITANCE_FORBIDDEN
+      message_contains:
+      - inheritance
+      - forbidden
+      data_keys: []
+- id: TRT-trait-cannot-declare-field-members
+  category: traits
+  title: Trait cannot declare field members
+  code: |
+    trait T {
+      field mut n: i64
+      fn f(self: &Self) -> i64
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: TRAIT_STATE_FORBIDDEN
+      message_contains:
+      - trait
+      - state
+      data_keys: []
+- id: TRT-trait-cannot-declare-property-members
+  category: traits
+  title: Trait cannot declare property members
+  code: |
+    trait T {
+      prop count: i64 {
+        fn get_count(self: &Self) -> i64 = 0
+      }
+
+      fn f(self: &Self) -> i64
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: TRAIT_STATE_FORBIDDEN
+      message_contains:
+      - trait
+      - state
+      data_keys: []
+- id: TRT-default-body-assumes-exact-current-trait-through-generic-helper
+  category: traits
+  title: Default body assumes exact current trait through generic helper
+  code: |
+    trait Summary {
+      type Output
+      fn author(self: &Self) -> Self::Output
+      fn summary(self: &Self) -> Self::Output = summarize_current(self)
+    }
+
+    fn summarize_current[T: Summary](value: &T) -> T::Output = value.author()
+
+    struct Report {}
+
+    impl Summary for Report {
+      type Output = Str
+      fn author(self: &Self) -> Self::Output = "Ada"
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let report = Report{}
+      yield Ok(report.summary())
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"Ada"'
+- id: TRT-default-body-member-signatures-allow-mutual-references
+  category: traits
+  title: Default body member signatures allow mutual references
+  code: |
+    trait MutualDefaults {
+      fn left(self: &Self) -> i64 = self.right()
+      fn right(self: &Self) -> i64 = self.left()
+    }
+
+    struct Token {}
+    impl MutualDefaults for Token {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: TRT-default-body-requires-explicit-unrelated-trait-assumption
+  category: traits
+  title: Default body requires explicit unrelated trait assumption
+  code: |
+    trait Render {
+      fn render(self: &Self) -> Str
+    }
+
+    fn render_current[T: Render](value: &T) -> Str = value.render()
+
+    trait Summary {
+      fn summary(self: &Self) -> Str = render_current(self) // @primary unrelated-default-bound
+    }
+
+    struct Report {}
+    impl Summary for Report {
+      fn summary(self: &Self) -> Str = "override"
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+      primary_span:
+        marker: unrelated-default-bound
+- id: TRT-default-body-current-trait-assumption-requires-exact-trait-arguments
+  category: traits
+  title: Default body current-trait assumption requires exact trait arguments
+  code: |
+    trait Rel[A] {
+      fn value(self: &Self) -> i64
+      fn mismatched(self: &Self) -> i64 = read_rel::[Str, Self](self) // @primary mismatched-default-bound
+    }
+
+    fn read_rel[A, T: Rel[A]](value: &T) -> i64 = value.value()
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+      primary_span:
+        marker: mismatched-default-bound
+- id: TRT-default-body-rejects-recursive-external-obligation
+  category: traits
+  title: Default body rejects recursive external obligation
+  code: |
+    trait Loop {}
+    impl[T: Loop] Loop for T {}
+
+    fn require_loop[T: Loop](_value: &T) -> i64 = 1
+
+    trait UsesLoop {
+      fn value(self: &Self) -> i64 = require_loop(self) // @primary recursive-default-bound
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+      primary_span:
+        marker: recursive-default-bound
+- id: TRT-default-method-conflict-is-compile-error
+  category: traits
+  title: Default method conflict is compile error
+  code: |
+    trait A { fn f(self: &Self) -> i64 = 1 }
+    trait B { fn f(self: &Self) -> i64 = 2 }
+
+    struct C {}
+    impl A for C {}
+    impl B for C {}
+
+    fn g(c: &C) -> i64 = c.f()
+    fn main!() -> Res[Str, Str] { yield Ok(to_str(g(&C{}))) }
+  expect:
+    compile_error:
+      code: TRAIT_METHOD_AMBIGUOUS
+      message_contains:
+      - fully qualified
+      data_keys: []
+- id: TRT-required-method-conflict-is-compile-error
+  category: traits
+  title: Required method conflict is compile error
+  code: |
+    trait A { fn f(self: &Self) -> i64 }
+    trait B { fn f(self: &Self) -> i64 }
+
+    struct C {}
+
+    impl A for C {
+      fn f(self: &Self) -> i64 = 1
+    }
+
+    impl B for C {
+      fn f(self: &Self) -> i64 = 2
+    }
+
+    fn g(c: &C) -> i64 = c.f()
+    fn main!() -> Res[Str, Str] { yield Ok(to_str(g(&C{}))) }
+  expect:
+    compile_error:
+      code: TRAIT_METHOD_AMBIGUOUS
+      message_contains:
+      - fully qualified
+      data_keys: []
+- id: TRT-resolve-conflict-with-fully-qualified-call
+  category: traits
+  title: Resolve conflict with fully qualified call
+  code: |
+    trait A { fn f(self: &Self) -> i64 = 1 }
+    trait B { fn f(self: &Self) -> i64 = 2 }
+
+    struct C {}
+    impl A for C {}
+    impl B for C {}
+
+    fn g(c: &C) -> i64 = wrapping_add(A.f(c), B.f(c))
+    fn main!() -> Res[Str, Str] { yield Ok(to_str(g(&C{}))) }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: TRT-qualified-trait-method-is-a-callable-reference-under-expected-fn
+  category: traits
+  title: Qualified trait method is a callable reference under expected Fn
+  code: |
+    trait Rank {
+      fn rank(self: &Self) -> Nat
+    }
+
+    struct Count {}
+
+    impl Rank for Count {
+      fn rank(self: &Self) -> Nat = 1
+    }
+
+    fn invoke(value: &Count, ranker: Fn(&Count) -> Nat) -> Nat = ranker(value)
+
+    fn main!() -> Res[Str, Str] {
+      let value = Count{}
+      yield Ok(to_str(invoke(&value, Rank.rank)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: TRT-trait-method-ness-cannot-be-changed-by-impl
+  category: traits
+  title: Trait method !-ness cannot be changed by impl
+  code: |
+    trait T { fn push!(self: &mut Self, x: i64) -> Unit }
+    struct C {}
+
+    impl T for C {
+      fn push(self: &mut Self, x: i64) -> Unit {}
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: TRAIT_EFFECT_MISMATCH
+      message_contains:
+      - must match
+      data_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+      data_equals:
+        trait: T
+        method: "push!"
+        expected_signature: "fn push!(self: &mut Self, x: i64) -> Unit"
+        actual_signature: "fn push(self: &mut Self, x: i64) -> Unit"
+- id: TRT-impl-must-provide-required-trait-method
+  category: traits
+  title: Impl must provide required trait method
+  code: |
+    trait T {
+      fn f(self: &Self) -> i64
+      fn g(self: &Self) -> i64 = 1
+    }
+
+    struct C {}
+
+    impl T for C {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_MISSING_METHOD
+      message_contains:
+      - trait
+      - method
+      - missing
+      data_keys: []
+- id: TRT-impl-method-parameter-type-must-match-trait-signature
+  category: traits
+  title: Impl method parameter type must match trait signature
+  code: |
+    trait T {
+      fn f(self: &Self, x: i64) -> i64
+    }
+
+    struct C {}
+
+    impl T for C {
+      fn f(self: &Self, x: Str) -> i64 = 1
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_SIGNATURE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - method
+      - signature
+      - mismatch
+      data_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+      data_equals:
+        trait: T
+        method: f
+        expected_signature: "fn f(self: &Self, x: i64) -> i64"
+        actual_signature: "fn f(self: &Self, x: Str) -> i64"
+- id: TRT-impl-method-return-type-must-match-trait-signature
+  category: traits
+  title: Impl method return type must match trait signature
+  code: |
+    trait T {
+      fn f(self: &Self) -> i64
+    }
+
+    struct C {}
+
+    impl T for C {
+      fn f(self: &Self) -> Str = "x"
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_SIGNATURE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - method
+      - signature
+      - mismatch
+      data_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+- id: TRT-dyn-trait-must-be-explicit
+  category: traits
+  title: dyn Trait must be explicit
+  code: |
+    trait T { fn f(self: &Self) -> i64 }
+    fn g(t: T) -> i64 = t.f()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: DYN_MUST_BE_EXPLICIT
+      message_contains:
+      - dyn
+      data_keys: []
+- id: TRT-explicit-dyn-trait-parameter-is-not-v0-1-baseline
+  category: traits
+  title: explicit dyn Trait parameter is not v0.1 baseline
+  code: |
+    trait T { fn f(self: &Self) -> i64 }
+
+    fn g(t: dyn T) -> i64 = 0
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: DYN_TRAIT_UNSUPPORTED
+      message_contains:
+      - dyn
+      - trait
+      - unsupported
+      data_keys: []
+- id: TRT-explicit-dyn-trait-field-is-not-v0-1-baseline
+  category: traits
+  title: explicit dyn Trait field is not v0.1 baseline
+  code: |
+    trait T { fn f(self: &Self) -> i64 }
+
+    struct Holder {
+      field item: dyn T
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: DYN_TRAIT_UNSUPPORTED
+      message_contains:
+      - dyn
+      - trait
+      - unsupported
+      data_keys: []
+- id: TRT-foo-and-foo-are-distinct-names
+  category: traits
+  title: foo and foo! are distinct names
+  code: |
+    trait A { fn foo(self: &Self) -> i64 = 1 }
+    trait B { fn foo!(self: &mut Self) -> Unit {} }
+
+    struct C {}
+    impl A for C {}
+    impl B for C {}
+
+    fn main!() -> Res[Str, Str] { yield Ok(to_str(A.foo(&C{}))) }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: TRT-inherent-method-dispatch-has-priority-over-trait-method
+  category: traits
+  title: Inherent method dispatch has priority over trait method
+  code: |
+    trait A { fn f(self: &Self) -> i64 = 1 }
+
+    struct C {
+      fn f(self: &Self) -> i64 = 2
+    }
+
+    impl A for C {}
+
+    fn g(c: &C) -> i64 = c.f()
+
+    fn main!() -> Res[Str, Str] { yield Ok(to_str(g(&C{}))) }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: TRT-duplicate-impl-headers-are-forbidden
+  category: traits
+  title: Duplicate impl headers are forbidden
+  code: |
+    trait T { fn f(self: &Self) -> i64 }
+    struct C {}
+
+    impl T for C { fn f(self: &Self) -> i64 = 1 }
+    impl T for C { fn f(self: &Self) -> i64 = 2 }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_DUPLICATE
+      message_contains:
+      - impl
+      - duplicate
+      data_keys: []
+- id: TRT-overlapping-impls-are-forbidden
+  category: traits
+  title: Overlapping impls are forbidden
+  code: |
+    trait T { fn f(self: &Self) -> i64 }
+    struct Pair[A, B] {}
+
+    impl[X] T for Pair[X, i64] { fn f(self: &Self) -> i64 = 1 }
+    impl[Y] T for Pair[i64, Y] { fn f(self: &Self) -> i64 = 2 }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_OVERLAP
+      message_contains:
+      - impl
+      - overlap
+      data_keys: []
+- id: TRT-specialization-is-forbidden-in-v0-1
+  category: traits
+  title: Specialization is forbidden in v0.1
+  code: |
+    trait T { fn f(self: &Self) -> i64 }
+    struct Wrapper[A] {}
+
+    impl[X] T for Wrapper[X] { fn f(self: &Self) -> i64 = 1 }
+    impl T for Wrapper[i64] { fn f(self: &Self) -> i64 = 2 }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: SPECIALIZATION_FORBIDDEN
+      message_contains:
+      - specialization
+      - forbidden
+      data_keys: []
+- id: TRT-negative-impl-syntax-is-unsupported-in-v0-1
+  category: traits
+  title: Negative impl syntax is unsupported in v0.1
+  code: |
+    trait T { fn f(self: &Self) -> i64 }
+    struct C {}
+
+    impl !T for C {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: NEGATIVE_IMPL_UNSUPPORTED
+      message_contains:
+      - negative
+      - impl
+      - unsupported
+      data_keys: []
+- id: TRT-impl-generic-parameters-must-constrain-trait-or-type-header
+  category: traits
+  title: Impl generic parameters must constrain trait or type header
+  code: |
+    trait T { fn f(self: &Self) -> i64 }
+    struct C {}
+
+    impl[U] T for C { fn f(self: &Self) -> i64 = 1 }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: IMPL_UNCONSTRAINED_TYPE_PARAM
+      message_contains:
+      - impl
+      - type parameter
+      - unconstrained
+      data_keys: []
+- id: TRT-impl-generic-cannot-occur-under-error-union
+  category: traits
+  title: Impl generic parameters cannot occur below structural error unions
+  code: |
+    trait Marker {}
+    struct ParseError {}
+
+    impl[E] Marker for Res[Unit, Union[E, ParseError]] {} // @primary generic-error-union-impl
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: IMPL_GENERIC_ERROR_UNION_UNSUPPORTED
+      message_contains:
+      - impl
+      - generic parameter
+      - error union
+      - unsupported
+      data_keys:
+      - parameter
+      data_equals:
+        parameter: E
+      primary_span:
+        marker: generic-error-union-impl
+- id: TRT-nested-impl-generic-under-error-union-remains-forbidden-with-independent-evidence
+  category: traits
+  title: Independent header evidence does not authorize a nested error-union generic
+  code: |
+    trait Marker[E] {}
+    struct Wrapped[E] {}
+    struct ParseError {}
+
+    impl[E] Marker[E] for Res[Unit, Union[Wrapped[E], ParseError]] {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: IMPL_GENERIC_ERROR_UNION_UNSUPPORTED
+      message_contains:
+      - impl
+      - generic parameter
+      - error union
+      - unsupported
+      data_keys:
+      - parameter
+      data_equals:
+        parameter: E
+- id: TRT-implemented-trait-reference-cannot-contain-generic-error-union-member
+  category: traits
+  title: Implemented trait arguments cannot contain generic error-union members
+  code: |
+    trait Marker[T] {}
+    struct Carrier {}
+    struct ParseError {}
+
+    impl[E] Marker[Res[Unit, Union[E, ParseError]]] for Carrier {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: IMPL_GENERIC_ERROR_UNION_UNSUPPORTED
+      message_contains:
+      - impl
+      - generic parameter
+      - error union
+      - unsupported
+      data_keys:
+      - parameter
+      data_equals:
+        parameter: E
+- id: TRT-transparent-alias-cannot-hide-impl-generic-under-error-union
+  category: traits
+  title: Transparent aliases cannot hide impl generics below error unions
+  code: |
+    trait Marker {}
+    struct ParseError {}
+    type Outcome[E] = Res[Unit, Union[E, ParseError]]
+
+    impl[E] Marker for Outcome[E] {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: IMPL_GENERIC_ERROR_UNION_UNSUPPORTED
+      message_contains:
+      - impl
+      - generic parameter
+      - error union
+      - unsupported
+      data_keys:
+      - parameter
+      data_equals:
+        parameter: E
+- id: TRT-complete-error-parameter-and-collapsed-union-remain-valid-impl-headers
+  category: traits
+  title: Complete error parameters and unions collapsed by normalization remain valid
+  code: |
+    trait Whole {}
+    trait Collapsed {}
+
+    impl[E] Whole for Res[Unit, E] {}
+    impl[E] Collapsed for Res[Unit, Union[E, Never]] {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-rigid-error-union-impl-identity-uses-normalized-member-set
+  category: traits
+  title: Rigid error-union impl identity ignores order duplicates and Never
+  code: |
+    trait Marker {}
+    struct IoError {}
+    struct ParseError {}
+
+    impl Marker for Res[Unit, Union[IoError, ParseError]] {}
+    impl Marker for Res[Unit, Union[Never, ParseError, IoError, IoError]] {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_DUPLICATE
+      message_contains:
+      - impl
+      - duplicate
+      data_keys: []
+- id: TRT-disjoint-rigid-error-union-impls-remain-disjoint
+  category: traits
+  title: Distinct rigid error-union impl headers remain disjoint
+  code: |
+    trait Marker {}
+    struct IoError {}
+    struct ParseError {}
+    struct DomainError {}
+
+    impl Marker for Res[Unit, Union[IoError, ParseError]] {}
+    impl Marker for Res[Unit, Union[IoError, DomainError]] {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-complete-error-parameter-specializes-rigid-error-union-header
+  category: traits
+  title: Complete error parameter retains ordinary specialization classification
+  code: |
+    trait Marker {}
+    struct IoError {}
+    struct ParseError {}
+
+    impl[E] Marker for Res[Unit, E] {}
+    impl Marker for Res[Unit, Union[IoError, ParseError]] {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: SPECIALIZATION_FORBIDDEN
+      message_contains:
+      - specialization
+      - forbidden
+      data_keys: []
+- id: TRT-orphan-rule-rejects-impl-when-both-trait-and-type-are-non-local
+  category: traits
+  title: Orphan rule uses the nominal target head rather than a local type argument
+  code: |
+    import std::vec::Vec
+
+    struct Local {}
+
+    impl Eq for Vec[Local] {
+      fn eq(self: &Self, _other: &Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: ORPHAN_RULE_VIOLATION
+      message_contains:
+      - orphan
+      - local
+      - trait
+      - type
+      data_keys: []
+- id: TRT-nested-local-argument-does-not-localize-foreign-target-head
+  category: traits
+  title: Nested local argument does not localize a foreign target head
+  code: |
+    import std::vec::Vec
+
+    struct Local {}
+
+    impl Eq for Vec[Opt[Local]] {
+      fn eq(self: &Self, _other: &Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: ORPHAN_RULE_VIOLATION
+      message_contains:
+      - orphan
+      - local
+      - trait
+      - type
+      data_keys: []
+- id: TRT-local-generic-target-head-remains-local-directly-and-through-alias
+  category: traits
+  title: Local generic target head remains local directly and through alias expansion
+  code: |
+    import std::vec::Vec
+
+    struct Direct[T] {}
+    struct Aliased[T] {}
+    type LocalAlias = Aliased[Vec[i64]]
+
+    impl Display for Direct[Vec[i64]] {
+      fn to_str(self: &Self) -> Str = "direct"
+    }
+
+    impl Display for LocalAlias {
+      fn to_str(self: &Self) -> Str = "alias"
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-transparent-generic-alias-does-not-create-local-target-head
+  category: traits
+  title: Transparent generic alias does not create a local target head
+  code: |
+    import std::vec::Vec
+
+    struct Local {}
+    type LocalVec[T] = Vec[T]
+
+    impl Eq for LocalVec[Local] {
+      fn eq(self: &Self, _other: &Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: ORPHAN_RULE_VIOLATION
+      message_contains:
+      - orphan
+      - local
+      - trait
+      - type
+      data_keys: []
+- id: TRT-reference-to-local-type-has-no-local-nominal-target-head
+  category: traits
+  title: Reference to a local type has no local nominal target head
+  code: |
+    struct Local {}
+
+    impl Eq for &Local {
+      fn eq(self: &Self, _other: &Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: ORPHAN_RULE_VIOLATION
+      message_contains:
+      - orphan
+      - local
+      - trait
+      - type
+      data_keys: []
+- id: TRT-structural-target-with-local-member-has-no-local-nominal-target-head
+  category: traits
+  title: Structural target with a local member has no local nominal target head
+  code: |
+    struct Local {}
+
+    impl Eq for (Local, i64) {
+      fn eq(self: &Self, _other: &Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: ORPHAN_RULE_VIOLATION
+      message_contains:
+      - orphan
+      - local
+      - trait
+      - type
+      data_keys: []
+- id: TRT-local-trait-authorizes-reference-and-structural-targets
+  category: traits
+  title: Local trait authorizes reference and structural targets without local heads
+  code: |
+    trait LocalMark {}
+    struct Local {}
+
+    impl LocalMark for &Local {}
+    impl LocalMark for (Local, i64) {}
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-box-of-local-type-has-no-fundamental-locality-exception
+  category: traits
+  title: Box of a local type has no fundamental locality exception
+  code: |
+    struct Local {}
+
+    impl Eq for Box[Local] {
+      fn eq(self: &Self, _other: &Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: ORPHAN_RULE_VIOLATION
+      message_contains:
+      - orphan
+      - local
+      - trait
+      - type
+      data_keys: []
+- id: TRT-tensor-impl-specialization-is-forbidden-in-v0-1
+  category: traits
+  title: Tensor impl specialization is forbidden in v0.1
+  code: |
+    import std::tensor::Tensor
+
+    trait TScore { fn score(self: &Self) -> i64 }
+
+    impl[X] TScore for Tensor[X] { fn score(self: &Self) -> i64 = 1 }
+    impl TScore for Tensor[f32] { fn score(self: &Self) -> i64 = 2 }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: SPECIALIZATION_FORBIDDEN
+      message_contains:
+      - specialization
+      - forbidden
+      data_keys: []
+- id: TRT-tensor-type-has-no-orphan-rule-exception
+  category: traits
+  title: Tensor type has no orphan-rule exception
+  code: |
+    import std::tensor::Tensor
+
+    impl Eq for Tensor[f32] {
+      fn eq(self: &Self, _other: &Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: ORPHAN_RULE_VIOLATION
+      message_contains:
+      - orphan
+      - local
+      - trait
+      - type
+      data_keys: []
+- id: TRT-package-mode-orphan-rule-rejects-foreign-trait-for-foreign-type
+  category: traits
+  title: Package mode orphan rule rejects foreign trait for foreign type
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_model = { path = "deps/dep_model" }
+      dep_trait = { path = "deps/dep_trait" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_model = { target = "$root/dep_model", path = "deps/dep_model" }
+      dep_trait = { target = "$root/dep_trait", path = "deps/dep_trait" }
+
+      [[packages]]
+      node = "$root/dep_model"
+      name = "dep_model"
+      version = "1.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/dep_trait"
+      name = "dep_trait"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_model::types::Thing
+      import dep_trait::api::ForeignMark
+
+      impl ForeignMark for Thing {
+        fn mark(self: &Self) -> i64 = 1
+      }
+
+      fn main!() -> Res[Str, Str] { yield Ok("x") }
+    deps/dep_model/Eglur.toml: |
+      [package]
+      name = "dep_model"
+      version = "1.0.0"
+    deps/dep_model/src/types.eglur: |
+      module types
+
+      pub struct Thing {}
+    deps/dep_trait/Eglur.toml: |
+      [package]
+      name = "dep_trait"
+      version = "1.0.0"
+    deps/dep_trait/src/api.eglur: |
+      module api
+
+      pub trait ForeignMark {
+        fn mark(self: &Self) -> i64
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: ORPHAN_RULE_VIOLATION
+      message_contains:
+      - orphan
+      - local
+      - trait
+      - type
+      data_keys: []
+- id: TRT-package-mode-detects-duplicate-impls-across-modules
+  category: traits
+  title: Package mode detects duplicate impls across modules
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_model = { path = "deps/dep_model" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_model = { target = "$root/dep_model", path = "deps/dep_model" }
+
+      [[packages]]
+      node = "$root/dep_model"
+      name = "dep_model"
+      version = "1.0.0"
+      source = "path"
+    src/api.eglur: |
+      module api
+
+      pub trait LocalMark {
+        fn mark(self: &Self) -> i64
+      }
+    src/impl_a.eglur: |
+      module impl_a
+      import api::LocalMark
+      import dep_model::types::Thing
+
+      impl LocalMark for Thing {
+        fn mark(self: &Self) -> i64 = 1
+      }
+
+      pub fn touch_a() -> i64 = 1
+    src/impl_b.eglur: |
+      module impl_b
+      import api::LocalMark
+      import dep_model::types::Thing
+
+      impl LocalMark for Thing {
+        fn mark(self: &Self) -> i64 = 2
+      }
+
+      pub fn touch_b() -> i64 = 2
+    src/main.eglur: |
+      module main
+      import impl_a::touch_a
+      import impl_b::touch_b
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(touch_a() + touch_b()))
+      }
+    deps/dep_model/Eglur.toml: |
+      [package]
+      name = "dep_model"
+      version = "1.0.0"
+    deps/dep_model/src/types.eglur: |
+      module types
+
+      pub struct Thing {}
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_DUPLICATE
+      message_contains:
+      - impl
+      - duplicate
+      data_keys: []
+- id: TRT-package-mode-detects-overlapping-impls-across-modules
+  category: traits
+  title: Package mode detects overlapping impls across modules
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_model = { path = "deps/dep_model" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_model = { target = "$root/dep_model", path = "deps/dep_model" }
+
+      [[packages]]
+      node = "$root/dep_model"
+      name = "dep_model"
+      version = "1.0.0"
+      source = "path"
+    src/api.eglur: |
+      module api
+
+      pub trait LocalMark {
+        fn mark(self: &Self) -> i64
+      }
+    src/impl_a.eglur: |
+      module impl_a
+      import api::LocalMark
+      import dep_model::types::Pair
+
+      impl[X] LocalMark for Pair[X, i64] {
+        fn mark(self: &Self) -> i64 = 1
+      }
+
+      pub fn touch_a() -> i64 = 1
+    src/impl_b.eglur: |
+      module impl_b
+      import api::LocalMark
+      import dep_model::types::Pair
+
+      impl[Y] LocalMark for Pair[i64, Y] {
+        fn mark(self: &Self) -> i64 = 2
+      }
+
+      pub fn touch_b() -> i64 = 2
+    src/main.eglur: |
+      module main
+      import impl_a::touch_a
+      import impl_b::touch_b
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(touch_a() + touch_b()))
+      }
+    deps/dep_model/Eglur.toml: |
+      [package]
+      name = "dep_model"
+      version = "1.0.0"
+    deps/dep_model/src/types.eglur: |
+      module types
+
+      pub struct Pair[A, B] {}
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_OVERLAP
+      message_contains:
+      - impl
+      - overlap
+      data_keys: []
+- id: TRT-blanket-tensor-impl-is-allowed-when-coherence-constraints-are-satisfied
+  category: traits
+  title: Blanket tensor impl is allowed when coherence constraints are satisfied
+  code: |
+    import std::tensor::Tensor
+
+    trait LocalTensorTrait { fn mark(self: &Self) -> i64 }
+
+    impl[T] LocalTensorTrait for Tensor[T] {
+      fn mark(self: &Self) -> i64 = 0
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-same-name-inherent-methods-require-explicit-overload-marker
+  category: traits
+  title: Same-name inherent methods require explicit overload marker
+  code: |
+    struct C {
+      fn f(self: &Self, x: i64) -> i64 = x
+      fn f(self: &Self, x: f32) -> i64 = 0
+    }
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: OVERLOAD_MARKER_REQUIRED
+      message_contains:
+      - overload
+      - required
+      data_keys: []
+- id: TRT-explicit-inherent-method-overloads-dispatch-by-parameter-type
+  category: traits
+  title: Explicit inherent method overloads dispatch by parameter type
+  code: |
+    struct C {
+      overload fn f(self: &Self, x: i64) -> i64 = 1
+      overload fn f(self: &Self, x: f32) -> i64 = 2
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let c = C{}
+      let y: f32 = 1.0
+      yield Ok(to_str(wrapping_add(c.f(1), c.f(y))))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: TRT-trait-method-call-requires-trait-visibility-at-call-site
+  category: traits
+  title: Trait method call requires trait visibility at call site
+  file_set_root: .
+  files:
+    app/render.eglur: |
+      module app::render
+
+      pub trait Render { fn render(self: &Self) -> Str }
+      pub struct Doc {}
+
+      impl Render for Doc {
+        fn render(self: &Self) -> Str = "ok"
+      }
+    app/main.eglur: |
+      module app::main
+      import app::render::Doc
+
+      fn main!() -> Res[Str, Str] {
+        let d = Doc{}
+        yield Ok(d.render())
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+- id: TRT-trait-reexport-preserves-one-method-candidate-identity
+  category: traits
+  title: trait re-export preserves target identity and contributes one method candidate
+  file_set_root: .
+  files:
+    app/render.eglur: |
+      module app::render
+
+      pub trait Render { fn render(self: &Self) -> Str }
+      pub struct Doc {}
+
+      impl Render for Doc {
+        fn render(self: &Self) -> Str = "ok"
+      }
+    app/facade.eglur: |
+      module app::facade
+      pub import app::render::Render as FacadeRender
+    app/main.eglur: |
+      module app::main
+      import app::facade::FacadeRender
+      import app::render::{Doc, Render}
+
+      fn main!() -> Res[Str, Str] {
+        let doc = Doc{}
+        yield Ok(doc.render())
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: TRT-explicit-bounds-and-associated-types-preserve-carrier-and-result-types
+  category: traits
+  title: explicit bounds and associated types preserve carrier and result types
+  code: |
+    closed trait Readable {
+      type Elem
+      fn read(self: &Self) -> Self::Elem
+    }
+
+    struct Count {
+      field value: i64
+    }
+
+    impl Readable for Count {
+      type Elem = i64
+      fn read(self: &Self) -> i64 = self.value
+    }
+
+    fn project[C: Readable](x: C) -> C::Elem = x.read()
+    fn identity[C: Readable](x: C) -> C = x
+    fn closed(x: i64) -> i64 = x
+
+    fn main!() -> Res[Str, Str] {
+      let same = identity(Count { value: 7 })
+      let inferred = project(same)
+      let explicit = project::[Count](Count { value: 8 })
+      yield Ok(to_str(closed(wrapping_add(inferred, explicit))))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"15"'
+- id: TRT-inline-bound-must-resolve-to-a-trait
+  category: traits
+  title: inline bound must resolve to a trait
+  code: |
+    struct NotTrait {}
+
+    fn bad[T: NotTrait](x: T) -> T = x
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_INVALID
+      message_contains:
+      - trait
+      - bound
+      - invalid
+      data_keys: []
+- id: TRT-inline-bound-list-rejects-duplicate-trait-references
+  category: traits
+  title: inline bound list rejects duplicate trait references
+  code: |
+    trait Mark {}
+
+    fn bad[T: Mark + Mark](x: T) -> T = x
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_INVALID
+      message_contains:
+      - trait
+      - bound
+      - invalid
+      data_keys: []
+- id: TRT-inferred-type-argument-must-satisfy-declared-bound
+  category: traits
+  title: inferred type argument must satisfy declared bound
+  code: |
+    trait Mark {}
+    struct Plain {}
+
+    fn bounded[T: Mark](x: T) -> T = x
+
+    fn main!() -> Res[Str, Str] {
+      _ = bounded(Plain{})
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: TRT-leftmost-unsatisfied-bound-is-primary
+  category: traits
+  title: leftmost unsatisfied bound is primary
+  code: |
+    trait Left {}
+    trait Right {}
+    struct Plain {}
+
+    fn bounded[T: Left + Right](value: T) -> T = value
+
+    fn main!() -> Res[Str, Str] {
+      _ = bounded(Plain{}) // @primary unsatisfied-bound-use
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+      primary_span:
+        marker: unsatisfied-bound-use
+- id: TRT-recursive-bound-obligation-does-not-prove-itself
+  category: traits
+  title: recursive bound obligation does not prove itself
+  code: |
+    trait Loop {}
+    struct Plain {}
+
+    impl[T: Loop] Loop for T {}
+
+    fn bounded[T: Loop](value: T) -> T = value
+
+    fn main!() -> Res[Str, Str] {
+      _ = bounded(Plain{})
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: TRT-trait-impl-must-bind-every-associated-type
+  category: traits
+  title: trait impl must bind every associated type
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    struct Empty {}
+    impl HasItem for Empty {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_ASSOC_TYPE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - associated type
+      - mismatch
+      data_keys:
+      - trait
+      - associated_type
+      - reason
+      data_equals:
+        reason: missing
+- id: TRT-trait-impl-rejects-unknown-associated-type-binding
+  category: traits
+  title: trait impl rejects unknown associated type binding
+  code: |
+    trait Marker {}
+
+    struct Empty {}
+    impl Marker for Empty {
+      type Item = i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_ASSOC_TYPE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - associated type
+      - mismatch
+      data_keys:
+      - trait
+      - associated_type
+      - reason
+      data_equals:
+        reason: unknown
+- id: TRT-trait-impl-rejects-duplicate-associated-type-binding
+  category: traits
+  title: trait impl rejects duplicate associated type binding
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    struct Empty {}
+    impl HasItem for Empty {
+      type Item = i64
+      type Item = i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_ASSOC_TYPE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - associated type
+      - mismatch
+      data_keys:
+      - trait
+      - associated_type
+      - reason
+      data_equals:
+        reason: duplicate
+- id: TRT-associated-type-projection-rejects-bound-name-collision
+  category: traits
+  title: associated type projection rejects bound name collision
+  code: |
+    trait Left {
+      type Item
+      fn left(self: &Self) -> Self::Item
+    }
+
+    trait Right {
+      type Item
+      fn right(self: &Self) -> Self::Item
+    }
+
+    fn bad[T: Left + Right](x: T) -> T::Item = x.left()
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-associated-type-bindings-must-not-form-a-cycle
+  category: traits
+  title: associated type bindings must not form a cycle
+  code: |
+    trait Linked {
+      type Head
+      type Tail
+    }
+
+    struct Node {}
+    impl Linked for Node {
+      type Head = Self::Tail // @primary associated-cycle
+      type Tail = Self::Head
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_CYCLE
+      message_contains:
+      - associated type
+      - cycle
+      data_keys: []
+      primary_span:
+        marker: associated-cycle
+- id: TRT-generic-impl-self-bindings-must-not-form-symbolic-cycle
+  category: traits
+  title: generic impl Self bindings must not form symbolic cycle
+  code: |
+    trait Linked {
+      type Head
+      type Tail
+    }
+
+    struct Boxed[T] {}
+    impl[T] Linked for Boxed[T] {
+      type Head = Self::Tail
+      type Tail = Self::Head
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_CYCLE
+      message_contains:
+      - associated type
+      - cycle
+      data_keys: []
+- id: TRT-package-cannot-implement-foreign-closed-trait-for-local-type
+  category: traits
+  title: package cannot implement foreign closed trait for local type
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_trait = { path = "deps/dep_trait" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_trait = { target = "$root/dep_trait", path = "deps/dep_trait" }
+
+      [[packages]]
+      node = "$root/dep_trait"
+      name = "dep_trait"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_trait::api::ForeignClosed
+
+      struct Local {}
+
+      impl ForeignClosed for Local {
+        fn mark(self: &Self) -> i64 = 1
+      }
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/dep_trait/Eglur.toml: |
+      [package]
+      name = "dep_trait"
+      version = "1.0.0"
+    deps/dep_trait/src/api.eglur: |
+      module api
+
+      pub closed trait ForeignClosed {
+        fn mark(self: &Self) -> i64
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: CLOSED_TRAIT_IMPL_FORBIDDEN
+      message_contains:
+      - closed
+      - trait
+      - impl
+      - package
+      data_keys: []
+- id: TRT-closed-trait-may-be-implemented-across-modules-in-declaring-package
+  category: traits
+  title: closed trait may be implemented across modules in declaring package
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+    src/api.eglur: |
+      module api
+
+      pub closed trait LocalMark {
+        fn mark(self: &Self) -> i64
+      }
+    src/model.eglur: |
+      module model
+      import api::LocalMark
+
+      pub struct Thing {}
+
+      impl LocalMark for Thing {
+        fn mark(self: &Self) -> i64 = 9
+      }
+    src/main.eglur: |
+      module main
+      import api::LocalMark
+      import model::Thing
+
+      fn main!() -> Res[Str, Str] {
+        let thing = Thing{}
+        yield Ok(to_str(thing.mark()))
+      }
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"9"'
+- id: TRT-public-associated-type-is-usable-through-imported-trait
+  category: traits
+  title: public associated type is usable through imported trait
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_model = { path = "deps/dep_model" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_model = { target = "$root/dep_model", path = "deps/dep_model" }
+
+      [[packages]]
+      node = "$root/dep_model"
+      name = "dep_model"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_model::api::Readable
+      import dep_model::api::Count
+
+      fn project[T: Readable](value: T) -> T::Elem = value.read()
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(project(Count{})))
+      }
+    deps/dep_model/Eglur.toml: |
+      [package]
+      name = "dep_model"
+      version = "1.0.0"
+    deps/dep_model/src/api.eglur: |
+      module api
+
+      pub closed trait Readable {
+        type Elem
+        fn read(self: &Self) -> Self::Elem
+      }
+
+      pub struct Count {}
+
+      impl Readable for Count {
+        type Elem = i64
+        fn read(self: &Self) -> i64 = 9
+      }
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"9"'
+- id: TRT-bound-only-differences-do-not-make-impl-headers-disjoint
+  category: traits
+  title: bound-only differences do not make impl headers disjoint
+  code: |
+    trait Left {}
+    trait Right {}
+    trait Output {}
+    struct Boxed[T] {}
+
+    impl[T: Left] Output for Boxed[T] {}
+    impl[T: Right] Output for Boxed[T] {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_OVERLAP
+      message_contains:
+      - impl
+      - overlap
+      data_keys: []
+- id: TRT-trait-associated-type-names-must-be-unique
+  category: traits
+  title: trait associated type names must be unique
+  code: |
+    trait Duplicated {
+      type Item
+      type Item
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: NAME_AMBIGUOUS
+      message_contains:
+      - ambiguous
+      - name
+      data_keys: []
+- id: TRT-associated-type-projection-requires-a-declaring-bound
+  category: traits
+  title: associated type projection requires a declaring bound
+  code: |
+    fn bad[T](x: T) -> T::Item = x
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-associated-type-projection-is-forbidden-in-impl-target
+  category: traits
+  title: associated type projection is forbidden in impl target
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    trait Mark {}
+
+    impl[T: HasItem] Mark for T::Item {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-associated-type-binding-normalizes-through-bounded-impl-parameter
+  category: traits
+  title: associated type binding normalizes through bounded impl parameter
+  code: |
+    trait Readable {
+      type Elem
+      fn read(self: &Self) -> Self::Elem
+    }
+
+    struct Count {}
+    impl Readable for Count {
+      type Elem = i64
+      fn read(self: &Self) -> i64 = 7
+    }
+
+    struct Wrapped[T] {
+      field source: T
+    }
+
+    impl[T: Readable] Readable for Wrapped[T] {
+      type Elem = T::Elem
+      fn read(self: &Self) -> Self::Elem = self.source.read()
+    }
+
+    fn read_generic[T: Readable](value: &Wrapped[T]) -> T::Elem = value.read()
+    fn read_wrapped(value: &Wrapped[Count]) -> i64 = value.read()
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-trait-impl-signature-rejects-mismatch-after-associated-type-normalization
+  category: traits
+  title: trait impl signature rejects mismatch after associated type normalization
+  code: |
+    trait Readable {
+      type Elem
+      fn read(self: &Self) -> Self::Elem
+    }
+
+    struct Count {}
+    impl Readable for Count {
+      type Elem = i64
+      fn read(self: &Self) -> Str = "bad"
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_SIGNATURE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - method
+      - signature
+      - mismatch
+      data_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+- id: TRT-associated-type-projection-rejects-unknown-associated-name
+  category: traits
+  title: associated type projection rejects unknown associated name
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    fn bad[T: HasItem](value: T) -> T::Missing = value
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-associated-type-projection-rejects-concrete-base
+  category: traits
+  title: associated type projection rejects concrete base
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    struct Count {}
+    impl HasItem for Count {
+      type Item = i64
+    }
+
+    fn bad(_value: Count::Item) -> i64 = 0
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-associated-type-projection-rejects-chained-member
+  category: traits
+  title: associated type projection rejects chained member
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    fn bad[T: HasItem](value: T) -> T::Item::Nested = value
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-associated-type-projection-is-forbidden-in-implemented-trait-reference
+  category: traits
+  title: associated type projection is forbidden in implemented trait reference
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    trait Marker[T] {}
+    struct Boxed[T] {}
+
+    impl[T: HasItem] Marker[T::Item] for Boxed[T] {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-associated-bindings-do-not-distinguish-duplicate-impl-headers
+  category: traits
+  title: associated bindings do not distinguish duplicate impl headers
+  code: |
+    trait Output {
+      type Item
+    }
+
+    struct Boxed[T] {}
+
+    impl[T] Output for Boxed[T] {
+      type Item = i64
+    }
+
+    impl[T] Output for Boxed[T] {
+      type Item = Str
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_DUPLICATE
+      message_contains:
+      - impl
+      - duplicate
+      data_keys: []
+- id: TRT-generic-trait-reference-must-satisfy-declared-bound
+  category: traits
+  title: generic trait reference must satisfy declared bound
+  code: |
+    trait Mark {}
+    trait Uses[T: Mark] {}
+
+    struct Plain {}
+    struct Host {}
+
+    impl Uses[Plain] for Host {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: TRT-generic-impl-obligation-must-satisfy-impl-bound
+  category: traits
+  title: generic impl obligation must satisfy impl bound
+  code: |
+    trait Mark {}
+    trait Read {
+      fn read(self: &Self) -> i64
+    }
+
+    struct Plain {}
+    struct Wrapped[T] {}
+
+    impl[T: Mark] Read for Wrapped[T] {
+      fn read(self: &Self) -> i64 = 1
+    }
+
+    fn bad(value: &Wrapped[Plain]) -> i64 = value.read()
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: TRT-closed-remains-an-identifier-outside-trait-prefix
+  category: traits
+  title: closed remains an identifier outside trait prefix
+  code: |
+    fn closed(closed: i64) -> i64 = closed
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(closed(7)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: TRT-trait-method-call-works-when-trait-is-imported-at-call-site
+  category: traits
+  title: Trait method call works when trait is imported at call site
+  file_set_root: .
+  files:
+    app/render.eglur: |
+      module app::render
+
+      pub trait Render { fn render(self: &Self) -> Str }
+      pub struct Doc {}
+
+      impl Render for Doc {
+        fn render(self: &Self) -> Str = "ok"
+      }
+    app/main.eglur: |
+      module app::main
+      import app::render::Doc
+      import app::render::Render
+
+      fn main!() -> Res[Str, Str] {
+        let d = Doc{}
+        yield Ok(d.render())
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: TRT-inherent-name-match-blocks-trait-fallback-even-when-only-trait-signature-is-applicable
+  category: traits
+  title: Inherent name match blocks trait fallback even when only trait signature is applicable
+  code: |
+    trait T {
+      fn f(self: &Self, x: i64) -> i64 = 7
+    }
+
+    struct C {
+      fn f(self: &Self, x: Str) -> i64 = 1
+    }
+
+    impl T for C {}
+
+    fn main!() -> Res[Str, Str] {
+      let c = C{}
+      yield Ok(to_str(c.f(1)))
+    }
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+- id: TRT-method-overload-applicability-does-not-use-numeric-promotion-for-non-receiver-args
+  category: traits
+  title: Method overload applicability does not use numeric promotion for non-receiver args
+  code: |
+    struct C {
+      overload fn f(self: &Self, x: i64) -> i64 = 1
+      overload fn f(self: &Self, x: f32) -> i64 = 2
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let c = C{}
+      let x: u8 = 1
+      _ = c.f(x)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+- id: TRT-associated-type-binding-cannot-conceal-shared-reference
+  category: traits
+  title: associated type binding cannot conceal shared reference
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    struct Borrowing {}
+    impl HasItem for Borrowing {
+      type Item = &i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: REFERENCE_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - reference
+      - type position
+      - forbidden
+      data_keys: []
+- id: TRT-associated-type-binding-expands-alias-before-reference-check
+  category: traits
+  title: associated type binding expands alias before reference check
+  code: |
+    type Borrowed = &i64
+
+    trait HasItem {
+      type Item
+    }
+
+    struct Borrowing {}
+    impl HasItem for Borrowing {
+      type Item = Borrowed
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: REFERENCE_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - reference
+      - type position
+      - forbidden
+      data_keys: []
+- id: TRT-associated-type-binding-checks-callable-components-for-references
+  category: traits
+  title: associated type binding checks callable components for references
+  code: |
+    trait HasCallback {
+      type Callback
+    }
+
+    struct Borrowing {}
+    impl HasCallback for Borrowing {
+      type Callback = Fn(&i64) -> i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: REFERENCE_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - reference
+      - type position
+      - forbidden
+      data_keys: []
+- id: TRT-associated-binding-ownership-error-precedes-reference-error
+  category: traits
+  title: associated binding ownership error precedes reference error
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    struct Invalid {}
+    impl HasItem for Invalid {
+      type Item = Own[&i64]
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - Own
+      - type position
+      - forbidden
+      data_keys: []
+- id: TRT-generic-trait-reference-cannot-conceal-reference
+  category: traits
+  title: generic trait reference cannot conceal reference
+  code: |
+    trait Uses[T] {}
+    struct Host {}
+
+    impl Uses[&i64] for Host {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: REFERENCE_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - reference
+      - type position
+      - forbidden
+      data_keys: []
+- id: TRT-symbolic-well-formedness-environment-discharges-declared-bounds
+  category: traits
+  title: symbolic well-formedness environment discharges declared bounds
+  code: |
+    trait Mark {}
+    trait Uses[T: Mark] {}
+
+    struct Guarded[T: Mark] {
+      field value: T
+    }
+
+    struct Outer[T: Mark] {
+      field inner: Guarded[T]
+    }
+
+    struct Host[T: Mark] {
+      field value: T
+    }
+
+    impl[T: Mark] Uses[T] for Host[T] {}
+
+    fn accept[T: Mark, U: Uses[T]](_left: Guarded[T], _right: U) -> i64 = 1
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-symbolic-well-formedness-requires-exact-trait-arguments
+  category: traits
+  title: symbolic well-formedness requires exact trait arguments
+  code: |
+    trait Rel[T] {}
+
+    struct Guarded[T: Rel[i64]] {}
+
+    fn reject[T: Rel[Str]](_value: Guarded[T]) -> i64 = 0
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: TRT-impl-method-generic-bound-set-must-match-trait
+  category: traits
+  title: impl method generic bound set must match trait
+  code: |
+    trait Left {}
+    trait Extra {}
+
+    trait Mapper {
+      fn map[T: Left](self: &Self, value: T) -> T
+    }
+
+    struct Host {}
+    impl Mapper for Host {
+      fn map[T: Left + Extra](self: &Self, value: T) -> T = value
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_SIGNATURE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - method
+      - signature
+      - mismatch
+      data_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+      data_equals:
+        trait: Mapper
+        method: map
+        expected_signature: 'fn map[T0: Left](self: &Self, value: T0) -> T0'
+        actual_signature: 'fn map[T0: Extra + Left](self: &Self, value: T0) -> T0'
+- id: TRT-impl-method-generic-bound-set-is-order-insensitive
+  category: traits
+  title: impl method generic bound set is order insensitive
+  code: |
+    trait Left {}
+    trait Right {}
+
+    trait Mapper {
+      fn map[T: Left + Right](self: &Self, value: T) -> T
+    }
+
+    struct Host {}
+    impl Mapper for Host {
+      fn map[U: Right + Left](self: &Self, value: U) -> U = value
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-transparent-alias-cannot-hide-projection-in-impl-target
+  category: traits
+  title: transparent alias cannot hide projection in impl target
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    trait Mark {}
+    type Projected[T: HasItem] = T::Item
+
+    struct Only {}
+    impl HasItem for Only {
+      type Item = i64
+    }
+
+    impl Mark for Projected[Only] {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-transparent-alias-cannot-hide-projection-in-implemented-trait-reference
+  category: traits
+  title: transparent alias cannot hide projection in implemented trait reference
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    trait Marker[T] {}
+    struct Boxed {}
+    type Projected[T: HasItem] = T::Item
+
+    struct Only {}
+    impl HasItem for Only {
+      type Item = i64
+    }
+
+    impl Marker[Projected[Only]] for Boxed {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-associated-type-application-rejects-generic-arguments
+  category: traits
+  title: associated type application rejects generic arguments
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    fn bad[T: HasItem](_value: T::Item[i64]) -> i64 = 0
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TYPE_ARG_ARITY_MISMATCH
+      message_contains:
+      - type argument
+      - arity
+      data_keys:
+      - expected_count
+      - actual_count
+- id: TRT-qualified-concrete-type-path-cannot-project-associated-type
+  category: traits
+  title: qualified concrete type path cannot project associated type
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub trait HasItem {
+        type Item
+      }
+
+      pub struct Count {}
+      impl HasItem for Count {
+        type Item = i64
+      }
+    app/main.eglur: |
+      module app::main
+
+      fn bad(_value: app::model::Count::Item) -> i64 = 0
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-imported-concrete-type-alias-cannot-project-associated-type
+  category: traits
+  title: imported concrete type alias cannot project associated type
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub trait HasItem {
+        type Item
+      }
+
+      pub struct Count {}
+      impl HasItem for Count {
+        type Item = i64
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Count as LocalCount
+
+      fn bad(_value: LocalCount::Item) -> i64 = 0
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: ASSOCIATED_TYPE_PROJECTION_INVALID
+      message_contains:
+      - associated type
+      - projection
+      - invalid
+      data_keys: []
+- id: TRT-associated-type-name-is-not-a-standalone-import
+  category: traits
+  title: associated type name is not a standalone import
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub trait HasItem {
+        type Item
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Item
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: IMPORT_NOT_FOUND
+      message_contains:
+      - import
+      - not found
+      data_keys: []
+- id: TRT-public-conformance-cannot-expose-private-associated-binding
+  category: traits
+  title: public conformance cannot expose private associated binding
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      pub trait Expose {
+        type Item
+      }
+
+      struct Hidden {}
+
+      pub struct PublicCarrier {}
+      impl Expose for PublicCarrier {
+        type Item = Hidden // @primary private-associated-binding
+      }
+    app/main.eglur: |
+      module app::main
+      import app::api::{Expose, PublicCarrier}
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: private-associated-binding
+- id: TRT-public-conformance-checks-nested-associated-binding-visibility
+  category: traits
+  title: public conformance checks nested associated binding visibility
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      pub trait Expose {
+        type Item
+      }
+
+      struct Hidden {}
+
+      pub struct PublicCarrier {}
+      impl Expose for PublicCarrier {
+        type Item = Vec[Hidden]
+      }
+    app/main.eglur: |
+      module app::main
+      import app::api::{Expose, PublicCarrier}
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: TRT-public-conformance-allows-private-alias-with-public-expansion
+  category: traits
+  title: public conformance allows private alias with public expansion
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      pub trait Expose {
+        type Item
+      }
+
+      type InternalCount = i64
+
+      pub struct PublicCarrier {}
+      impl Expose for PublicCarrier {
+        type Item = InternalCount
+      }
+    app/main.eglur: |
+      module app::main
+      import app::api::{Expose, PublicCarrier}
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+
+- id: TRT-public-conformance-on-intrinsic-target-checks-associated-visibility
+  category: traits
+  title: public conformance on intrinsic target checks associated visibility
+  code: |
+    pub trait Expose {
+      type Item
+    }
+
+    struct Hidden {}
+    impl Expose for i64 {
+      type Item = Hidden
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: TRT-associated-reference-error-precedes-public-visibility-error
+  category: traits
+  title: associated reference error precedes public visibility error
+  code: |
+    pub trait Expose {
+      type Item
+    }
+
+    struct Hidden {}
+    pub struct PublicCarrier {}
+    impl Expose for PublicCarrier {
+      type Item = &Hidden
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: REFERENCE_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - reference
+      - type position
+      - forbidden
+      data_keys: []
+- id: TRT-private-carrier-may-bind-private-associated-type
+  category: traits
+  title: private carrier may bind private associated type
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      pub trait Expose {
+        type Item
+      }
+
+      struct Hidden {}
+      struct LocalCarrier {}
+      impl Expose for LocalCarrier {
+        type Item = Hidden
+      }
+
+      pub fn touch() -> i64 = 1
+    app/main.eglur: |
+      module app::main
+      import app::api::touch
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(touch()))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: TRT-private-trait-may-bind-private-associated-type-for-public-carrier
+  category: traits
+  title: private trait may bind private associated type for public carrier
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      trait LocalExpose {
+        type Item
+      }
+
+      struct Hidden {}
+      pub struct PublicCarrier {}
+      impl LocalExpose for PublicCarrier {
+        type Item = Hidden
+      }
+
+      pub fn touch() -> i64 = 1
+    app/main.eglur: |
+      module app::main
+      import app::api::touch
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(touch()))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: TRT-public-generic-conformance-may-bind-symbolic-public-projection
+  category: traits
+  title: public generic conformance may bind symbolic public projection
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      pub trait Source {
+        type Item
+      }
+
+      pub trait Expose {
+        type Item
+      }
+
+      pub struct Carrier[T: Source] {}
+      impl[T: Source] Expose for Carrier[T] {
+        type Item = T::Item
+      }
+
+      pub struct Count {}
+      impl Source for Count {
+        type Item = i64
+      }
+
+      pub fn touch() -> i64 = 1
+    app/main.eglur: |
+      module app::main
+      import app::api::touch
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(touch()))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: TRT-associated-binding-completeness-precedes-invalid-rhs
+  category: traits
+  title: associated binding completeness precedes invalid RHS
+  code: |
+    trait Pair {
+      type Left
+      type Right
+    }
+
+    struct Broken {}
+    impl Pair for Broken {
+      type Left = Missing::Item
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_ASSOC_TYPE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - associated type
+      - mismatch
+      data_keys:
+      - trait
+      - associated_type
+      - reason
+      data_equals:
+        reason: missing
+- id: TRT-private-qualified-base-fails-visibility-before-projection-classification
+  category: traits
+  title: private qualified base fails visibility before projection classification
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      struct Hidden {}
+    app/main.eglur: |
+      module app::main
+
+      fn bad(_value: app::model::Hidden::Item) -> i64 = 0
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: TRT-self-projection-in-impl-header-preserves-self-diagnostic
+  category: traits
+  title: Self projection in impl header preserves Self diagnostic
+  code: |
+    trait HasItem {
+      type Item
+    }
+
+    trait Marker {}
+
+    impl Marker for Self::Item {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: SELF_TYPE_INVALID
+      message_contains:
+      - Self
+      - scope
+      - invalid
+      data_keys: []
+- id: TRT-recursive-bound-during-associated-result-selection-remains-bound-error
+  category: traits
+  title: recursive bound during associated result selection remains bound error
+  code: |
+    trait Loop {}
+    impl[T: Loop] Loop for T {}
+
+    trait Readable {
+      type Elem
+      fn read(self: &Self) -> Self::Elem
+    }
+
+    struct Wrapped[T] {}
+    impl[T: Loop] Readable for Wrapped[T] {
+      type Elem = i64
+      fn read(self: &Self) -> Self::Elem = 1
+    }
+
+    struct Plain {}
+    fn bad(value: &Wrapped[Plain]) -> i64 = value.read()
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: TRT-prelude-eq-method-defines-operator-equality
+  category: traits
+  title: prelude Eq method defines operator equality
+  code: |
+    struct Key {
+      field id: i64
+      field revision: i64
+    }
+
+    impl Eq for Key {
+      fn eq(self: &Self, other: &Self) -> Bool = self.id == other.id
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a = Key{ id: 7, revision: 1 }
+      let b = Key{ id: 7, revision: 2 }
+      let c = Key{ id: 8, revision: 1 }
+      yield Ok(to_str((a == b) && (a != c)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: TRT-prelude-eq-impl-must-provide-required-method
+  category: traits
+  title: prelude Eq impl must provide required method
+  code: |
+    struct Key {}
+    impl Eq for Key {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_MISSING_METHOD
+      message_contains:
+      - trait
+      - method
+      - missing
+      data_keys: []
+- id: TRT-prelude-eq-impl-method-must-match-signature
+  category: traits
+  title: prelude Eq impl method must match signature
+  code: |
+    struct Key {}
+    impl Eq for Key {
+      fn eq(self: &Self, other: Self) -> Bool = true
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_SIGNATURE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - method
+      - signature
+      - mismatch
+      data_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+- id: TRT-prelude-ord-method-defines-relational-operators
+  category: traits
+  title: prelude Ord method defines relational operators
+  code: |
+    struct Priority {
+      field rank: i64
+    }
+
+    impl Eq for Priority {
+      fn eq(self: &Self, other: &Self) -> Bool = self.rank == other.rank
+    }
+
+    impl Ord for Priority {
+      fn cmp(self: &Self, other: &Self) -> Ordering =
+        Ord.cmp(&other.rank, &self.rank)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let high = Priority{ rank: 10 }
+      let low = Priority{ rank: 1 }
+      let same = Priority{ rank: 10 }
+      yield Ok(to_str((high < low) && (high <= same) && (low > high)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: TRT-prelude-ord-impl-requires-eq
+  category: traits
+  title: prelude Ord impl requires Eq
+  code: |
+    struct Key {}
+
+    impl Ord for Key {
+      fn cmp(self: &Self, other: &Self) -> Ordering = Ordering::Equal
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+      data_equals:
+        trait: Eq
+        type: Key
+- id: TRT-prelude-ord-impl-must-provide-required-method
+  category: traits
+  title: prelude Ord impl must provide required method
+  code: |
+    struct Key {}
+
+    impl Eq for Key {
+      fn eq(self: &Self, other: &Self) -> Bool = true
+    }
+    impl Ord for Key {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_MISSING_METHOD
+      message_contains:
+      - trait
+      - method
+      - missing
+      data_keys: []
+- id: TRT-prelude-ord-impl-method-must-match-signature
+  category: traits
+  title: prelude Ord impl method must match signature
+  code: |
+    struct Key {}
+
+    impl Eq for Key {
+      fn eq(self: &Self, other: &Self) -> Bool = true
+    }
+    impl Ord for Key {
+      fn cmp(self: &Self, other: Self) -> Ordering = Ordering::Equal
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_SIGNATURE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - method
+      - signature
+      - mismatch
+      data_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+- id: TRT-prelude-hash-is-source-callable-deterministic-for-one-seed-and-independent-of-eq
+  category: traits
+  title: prelude Hash is source-callable, deterministic for one seed, and independent of Eq
+  code: |
+    struct Token {
+      field id: i64
+    }
+
+    impl Hash for Token {
+      fn hash(self: &Self, seed: u64) -> u64 =
+        Hash.hash(&self.id, seed)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let token = Token{ id: 7 }
+      let first = Hash.hash(&token, 42)
+      let second = Hash.hash(&token, 42)
+      yield Ok(to_str(first == second))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: TRT-prelude-hash-impl-must-provide-required-method
+  category: traits
+  title: prelude Hash impl must provide required method
+  code: |
+    struct Key {}
+    impl Hash for Key {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_MISSING_METHOD
+      message_contains:
+      - trait
+      - method
+      - missing
+      data_keys: []
+- id: TRT-prelude-hash-impl-method-must-match-seeded-signature
+  category: traits
+  title: prelude Hash impl method must match seeded signature
+  code: |
+    struct Key {}
+    impl Hash for Key {
+      fn hash(self: &Self) -> u64 = 0
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_IMPL_SIGNATURE_MISMATCH
+      message_contains:
+      - trait
+      - impl
+      - method
+      - signature
+      - mismatch
+      data_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+- id: TRT-public-conformance-header-cannot-contain-private-type-argument
+  category: traits
+  title: public conformance header cannot contain a private type argument
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      pub trait Marker {}
+      pub struct Carrier[T] {}
+      struct Hidden {}
+
+      impl Marker for Carrier[Hidden] {} // @primary public-impl-private-argument
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-impl-private-argument
+- id: TRT-public-conformance-trait-reference-cannot-contain-private-type-argument
+  category: traits
+  title: public conformance trait reference cannot contain a private type argument
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      pub trait Marker[T] {}
+      pub struct Carrier {}
+      struct Hidden {}
+
+      impl Marker[Hidden] for Carrier {} // @primary public-impl-trait-private-argument
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-impl-trait-private-argument
+- id: TRT-public-conformance-bound-cannot-name-private-trait
+  category: traits
+  title: public conformance bound cannot name a private trait
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      trait Internal {}
+      pub trait Marker {}
+      pub struct Carrier[T] {}
+
+      impl[T: Internal] Marker for Carrier[T] {} // @primary public-impl-private-bound
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-impl-private-bound

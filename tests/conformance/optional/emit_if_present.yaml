@@ -1,0 +1,108 @@
+tests:
+- id: OEP-axis-names-dropped-contract-is-validated-when-emitted
+  category: optional_emit_if_present
+  title: AXIS_NAMES_DROPPED contract is validated when emitted
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::reshape
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError]] =
+      result {
+        let t = zeros[f32](2,3).with_names([#0:'mol, #1:'task])?
+        _ = reshape(t, [6].to_vec())?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+    value_diagnostics:
+    - code: AXIS_NAMES_DROPPED
+      message_contains:
+      - dropped
+      - name
+      help_contains:
+      - inspect axis-name preservation for reshape merge or split
+      related_contains:
+      - reshape axis-name overlay handling
+      data_keys: []
+
+- id: OEP-axis-overlay-permuted-contract-is-validated-when-emitted
+  category: optional_emit_if_present
+  title: AXIS_OVERLAY_PERMUTED contract is validated when emitted
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::permute
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError]] =
+      result {
+        let t = zeros[f32](2,3,4).with_names([#0:'B, #1:'T, #2:'C])?
+        _ = permute(t, [#0, #2, #1].to_vec())?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+    value_diagnostics:
+    - code: AXIS_OVERLAY_PERMUTED
+      message_contains:
+      - permute
+      - Named
+      help_contains:
+      - verify overlay index remap after permute
+      related_contains:
+      - permute overlay update path
+      data_keys: []
+
+- id: OEP-traverse-opt-none-contract-is-validated-when-emitted
+  category: optional_emit_if_present
+  title: TRAVERSE_OPT_NONE contract is validated when emitted
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = [Some(1), None, Some(3)].sequence_opt()
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+    value_diagnostics:
+    - code: TRAVERSE_OPT_NONE
+      message_contains:
+      - index 1
+      help_contains:
+      - inspect first None index in sequence/traverse path
+      related_contains:
+      - sequence_opt short-circuit path
+      data_keys:
+      - index
+
+- id: OEP-map_axis-opt-none-contract-is-validated-when-emitted
+  category: optional_emit_if_present
+  title: MAP_AXIS_OPT_NONE contract is validated when emitted
+  code: |
+    import std::tensor::{ones, map_axis, axis}
+
+    fn f(_x: Tensor[f32]) -> Opt[Tensor[f32]] = None
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[f32](3,2)
+      let g = map_axis(f, in_axes=axis(0))
+      _ = g(x)
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+    value_diagnostics:
+    - code: MAP_AXIS_OPT_NONE
+      message_contains:
+      - index 0
+      help_contains:
+      - inspect first None index in map_axis optional path
+      related_contains:
+      - map_axis Opt short-circuit path
+      data_keys:
+      - index

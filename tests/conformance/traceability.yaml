@@ -1,0 +1,2882 @@
+# Generated machine-checkable mapping: required diagnostic code -> conformance tests
+version: '0.1'
+release_history_root: repository-root
+release: v0.1.0
+status: released
+coverage_scope: diagnostic_codes
+sources:
+  required_codes:
+    - docs/spec/errors/compile-codes.md
+    - docs/spec/errors/extension-codes.md
+    - docs/spec/errors/runtime-codes.md
+  diagnostic_contract: docs/spec/errors/diagnostic-contracts.yaml
+  suites_manifest: tests/conformance/manifest.yaml
+policy:
+  excluded_nonbaseline_codes:
+    - AXIS_ALIASED_HEADER
+    - DERIVE_EXPANSION_FORBIDDEN
+    - GRAD_CUSTOM_KERNEL_NO_VJP
+    - GRAD_RESULT_SHAPE_MISMATCH
+    - OWNERSHIP_PROFILE_DISABLED
+  conditional_required_codes:
+    - code: DETERMINISM_UNAVAILABLE
+      precondition: strict_unavailable_path
+    - code: EXTERN_LINKAGE_FAILED
+      precondition: ffi_linkage_probe
+summary:
+  required_code_count: 272
+  baseline_scope_code_count: 267
+  asserted_code_count: 263
+  mentioned_only_code_count: 0
+  uncovered_code_count: 9
+  hard_required_code_count: 261
+  hard_required_asserted_count: 261
+  hard_required_gap_count: 0
+  conditional_required_code_count: 2
+  conditional_required_asserted_count: 2
+  optional_emit_if_present_code_count: 4
+  optional_emit_if_present_asserted_count: 0
+  optional_probe_suite_count: 1
+  optional_probe_optional_emit_if_present_asserted_count: 4
+  optional_probe_optional_emit_if_present_mentioned_only_count: 0
+  optional_probe_optional_emit_if_present_unasserted_count: 0
+  optional_extension_code_count: 5
+  optional_extension_asserted_count: 1
+  optional_extension_mentioned_only_count: 0
+  optional_extension_unasserted_count: 4
+  optional_extension_suite_count: 1
+  excluded_nonbaseline_code_count: 5
+  contract_failure_count: 0
+  contract_message_token_missing_count: 0
+  contract_help_token_missing_count: 0
+  contract_related_token_missing_count: 0
+  contract_data_key_missing_count: 0
+  contract_data_equals_failure_count: 0
+contract_validation:
+  failure_count: 0
+  failures:
+    []
+coverage:
+  - code: ABSTRACT_NUMERIC_KIND_VALUE_POSITION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-abstract-numeric-kind-cannot-be-field-annotation, TYC-abstract-numeric-kind-cannot-be-generic-concrete-argument, TYC-abstract-numeric-kind-cannot-be-local-annotation, TYC-abstract-numeric-kind-cannot-be-parameter-type, TYC-abstract-numeric-kind-cannot-be-return-type]
+    mentioned_only_in: []
+  - code: AMBIGUOUS_DIMS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-einop-output-only-symbol-requires-size-binding, XFM-named-axis-pack-partition-ambiguity-fails-with-ambiguousdims, XFM-non-unique-dim-solve-is-rejected-even-if-reduction-output-is-shape-unique, XFM-output-only-free-dim-is-ambiguous, XFM-view-without-enough-constraints-fails-with-ambiguousdims, XFM-zero-product-has-multiple-dimension-solutions]
+    mentioned_only_in: []
+  - code: ASSIGNMENT_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-assignment-annotation-mismatch-precedes-destructuring, TYC-assignment-type-mismatch-alias-annotation, TYC-assignment-type-mismatch-annotated-local, TYC-assignment-type-mismatch-const-initializer, TYC-assignment-type-mismatch-explicit-dereference, TYC-assignment-type-mismatch-mutable-field, TYC-assignment-type-mismatch-mutable-local, TYC-assignment-type-mismatch-reference-binding, TYC-assignment-type-mismatch-tuple-annotation, TYC-assignment-type-mismatch-wildcard-annotation, TYC-assignment-value-mismatch-precedes-effect-check]
+    mentioned_only_in: []
+  - code: ASSIGN_TARGET_NOT_ASSIGNABLE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-assignment-nonstorage-target-precedes-value-mismatch, TYC-bare-assignment-does-not-introduce-local, TYC-call-result-is-not-assignable-target, TYC-try-expression-is-not-assignable-target]
+    mentioned_only_in: []
+  - code: ASSOCIATED_TYPE_CYCLE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-associated-type-bindings-must-not-form-a-cycle, TRT-generic-impl-self-bindings-must-not-form-symbolic-cycle]
+    mentioned_only_in: []
+  - code: ASSOCIATED_TYPE_PROJECTION_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-associated-type-projection-is-forbidden-in-impl-target, TRT-associated-type-projection-is-forbidden-in-implemented-trait-reference, TRT-associated-type-projection-rejects-bound-name-collision, TRT-associated-type-projection-rejects-chained-member, TRT-associated-type-projection-rejects-concrete-base, TRT-associated-type-projection-rejects-unknown-associated-name, TRT-associated-type-projection-requires-a-declaring-bound, TRT-imported-concrete-type-alias-cannot-project-associated-type, TRT-qualified-concrete-type-path-cannot-project-associated-type, TRT-transparent-alias-cannot-hide-projection-in-impl-target, TRT-transparent-alias-cannot-hide-projection-in-implemented-trait-reference]
+    mentioned_only_in: []
+  - code: ATTRIBUTE_TARGET_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-default-attribute-on-function-target-is-unsupported]
+    mentioned_only_in: []
+  - code: ATTRIBUTE_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-enum-variant-attributes-other-than-default-are-unsupported-in-v0-1, ATR-non-derive-attribute-is-parse-valid-but-semantically-unsupported]
+    mentioned_only_in: []
+  - code: AXIS_ALIASED_HEADER
+    severity: error
+    policy: excluded_nonbaseline
+    status: uncovered
+    asserted_in: []
+    mentioned_only_in: []
+  - code: AXIS_DUPLICATE_NAME
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-overlay
+        file: tensor/overlay.yaml
+        test_ids: [AX-with-names-patch-checks-retained-names-in-axis-order, AX-with-names-rejects-duplicate-axisname-in-overlay]
+    mentioned_only_in: []
+  - code: AXIS_MAPPING_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-einop-rejects-tagged-sum-in-left-axis-expression, XFM-einop-rejects-tagged-sum-in-right-axis-expression, XFM-non-distributive-equal-numel-axisexpr-map-is-unsupported]
+    mentioned_only_in: []
+  - code: AXIS_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-contract
+        file: tensor/contract.yaml
+        test_ids: [TCT-repeated-label-strict-names-check-later-occurrences, TCT-strict-names-prefers-axis-mismatch-over-shape-mismatch-when-both-are-possible, TCT-strict-names-rejects-mismatched-semantic-names, TCT-with-aliases-rejects-canonical-label-remap, TCT-with-aliases-rejects-target-outside-contract-labels]
+    mentioned_only_in: []
+  - code: AXIS_NAMES_DROPPED
+    severity: warning
+    policy: optional_emit_if_present
+    status: uncovered
+    asserted_in: []
+    mentioned_only_in: []
+  - code: AXIS_NAME_NOT_FOUND
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-sum-by-missing-axisname-fails-with-axis-name-not-found]
+    mentioned_only_in: []
+  - code: AXIS_OUT_OF_RANGE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-overlay
+        file: tensor/overlay.yaml
+        test_ids: [AX-with-names-bounds-failure-precedes-patched-duplicate, AX-with-names-validates-axisindex-bounds]
+    mentioned_only_in: []
+  - code: AXIS_OVERLAY_PERMUTED
+    severity: note
+    policy: optional_emit_if_present
+    status: uncovered
+    asserted_in: []
+    mentioned_only_in: []
+  - code: AXIS_PACK_ANON_DUPLICATE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-duplicate-anonymous-axis-packs-are-forbidden]
+    mentioned_only_in: []
+  - code: AXIS_PACK_UNBOUND
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-einop-rejects-unbound-anonymous-output-pack, XFM-output-named-axis-pack-must-be-bound-on-input-side]
+    mentioned_only_in: []
+  - code: BINDING_TYPE_UNDETERMINED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-result
+        file: core/result.yaml
+        test_ids: [RES-never-final-yield-does-not-infer-result-family, RES-result-block-without-question-mark-requires-expected-context]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-annotated-let-mut-without-initializer-is-rejected, TYC-annotated-let-without-initializer-is-rejected, TYC-empty-array-literal-without-expected-type-is-underdetermined, TYC-empty-map-literal-without-contextual-type-is-rejected, TYC-local-binding-without-type-and-initializer-is-rejected, TYC-none-binding-without-contextual-type-is-rejected, TYC-ordinary-closure-binding-does-not-infer-from-later-call, TYC-res-err-binding-without-ok-type-context-is-rejected, TYC-res-ok-binding-without-error-type-context-is-rejected]
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-reduce-by-immediate-invocation-requires-complete-callback-result, RDX-reduce-by-untyped-stored-schema-fails-at-initializer]
+    mentioned_only_in: []
+  - code: BREAK_OUTSIDE_LOOP
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-loops
+        file: core/loops.yaml
+        test_ids: [LOP-break-inside-closure-cannot-target-outer-loop, LOP-break-outside-loop-is-compile-error]
+    mentioned_only_in: []
+  - code: BROADCAST_SHAPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-elementwise
+        file: tensor/elementwise.yaml
+        test_ids: [ELW-runtime-incompatible-trailing-dimensions-return-shapeerror, ELW-static-incompatible-trailing-dimensions-use-broadcast-shape-mismatch, ELW-static-zero-sized-axis-rejects-larger-axis]
+      - id: tensor-indexing
+        file: tensor/indexing.yaml
+        test_ids: [TIX-const-empty-scatter-rejects-incompatible-values-before-no-op, TIX-incompatible-take-coordinate-shapes-are-rejected, TIX-runtime-scatter-value-directed-expansion-mismatch-returns-shape-error]
+      - id: tensor-movement
+        file: tensor/movement.yaml
+        test_ids: [AX-runtime-expand-rejects-non-singleton-replacement, AX-static-expand-rejects-non-singleton-replacement, AX-static-expand-rejects-rank-shrink, AX-static-expand-rejects-zero-to-nonzero]
+    mentioned_only_in: []
+  - code: CALL_ARG_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-concurrency
+        file: core/concurrency.yaml
+        test_ids: [CON-spawn-rejects-preconstructed-fn-with-nonzero-arity]
+      - id: core-result
+        file: core/result.yaml
+        test_ids: [RES-error-union-err-constructor-rejects-non-member-payload]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-bare-integer-literal-does-not-gain-overloads-by-bounded-fit, TYC-call-argument-type-mismatch-is-rejected, TYC-expected-generic-owner-payload-mismatch-is-rejected, TYC-fn-type-rejects-callable-arity-mismatch, TYC-fn-type-rejects-callable-result-mismatch, TYC-nested-block-type-mismatch-belongs-to-call-argument, TYC-nonliteral-constructor-constraint-contextualizes-integer-literal, TYC-raw-pointer-const-to-mut-argument-is-not-weakened, TYC-raw-pointer-pointee-mismatch-is-rejected-at-extern-sink, TYC-res-err-constructor-payload-mismatch-is-rejected, TYC-res-ok-constructor-payload-mismatch-is-rejected]
+      - id: tensor-dtypes
+        file: tensor/dtypes.yaml
+        test_ids: [DTP-fixed-dtype-constructor-rejects-other-supported-dtype, DTP-unsupported-normalized-constructor-dtype-is-rejected]
+      - id: tensor-grad
+        file: tensor/grad.yaml
+        test_ids: [TGD-grad-rejects-tensorview-primal-result-family, TGD-value-and-grad-rejects-tensorview-primal-result-family]
+      - id: tensor-indexing
+        file: tensor/indexing.yaml
+        test_ids: [TIX-set-at-bang-rejects-tensorview-destination, TIX-take-rejects-non-i64-index-list]
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-map_axis-does-not-convert-tensor-to-preserved-tensorview-parameter, TMA-map_axis-does-not-convert-tensorview-to-preserved-tensor-parameter, TMA-map_axis-rejects-callback-results-outside-the-closed-tensor-carrier-families]
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-reduce-by-ordered-phase-input-matches-prior-output, RDX-reduce-by-rejects-unsupported-phase-payload-dtype, RDX-reduce-by-typed-stored-schema-is-monomorphic]
+    mentioned_only_in: []
+  - code: CALL_DUPLICATE_NAMED_ARG
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-duplicate-named-argument-binding-is-rejected]
+    mentioned_only_in: []
+  - code: CALL_MISSING_ARG
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-io-time
+        file: core/io_time.yaml
+        test_ids: [IOT-copy-requires-explicit-source-link-mode, IOT-create-dir-all-requires-explicit-dir-traversal, IOT-create-dir-requires-explicit-dir-traversal, IOT-file-access-requires-explicit-link-mode]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-call-missing-required-argument-is-rejected]
+    mentioned_only_in: []
+  - code: CALL_POSITIONAL_AFTER_NAMED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-call-positional-arguments-cannot-appear-after-named-arguments]
+    mentioned_only_in: []
+  - code: CALL_TOO_MANY_ARGS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-call-too-many-positional-arguments-is-rejected]
+    mentioned_only_in: []
+  - code: CALL_UNKNOWN_NAMED_ARG
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-unknown-named-argument-binding-is-rejected]
+    mentioned_only_in: []
+  - code: CAST_INVALID_DTYPE_PAIR
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-cast
+        file: tensor/cast.yaml
+        test_ids: [CST-bitcast-unequal-widths-fail-with-cast-invalid-dtype-pair, CST-forbidden-dtype-pair-fails-with-cast-invalid-dtype-pair-in-const-evaluable-context, CST-wrapping-cast-illegal-pair-is-cast-invalid-dtype-pair-and-never-cast-invalid-value]
+      - id: tensor-numeric-runtime
+        file: tensor/numeric_runtime.yaml
+        test_ids: [NRT-bitcast-rejects-mismatched-bit-widths-with-cast-invalid-dtype-pair, NRT-float-to-bool-cast-is-forbidden-and-reports-cast-invalid-dtype-pair, NRT-wrapping-cast-rejects-non-integer-dtype-pairs-with-cast-invalid-dtype-pair]
+    mentioned_only_in: []
+  - code: CAST_INVALID_VALUE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-cast
+        file: tensor/cast.yaml
+        test_ids: [CST-const-evaluable-nan-to-int-cast-fails-with-cast-invalid-value, CST-explicit-lossy-narrowing-fails-for-out-of-range-values-at-runtime, CST-non-const-evaluable-cast-value-failure-returns-err-channel]
+      - id: tensor-numeric-runtime
+        file: tensor/numeric_runtime.yaml
+        test_ids: [NRT-const-evaluable-nan-to-int-cast-is-compile-time-cast-invalid-value, NRT-domain-invalid-sqrt-produces-ieee-nan-path-and-invalid-cast-fails-deterministically, NRT-float-division-by-zero-remains-ieee-value-path-and-fails-only-on-invalid-cast, NRT-integer-to-bool-cast-rejects-non-0-1-values-with-cast-invalid-value]
+    mentioned_only_in: []
+  - code: CLOSED_TRAIT_IMPL_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-package-cannot-implement-foreign-closed-trait-for-local-type]
+      - id: tensor-capabilities
+        file: tensor/capabilities.yaml
+        test_ids: [TCP-foreign-package-cannot-implement-affinetensor, TCP-foreign-package-cannot-implement-readabletensor]
+    mentioned_only_in: []
+  - code: COMPARISON_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-concurrency
+        file: core/concurrency.yaml
+        test_ids: [CON-opt-task-does-not-gain-conditional-eq, CON-task-values-are-not-equality-comparable]
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-roots-are-not-equality-comparable]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-callable-values-are-not-equality-comparable, TYC-complex-values-are-not-relationally-comparable, TYC-generic-equality-requires-explicit-eq-bound, TYC-generic-relational-comparison-requires-explicit-ord-bound, TYC-opt-equality-requires-identical-inner-type-arguments, TYC-opt-relational-comparison-is-rejected, TYC-reference-values-are-not-equality-comparable, TYC-res-equality-rejects-error-type-mismatch, TYC-res-equality-requires-identical-ok-and-err-type-arguments, TYC-same-static-type-without-eq-is-not-comparable, TYC-string-relational-comparison-is-rejected, TYC-tuple-equality-requires-eq-for-every-element]
+    mentioned_only_in: []
+  - code: CONSTRUCTOR_PAYLOAD_FORM_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-enum-named-payload-cannot-be-omitted, TYC-named-payload-constructor-rejects-positional-form, TYC-positional-constructor-rejects-named-form, TYC-unit-variant-constructor-rejects-positional-form, TYC-zero-arity-positional-constructor-requires-parentheses]
+    mentioned_only_in: []
+  - code: CONSTRUCTOR_TARGET_KIND_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-struct-literal-rejects-enum-target-kind, TYC-transparent-alias-does-not-introduce-constructor-head, TYC-variant-constructor-rejects-function-target-kind]
+    mentioned_only_in: []
+  - code: CONST_CYCLE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-cross-module-const-dependency-cycle-is-rejected]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-const-cycle-takes-precedence-over-forward-reference-classification]
+    mentioned_only_in: []
+  - code: CONST_FORWARD_REFERENCE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-same-module-const-forward-reference-is-rejected]
+    mentioned_only_in: []
+  - code: CONST_INIT_NOT_CONST
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-const-initializer-must-be-const-evaluable, TYC-map-literal-is-not-const-evaluable]
+    mentioned_only_in: []
+  - code: CONTINUE_OUTSIDE_LOOP
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-loops
+        file: core/loops.yaml
+        test_ids: [LOP-continue-inside-closure-cannot-target-outer-loop, LOP-continue-outside-loop-is-compile-error]
+    mentioned_only_in: []
+  - code: CONTRACT_NON_ATOMIC_AXIS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-contract-forbids-axis-pack-tokens-because-axes-must-be-atomic, XFM-contract-forbids-non-atomic-axis-expressions]
+    mentioned_only_in: []
+  - code: CONTRACT_OUTPUT_LABEL_DUPLICATE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-contract
+        file: tensor/contract.yaml
+        test_ids: [TCT-contract-earlier-duplicate-precedes-later-unbound-label, TCT-contract-output-label-must-not-be-duplicated]
+    mentioned_only_in: []
+  - code: CONTRACT_OUTPUT_LABEL_UNBOUND
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-contract
+        file: tensor/contract.yaml
+        test_ids: [TCT-contract-output-label-must-be-bound-on-input-side, TCT-contract-unbound-output-precedes-duplicate-unbound-label]
+    mentioned_only_in: []
+  - code: CONTRACT_REPEATED_LABEL_DIM_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-contract
+        file: tensor/contract.yaml
+        test_ids: [TCT-cross-operand-size-one-repeated-label-does-not-broadcast, TCT-first-repeated-label-mismatch-rejects-size-one-to-zero-broadcast, TCT-repeated-label-dimension-mismatch-returns-contract-error]
+    mentioned_only_in: []
+  - code: DERIVE_DUPLICATE_ENTRY
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-duplicate-derive-entry-is-rejected]
+    mentioned_only_in: []
+  - code: DERIVE_ELIGIBILITY_FAILED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-built-in-derive-rejects-unconstrained-generic-payload-bound, ATR-derive-default-on-enum-fails-when-default-marks-non-unit-variant, ATR-derive-default-on-enum-fails-when-default-variant-is-missing, ATR-derive-default-on-enum-fails-when-multiple-default-variants-exist, ATR-derived-hash-rejects-field-without-hash, ATR-derived-ord-requires-eq, ATR-mutual-recursive-derive-propagates-external-failure, ATR-recursive-derive-rejects-type-argument-growth]
+    mentioned_only_in: []
+  - code: DERIVE_EXPANSION_FORBIDDEN
+    severity: error
+    policy: excluded_nonbaseline
+    status: uncovered
+    asserted_in: []
+    mentioned_only_in: []
+  - code: DERIVE_TARGET_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-derive-on-fn-target-is-unsupported-in-v0-1, ATR-derive-on-impl-target-is-unsupported-in-v0-1]
+    mentioned_only_in: []
+  - code: DERIVE_TRAIT_RESOLUTION_FAILED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-derive-path-must-resolve-to-trait-symbol, ATR-partialeq-is-not-a-v0-1-prelude-trait, ATR-partialord-is-not-a-v0-1-prelude-trait, ATR-unresolved-derive-trait-path-is-rejected]
+    mentioned_only_in: []
+  - code: DERIVE_TRAIT_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-display-is-not-in-v0-1-built-in-derive-surface, ATR-error-is-not-in-v0-1-built-in-derive-surface, ATR-from-is-not-in-v0-1-built-in-derive-surface, ATR-into-is-not-in-v0-1-built-in-derive-surface, ATR-resolved-trait-without-derive-support-is-rejected, ATR-tryfrom-is-not-in-v0-1-built-in-derive-surface, ATR-tryinto-is-not-in-v0-1-built-in-derive-surface]
+    mentioned_only_in: []
+  - code: DETERMINISM_UNAVAILABLE
+    severity: error
+    policy: conditional_required
+    precondition: strict_unavailable_path
+    status: asserted
+    asserted_in:
+      - id: tensor-determinism-unavailable
+        file: tensor/determinism_unavailable.yaml
+        precondition: strict_unavailable_path
+        test_ids: [TDU-strict-determinism-profile-unavailable-must-fail-explicitly]
+    mentioned_only_in: []
+  - code: DIM_BINDING_REQUIRED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-dynamic-mixed-multivariate-dims-require-explicit-binding, XFM-mixed-multivariate-dims-require-explicit-binding]
+    mentioned_only_in: []
+  - code: DOMAIN_INVALID_VALUE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-concurrency
+        file: core/concurrency.yaml
+        test_ids: [CON-par-map-zero-workers-is-domain-invalid-value, CON-par-traverse-opt-negative-workers-is-domain-invalid-value, CON-par-traverse-res-negative-workers-is-domain-invalid-value]
+      - id: core-io-time
+        file: core/io_time.yaml
+        test_ids: [IOT-duration-millis-negative-literal-is-domain-invalid-value, IOT-duration-nanos-negative-literal-is-domain-invalid-value, IOT-duration-seconds-negative-literal-is-domain-invalid-value, IOT-read-chunk-zero-max-bytes-is-domain-invalid-value]
+      - id: core-network
+        file: core/network.yaml
+        test_ids: [NET-tcpstream-read-chunk-zero-max-bytes-is-domain-invalid-value]
+      - id: core-traverse
+        file: core/traverse.yaml
+        test_ids: [TRV-window-negative-size-is-domain-invalid-value]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-nat-contextual-negative-literal-is-domain-invalid-value, TYC-nat-runtime-conversion-negative-value-returns-domain-error, TYC-positive-nat-contextual-zero-literal-is-domain-invalid-value, TYC-positive-nat-runtime-conversion-zero-value-returns-domain-error]
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-with-sizes-negative-binding-is-domain-invalid-value]
+    mentioned_only_in: []
+  - code: DROP_OWN_REQUIRES_MOVE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-drop-own-requires-explicit-move-operand-form]
+    mentioned_only_in: []
+  - code: DUPLICATE_KEY
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-containers
+        file: core/containers.yaml
+        test_ids: [CNT-to-map-fails-on-duplicate-keys]
+    mentioned_only_in: []
+  - code: DYN_MUST_BE_EXPLICIT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-dyn-trait-must-be-explicit]
+    mentioned_only_in: []
+  - code: DYN_TRAIT_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-explicit-dyn-trait-field-is-not-v0-1-baseline, TRT-explicit-dyn-trait-parameter-is-not-v0-1-baseline]
+    mentioned_only_in: []
+  - code: EFFECT_SIGNATURE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-effects
+        file: core/effects.yaml
+        test_ids: [EFF-bang-method-must-take-mut-self, EFF-non-bang-method-cannot-take-mut-self]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-bang-mutating-method-must-take-mut-self, TYC-non-bang-method-must-not-take-mut-self]
+    mentioned_only_in: []
+  - code: EFFECT_VIOLATION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-effectful-test-function-requires-bang-marker]
+      - id: core-concurrency
+        file: core/concurrency.yaml
+        test_ids: [CON-join-is-effectful-and-forbidden-in-non-bang-function, CON-spawn-is-effect-non-bang-cannot-call]
+      - id: core-effects
+        file: core/effects.yaml
+        test_ids: [EFF-apply-desugars-to-call-and-cannot-hide-bang-call-in-non-bang-context, EFF-bounded-generic-bang-trait-call-has-unknown-summary, EFF-effectful-callback-io-propagates-through-localizable-wrapper, EFF-explicit-property-setter-call-cannot-hide-non-local-effect-in-non-bang-context, EFF-fn-type-rejects-effectful-closure-value, EFF-fn-type-rejects-effectful-hole-partial-application, EFF-imported-transitive-io-summary-rejects-non-bang-local-call, EFF-never-path-does-not-hide-later-effectful-source, EFF-non-bang-dead-if-branch-cannot-hide-effectful-call, EFF-non-bang-function-cannot-call-print, EFF-non-bang-function-cannot-call-process-snapshot-helper, EFF-non-bang-function-cannot-open-byte-reader, EFF-non-bang-function-cannot-read-time, EFF-non-bang-zero-iteration-loop-body-cannot-hide-effectful-call, EFF-partial-application-captures-non-hole-args-in-enclosing-context, EFF-then-desugars-to-call-and-cannot-hide-bang-call-in-non-bang-context]
+      - id: core-network
+        file: core/network.yaml
+        test_ids: [NET-non-bang-function-cannot-call-tcp-connect]
+      - id: core-runtime-errors
+        file: core/runtime_errors.yaml
+        test_ids: [RTE-compile-time-failures-take-precedence-over-potential-runtime-abort-paths]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-non-bang-extern-call-remains-effect-violation-even-inside-unsafe-block]
+    mentioned_only_in: []
+  - code: EINOP_OUTPUT_LABEL_DUPLICATE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-einop-rejects-duplicate-output-label, XFM-einop-rejects-duplicate-output-named-pack]
+    mentioned_only_in: []
+  - code: ENUM_VARIANT_VISIBILITY_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-enum-variant-level-visibility-is-forbidden-in-v0-1]
+    mentioned_only_in: []
+  - code: EXTERN_ABI_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-extern-abi-selector-outside-baseline-subset-is-rejected]
+    mentioned_only_in: []
+  - code: EXTERN_LINKAGE_FAILED
+    severity: error
+    policy: conditional_required
+    precondition: ffi_linkage_probe
+    status: asserted
+    asserted_in:
+      - id: core-ffi-linkage-probe
+        file: core/ffi_linkage_probe.yaml
+        precondition: ffi_linkage_probe
+        test_ids: [FFI-unresolved-extern-symbol-surfaces-extern-linkage-failed-at-runtime]
+    mentioned_only_in: []
+  - code: EXTERN_SIGNATURE_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-extern-signature-rejects-bool-pointer-parameter-type, TYC-extern-signature-rejects-bool-pointer-return-type, TYC-extern-signature-rejects-box-parameter-type, TYC-extern-signature-rejects-dyn-trait-parameter-type, TYC-extern-signature-rejects-function-parameter-type, TYC-extern-signature-rejects-opt-parameter-type, TYC-extern-signature-rejects-own-parameter-type, TYC-extern-signature-rejects-pointer-to-user-struct-parameter-type, TYC-extern-signature-rejects-reference-parameter-type, TYC-extern-signature-rejects-res-return-type, TYC-extern-signature-rejects-tuple-return-type, TYC-extern-signature-rejects-union-parameter-type, TYC-extern-signature-rejects-unit-parameter-type, TYC-extern-signature-rejects-unit-pointer-parameter-type, TYC-extern-signature-rejects-unit-pointer-return-type, TYC-extern-signature-rejects-user-enum-parameter-type, TYC-extern-signature-rejects-user-struct-return-type, TYC-never-is-unsupported-in-extern-signatures]
+    mentioned_only_in: []
+  - code: EXTERN_VISIBILITY_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-pub-extern-declaration-is-forbidden-in-v0-1]
+    mentioned_only_in: []
+  - code: FN_RETURN_TYPE_REQUIRED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-extern-declaration-requires-explicit-return-type, TYC-named-function-requires-explicit-return-type, TYC-pub-fn-also-uses-named-function-return-type-rule]
+    mentioned_only_in: []
+  - code: FOLD_RES_FAIL
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traverse
+        file: core/traverse.yaml
+        test_ids: [TRV-fold-res-fail-fast-returns-first-err-and-reports-index, TRV-fold-res-is-fail-fast-and-stops-effects-after-first-err]
+    mentioned_only_in: []
+  - code: FOR_ITERABLE_NOT_SEQUENCE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-loops
+        file: core/loops.yaml
+        test_ids: [LOP-for-in-requires-iterable-sequence]
+    mentioned_only_in: []
+  - code: FSTRING_INVALID_PLACEHOLDER
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-f-string-placeholder-grammar-is-restricted-to-name-and-name-colon-debug]
+    mentioned_only_in: []
+  - code: FSTRING_UNRESOLVED_NAME
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-f-string-placeholder-name-must-resolve-in-scope]
+    mentioned_only_in: []
+  - code: GENERIC_PARAMETER_REDECLARATION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-generic-parameter-name-must-be-unique-within-one-list, TYC-nested-declaration-cannot-redeclare-enclosing-generic-parameter]
+    mentioned_only_in: []
+  - code: GRAD_ARGNUM_OUT_OF_RANGE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-grad
+        file: tensor/grad.yaml
+        test_ids: [TGD-grad-argnum-must-be-within-callable-arity]
+    mentioned_only_in: []
+  - code: GRAD_CUSTOM_KERNEL_NO_VJP
+    severity: error
+    policy: excluded_nonbaseline
+    status: uncovered
+    asserted_in: []
+    mentioned_only_in: []
+  - code: GRAD_LOWERING_FAILED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-grad
+        file: tensor/grad.yaml
+        test_ids: [TGD-grad-lowering-fails-for-non-graph-recursive-tensor-program]
+    mentioned_only_in: []
+  - code: GRAD_NON_FLOAT_DTYPE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-grad
+        file: tensor/grad.yaml
+        test_ids: [TGD-grad-differentiated-dtype-must-be-floating]
+    mentioned_only_in: []
+  - code: GRAD_NON_TENSOR_ARG
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-grad
+        file: tensor/grad.yaml
+        test_ids: [TGD-grad-differentiated-argument-must-be-tensor]
+    mentioned_only_in: []
+  - code: GRAD_PRIMAL_NOT_SCALAR
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-grad
+        file: tensor/grad.yaml
+        test_ids: [TGD-grad-scalar-mode-rejects-non-scalar-primal-output]
+    mentioned_only_in: []
+  - code: GRAD_RESULT_SHAPE_MISMATCH
+    severity: error
+    policy: excluded_nonbaseline
+    status: uncovered
+    asserted_in: []
+    mentioned_only_in: []
+  - code: GRAD_UNSUPPORTED_PRIMITIVE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-grad
+        file: tensor/grad.yaml
+        test_ids: [TGD-grad-rejects-unsupported-primitive-in-differentiable-path, TGD-higher-order-grad-is-unsupported-in-v0-1, TGD-source-active-add-is-unsupported-even-though-reverse-execution-may-use-add, TGD-source-active-numeric-cast-is-unsupported-even-though-reverse-execution-may-use-cast, TGD-source-active-scatter-is-unsupported-even-though-reverse-execution-may-use-scatter-add]
+    mentioned_only_in: []
+  - code: IF_BOOL_UNKNOWN_BRANCH_FOR_BOOL
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-bool-condition-must-not-include-unknown-branch]
+    mentioned_only_in: []
+  - code: IF_BRANCH_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-declared-non-never-call-does-not-gain-divergence-from-body, CFL-if-branch-result-type-mismatch-is-compile-error]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-raw-pointer-if-branches-require-an-exact-common-type]
+      - id: tensor-cast
+        file: tensor/cast.yaml
+        test_ids: [CST-mixed-cast-result-branches-do-not-erase-dtype]
+    mentioned_only_in: []
+  - code: IF_CONDITION_NOT_BOOL
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-if-condition-must-be-bool-or-tri]
+    mentioned_only_in: []
+  - code: IF_MISSING_ELSE_VALUE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-value-context-if-requires-else]
+    mentioned_only_in: []
+  - code: IF_TRI_UNKNOWN_BRANCH_REQUIRED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-tri-condition-requires-unknown-branch]
+    mentioned_only_in: []
+  - code: IMMUTABLE_BINDING_ASSIGN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-immutable-field-assignment-in-statically-false-if-branch-is-rejected, CFL-immutable-let-reassignment-in-statically-false-if-branch-is-still-rejected]
+      - id: core-loops
+        file: core/loops.yaml
+        test_ids: [LOP-immutable-field-assignment-in-zero-iteration-loop-body-is-rejected, LOP-immutable-let-reassignment-in-zero-iteration-for-body-is-compile-time-error]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-assignment-target-mutability-precedes-value-mismatch, TYC-immutable-field-cannot-be-reassigned-even-in-mutating-method, TYC-immutable-let-binding-rejects-reassignment]
+    mentioned_only_in: []
+  - code: IMPL_GENERIC_ERROR_UNION_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-impl-generic-cannot-occur-under-error-union, TRT-implemented-trait-reference-cannot-contain-generic-error-union-member, TRT-nested-impl-generic-under-error-union-remains-forbidden-with-independent-evidence, TRT-transparent-alias-cannot-hide-impl-generic-under-error-union]
+    mentioned_only_in: []
+  - code: IMPL_UNCONSTRAINED_TYPE_PARAM
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-impl-generic-parameters-must-constrain-trait-or-type-header]
+    mentioned_only_in: []
+  - code: IMPORT_BANG_ALIAS_MUST_BANG
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-bang-import-alias-must-remain-bang]
+    mentioned_only_in: []
+  - code: IMPORT_NOT_FOUND
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-direct-import-of-catalog-sum-variant-is-invalid, MOD-direct-import-of-user-enum-variant-constructor-is-invalid, MOD-package-mode-forbids-importing-transitive-only-dependency-modules, MOD-unresolved-import-symbol-reports-import-not-found]
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-associated-type-name-is-not-a-standalone-import]
+      - id: tensor-capabilities
+        file: tensor/capabilities.yaml
+        test_ids: [TCP-affinetensor-is-not-prelude-visible]
+      - id: tensor-numeric-runtime
+        file: tensor/numeric_runtime.yaml
+        test_ids: [NRT-mod-is-not-a-v0-1-remainder-alias]
+    mentioned_only_in: []
+  - code: IMPORT_ROOT_CONFLICT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-package-mode-import-root-conflict-between-dependency-key-and-local-module-path-is-rejected]
+    mentioned_only_in: []
+  - code: IMPORT_SUPER_AT_ROOT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-super-import-at-root-module-is-invalid]
+    mentioned_only_in: []
+  - code: INCONSISTENT_DIMS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-axisexpr-product-overflow-is-inconsistent-not-wrapped, XFM-einop-repeated-label-dimension-mismatch-is-inconsistent, XFM-isolated-product-with-nondivisible-constant-is-inconsistent, XFM-large-univariate-nonlinear-dim-without-root-is-inconsistent, XFM-named-axis-pack-with-no-rank-partition-is-inconsistent, XFM-output-only-axisexpr-product-overflow-is-inconsistent-not-wrapped, XFM-supported-distribution-precedes-inconsistent-dimension-checking, XFM-with-sizes-conflicting-binding-is-inconsistent-dims]
+    mentioned_only_in: []
+  - code: INDEX_OUT_OF_BOUNDS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-indexing
+        file: tensor/indexing.yaml
+        test_ids: [TIX-get-at-const-out-of-bounds-is-compile-time-index-out-of-bounds]
+    mentioned_only_in: []
+  - code: INDEX_SPEC_ARITY_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-indexing
+        file: tensor/indexing.yaml
+        test_ids: [TIX-const-over-consuming-index-spec-is-rejected, TIX-runtime-over-consuming-index-spec-returns-index-error]
+    mentioned_only_in: []
+  - code: INDEX_SPEC_REST_DUPLICATE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-indexing
+        file: tensor/indexing.yaml
+        test_ids: [TIX-const-duplicate-rest-is-rejected, TIX-runtime-duplicate-rest-returns-index-error]
+    mentioned_only_in: []
+  - code: INHERITANCE_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-no-implementation-inheritance]
+    mentioned_only_in: []
+  - code: INT_DIV_BY_ZERO
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-numeric
+        file: core/numeric.yaml
+        test_ids: [NUM-checked-dynamic-division-by-zero-returns-numericerror, NUM-const-division-by-zero-retains-int-div-by-zero-code]
+      - id: tensor-numeric-runtime
+        file: tensor/numeric_runtime.yaml
+        test_ids: [NRT-integer-division-by-zero-fails-with-int-div-by-zero]
+    mentioned_only_in: []
+  - code: INT_OVERFLOW
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-contextual-integer-pattern-retains-overflow-diagnostic]
+      - id: core-numeric
+        file: core/numeric.yaml
+        test_ids: [NUM-checked-dynamic-overflow-returns-numericerror, NUM-checked-dynamic-unary-negation-overflow-returns-numericerror, NUM-checked-promotion-conversion-overflow-returns-numericerror, NUM-const-overflow-retains-int-overflow-code, NUM-const-signed-minimum-divided-by-minus-one-retains-int-overflow, NUM-contextual-fixed-width-literal-rejects-out-of-range-value, NUM-default-integer-type-does-not-search-wider-fixed-width-dtypes, NUM-integer-literal-outside-all-fixed-width-ranges-is-rejected, NUM-signed-minimum-divided-by-minus-one-returns-int-overflow]
+      - id: tensor-contract
+        file: tensor/contract.yaml
+        test_ids: [TCT-integer-contract-overflow-returns-numericerror]
+      - id: tensor-indexing
+        file: tensor/indexing.yaml
+        test_ids: [TIX-set-at-add-checks-each-duplicate-update-before-cancellation]
+      - id: tensor-numeric-runtime
+        file: tensor/numeric_runtime.yaml
+        test_ids: [NRT-checked-integer-overflow-fails-with-int-overflow, NRT-integer-abs-minimum-value-fails-with-int-overflow, NRT-integer-neg-minimum-value-fails-with-int-overflow, NRT-signed-minimum-divided-by-minus-one-returns-int-overflow]
+      - id: tensor-promotion
+        file: tensor/promotion.yaml
+        test_ids: [TPM-implicit-promotion-conversion-overflow-fails-with-int-overflow, TPM-promoted-integer-arithmetic-overflow-fails-after-successful-conversion]
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-default-reduce-integer-sum-overflow-returns-numericerror, RDX-integer-sum-overflow-returns-numericerror]
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-einop-later-output-failure-is-expression-atomic, XFM-integer-einop-overflow-returns-numericerror]
+    mentioned_only_in: []
+  - code: INT_REM_BY_ZERO
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-numeric
+        file: core/numeric.yaml
+        test_ids: [NUM-checked-dynamic-remainder-by-zero-returns-numericerror, NUM-const-remainder-by-zero-retains-int-rem-by-zero-code]
+      - id: tensor-numeric-runtime
+        file: tensor/numeric_runtime.yaml
+        test_ids: [NRT-integer-remainder-by-zero-fails-with-int-rem-by-zero]
+    mentioned_only_in: []
+  - code: ITEM_REQUIRES_RANK0
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-capabilities
+        file: tensor/capabilities.yaml
+        test_ids: [TCP-tensorview-item-rejects-non-rank-0-view]
+      - id: tensor-contract
+        file: tensor/contract.yaml
+        test_ids: [TCT-item-rejects-non-rank-0-tensor]
+    mentioned_only_in: []
+  - code: LET_PATTERN_DUPLICATE_BINDING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-let-pattern-rejects-duplicate-binding-name]
+    mentioned_only_in: []
+  - code: LET_PATTERN_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-let-tuple-pattern-rejects-arity-mismatch, TYC-let-tuple-pattern-rejects-non-tuple-initializer, TYC-let-unary-tuple-pattern-rejects-non-tuple-initializer, TYC-unit-pattern-rejects-non-unit-initializer]
+    mentioned_only_in: []
+  - code: LET_PATTERN_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-let-rest-pattern-is-rejected-in-v0-1, TYC-let-struct-pattern-is-rejected-in-v0-1, TYC-let-variant-pattern-is-rejected-in-v0-1]
+    mentioned_only_in: []
+  - code: LEX_INVALID_CHAR
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-axis-index-without-initial-digit-reports-invalid-char, LEX-emoji-is-an-invalid-character, LEX-line-separator-scalar-is-not-a-source-newline, LEX-next-line-scalar-is-not-a-source-newline, LEX-non-leading-utf8-bom-is-rejected, LEX-paragraph-separator-scalar-is-not-a-source-newline, LEX-unsupported-sigil-prefixed-identifier-is-rejected, LEX-vertical-tab-is-not-source-whitespace]
+    mentioned_only_in: []
+  - code: LEX_INVALID_ESCAPE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-invalid-escape-sequence-reports-lexical-error, LEX-unicode-escape-rejects-surrogate-value, LEX-unicode-escape-rejects-value-above-unicode-range]
+    mentioned_only_in: []
+  - code: LEX_INVALID_IDENTIFIER_CHAR
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-combining-xid-continue-is-an-identifier-character-error, LEX-non-ascii-axis-name-is-an-identifier-character-error, LEX-non-ascii-identifier-is-rejected-in-v0-1]
+    mentioned_only_in: []
+  - code: LEX_INVALID_NUMBER
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-consecutive-decimal-separators-report-lexical-error, LEX-duration-suffix-numeric-literal-is-rejected-in-v0-1-baseline, LEX-exponent-separator-adjacency-reports-lexical-error, LEX-malformed-numeric-literal-reports-lexical-error, LEX-started-axis-index-with-trailing-separator-reports-number-error, LEX-tuple-index-context-rejects-exponent-suffix]
+    mentioned_only_in: []
+  - code: LEX_INVALID_UTF8
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-invalid-utf8-source-is-rejected-before-tokenization]
+    mentioned_only_in: []
+  - code: LEX_NESTED_BLOCK_COMMENT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-nested-block-comment-reports-lexical-error]
+    mentioned_only_in: []
+  - code: LEX_UNTERMINATED_BLOCK_COMMENT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-unterminated-block-comment-reports-lexical-error]
+    mentioned_only_in: []
+  - code: LEX_UNTERMINATED_STRING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-unterminated-string-reports-lexical-error]
+    mentioned_only_in: []
+  - code: LOCAL_BINDING_REDECLARATION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-duplicate-closure-parameters-are-rejected, TYC-duplicate-function-parameters-are-rejected, TYC-redeclaration-precedes-invalid-initializer, TYC-same-block-binding-redeclaration-is-rejected]
+    mentioned_only_in: []
+  - code: LOGICAL_OPERAND_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-logical-operator-rejects-non-bool-tri-operand]
+    mentioned_only_in: []
+  - code: LOOP_CONDITION_NOT_BOOL
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-loops
+        file: core/loops.yaml
+        test_ids: [LOP-while-condition-must-be-bool, LOP-while-does-not-accept-tri-condition-in-v0-1]
+    mentioned_only_in: []
+  - code: MAP_AXIS_BATCH_SIZE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-const-mapped-axis-size-mismatch-is-compile-time-map_axis-batch-size-mismatch]
+    mentioned_only_in: []
+  - code: MAP_AXIS_EMPTY_BATCH_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-const-empty-mapped-batch-is-compile-time-map_axis-empty-batch-unsupported]
+    mentioned_only_in: []
+  - code: MAP_AXIS_IN_AXES_ARITY_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-in-axes-arity-mismatch-is-compile-time-map_axis-in-axes-arity-mismatch]
+    mentioned_only_in: []
+  - code: MAP_AXIS_NON_TENSOR_MAPPED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-mapping-a-non-tensor-argument-is-compile-time-map_axis-non-tensor-mapped]
+    mentioned_only_in: []
+  - code: MAP_AXIS_NO_MAPPED_ARGS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-all-none-in-axes-is-compile-time-map_axis-no-mapped-args]
+    mentioned_only_in: []
+  - code: MAP_AXIS_OPT_NONE
+    severity: note
+    policy: optional_emit_if_present
+    status: uncovered
+    asserted_in: []
+    mentioned_only_in: []
+  - code: MAP_AXIS_OUT_AXIS_OUT_OF_RANGE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-const-out-axis-violation-is-compile-time-map_axis-out-axis-out-of-range]
+    mentioned_only_in: []
+  - code: MAP_AXIS_OUT_NAME_DUPLICATE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-const-out-name-duplicate-is-compile-time-map_axis-out-name-duplicate]
+    mentioned_only_in: []
+  - code: MAP_AXIS_RESULT_OVERLAY_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-map_axis-reports-result-overlay-mismatch-at-first-mismatching-index]
+    mentioned_only_in: []
+  - code: MAP_AXIS_RESULT_SHAPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-map_axis-reports-result-shape-mismatch-at-first-mismatching-index]
+    mentioned_only_in: []
+  - code: MAP_AXIS_RES_FAIL
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-map_axis-over-res-fail-fast-reports-earliest-index]
+    mentioned_only_in: []
+  - code: MATCH_ARM_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-match-arm-result-type-mismatch-is-compile-error]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-raw-pointer-match-arms-require-an-exact-common-type]
+    mentioned_only_in: []
+  - code: MATCH_BINDING_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-match-or-pattern-must-bind-identical-names, CFL-match-or-pattern-rejects-extra-binding, CFL-nested-or-pattern-must-preserve-binding-types, CFL-or-pattern-same-name-must-have-same-binding-type]
+    mentioned_only_in: []
+  - code: MATCH_GUARD_EFFECT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-match-guard-must-be-pure-in-v0-1]
+    mentioned_only_in: []
+  - code: MATCH_GUARD_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-match-guard-does-not-accept-tri-implicitly, CFL-match-guard-must-typecheck-to-bool]
+    mentioned_only_in: []
+  - code: MATCH_NON_EXHAUSTIVE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-empty-container-field-keeps-recursive-struct-inhabited, CFL-empty-match-rejects-inhabited-scrutinee, CFL-empty-match-rejects-recursive-sum-with-base-variant, CFL-empty-match-rejects-unknown-generic-inhabitance, CFL-guarded-arm-does-not-count-as-exhaustive-coverage, CFL-match-non-exhaustive-arms-are-rejected]
+    mentioned_only_in: []
+  - code: MATCH_UNREACHABLE_ARM
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-duplicate-literal-match-arm-is-compile-error, CFL-explicit-impossible-payload-arm-is-unreachable, CFL-shadowed-variant-match-arm-is-compile-error, CFL-unreachable-match-arm-is-compile-error]
+    mentioned_only_in: []
+  - code: METHOD_NOT_FOUND
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-effects
+        file: core/effects.yaml
+        test_ids: [EFF-legacy-sorted-should-not-exist-use-sort]
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-root-does-not-forward-clone-from-payload]
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-inherent-name-match-blocks-trait-fallback-even-when-only-trait-signature-is-applicable, TRT-method-overload-applicability-does-not-use-numeric-promotion-for-non-receiver-args, TRT-trait-method-call-requires-trait-visibility-at-call-site]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-vec-only-method-on-array-literal-requires-explicit-to-vec-conversion]
+      - id: tensor-capabilities
+        file: tensor/capabilities.yaml
+        test_ids: [TCP-concrete-owner-does-not-own-readable-query-callable]
+      - id: tensor-overlay
+        file: tensor/overlay.yaml
+        test_ids: [AX-tensorview-does-not-expose-owning-name-overlay-update]
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-legacy-by-method-is-not-exposed-on-reduce-schema]
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-einop-does-not-expose-reduce-by-customization-in-v0-1]
+    mentioned_only_in: []
+  - code: METHOD_RECEIVER_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-method-receiver-must-be-first-parameter, TYC-method-receiver-type-must-be-self-family, TYC-struct-body-method-requires-receiver, TYC-trait-method-requires-receiver]
+    mentioned_only_in: []
+  - code: MODULE_PATH_COMPONENT_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-file-set-keyword-module-path-component-is-invalid, MOD-file-set-lone-underscore-module-path-component-is-invalid, MOD-file-set-relative-root-module-path-component-is-invalid, MOD-file-set-unicode-module-path-component-is-invalid, MOD-package-invalid-module-path-selection-is-deterministic]
+    mentioned_only_in: []
+  - code: MODULE_PATH_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-module-declaration-path-must-match-canonical-file-path]
+    mentioned_only_in: []
+  - code: MODULE_ROOT_RESERVED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-file-set-local-standard-library-root-is-reserved, MOD-package-local-standard-library-root-precedes-header-mismatch-and-uses-lexical-path-order]
+    mentioned_only_in: []
+  - code: MOVE_REQUIRES_OWN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-move-operator-requires-own-operand]
+    mentioned_only_in: []
+  - code: MULTI_INPUT_NOT_ALLOWED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-view-is-unary-in-v0-1]
+    mentioned_only_in: []
+  - code: MUTABLE_CAPTURE_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-concurrency
+        file: core/concurrency.yaml
+        test_ids: [CON-task-thunk-cannot-capture-mutable-binding]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-direct-assignment-to-captured-binding-uses-capture-diagnostic, TYC-mutable-capture-in-statically-false-branch-is-forbidden, TYC-mutable-reference-capture-precedes-reference-escape, TYC-nested-closure-cannot-capture-mutable-outer-closure-local, TYC-read-only-capture-of-mutable-binding-is-forbidden, TYC-write-through-captured-mutable-reference-uses-capture-diagnostic, TYC-write-through-captured-root-is-forbidden]
+    mentioned_only_in: []
+  - code: NAME_AMBIGUOUS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-bare-user-enum-variant-pattern-name-is-ambiguous]
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-duplicate-imported-binding-name-is-ambiguous]
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-trait-associated-type-names-must-be-unique]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-property-accessor-names-are-reserved-in-inherent-method-namespace, TYC-struct-member-names-are-unique-across-field-and-property-declarations]
+    mentioned_only_in: []
+  - code: NAME_NOT_FOUND
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-catalog-variant-dot-form-is-not-constructor-syntax, TYC-closure-local-does-not-escape-closure, TYC-for-binder-does-not-escape-loop, TYC-later-local-declaration-is-not-hoisted, TYC-let-binding-group-activates-atomically, TYC-match-binding-does-not-escape-arm, TYC-never-path-does-not-suppress-later-source-validation, TYC-self-initializer-does-not-see-new-binding, TYC-unit-type-name-is-not-a-built-in-value, TYC-user-enum-variant-dot-form-is-not-constructor-syntax]
+      - id: tensor-dtypes
+        file: tensor/dtypes.yaml
+        test_ids: [DTP-omitted-descriptor-import-reports-name-not-found]
+    mentioned_only_in: []
+  - code: NEGATIVE_IMPL_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-negative-impl-syntax-is-unsupported-in-v0-1]
+    mentioned_only_in: []
+  - code: NON_BANG_MUT_PARAM_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-effects
+        file: core/effects.yaml
+        test_ids: [EFF-non-bang-cannot-mutate-external-state-through-explicit-mut-parameter, EFF-non-bang-function-cannot-declare-non-receiver-mut-parameter]
+    mentioned_only_in: []
+  - code: NOT_A_VIEW
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-movement
+        file: tensor/movement.yaml
+        test_ids: [AX-reshape-of-noncontiguous-tensorview-returns-not-a-view]
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-non-affine-right-distribution-is-not-a-view, XFM-non-affine-view-remap-is-rejected-with-not-a-view]
+    mentioned_only_in: []
+  - code: NUMEL_MISMATCH_GROW
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-rearrange-cannot-grow-numel]
+    mentioned_only_in: []
+  - code: NUMEL_MISMATCH_SHRINK
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-rearrange-cannot-shrink-numel]
+    mentioned_only_in: []
+  - code: NUMERIC_CHECKED_CONTEXT_REQUIRED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-numeric
+        file: core/numeric.yaml
+        test_ids: [NUM-checked-boundary-does-not-cross-closure-body, NUM-division-total-divisor-does-not-exempt-fallible-promotion, NUM-dynamic-faulting-operator-outside-checked-is-rejected, NUM-remainder-total-divisor-does-not-exempt-fallible-promotion]
+    mentioned_only_in: []
+  - code: NUMERIC_OPERAND_NOT_NUMERIC
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-plus-is-numeric-only-and-not-string-concatenation, TYC-tri-arithmetic-operators-are-rejected, TYC-tri-mixed-with-numeric-arithmetic-is-rejected, TYC-tri-with-fractional-division-operator-is-rejected, TYC-unary-negation-rejects-non-numeric-operand]
+    mentioned_only_in: []
+  - code: ORPHAN_RULE_VIOLATION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-box-of-local-type-has-no-fundamental-locality-exception, TRT-nested-local-argument-does-not-localize-foreign-target-head, TRT-orphan-rule-rejects-impl-when-both-trait-and-type-are-non-local, TRT-package-mode-orphan-rule-rejects-foreign-trait-for-foreign-type, TRT-reference-to-local-type-has-no-local-nominal-target-head, TRT-structural-target-with-local-member-has-no-local-nominal-target-head, TRT-tensor-type-has-no-orphan-rule-exception, TRT-transparent-generic-alias-does-not-create-local-target-head]
+    mentioned_only_in: []
+  - code: OVERLOAD_AMBIGUOUS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-overload-function-value-coercion-rejects-multiple-compatible-candidates]
+    mentioned_only_in: []
+  - code: OVERLOAD_MARKER_REQUIRED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-same-name-inherent-methods-require-explicit-overload-marker]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-overload-marker-error-precedes-visibility-mismatch, TYC-same-name-declarations-require-explicit-overload-marker]
+    mentioned_only_in: []
+  - code: OVERLOAD_OVERLAP
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-alias-hidden-projection-does-not-make-overloads-disjoint, TYC-alpha-equivalent-generic-overload-declarations-overlap, TYC-associated-projections-do-not-make-overloads-disjoint, TYC-bound-only-differences-do-not-make-overloads-disjoint, TYC-overlapping-overload-declarations-are-forbidden]
+    mentioned_only_in: []
+  - code: OVERLOAD_RETURN_ONLY_DIFFERENCE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-overloads-that-differ-only-by-return-type-are-forbidden]
+    mentioned_only_in: []
+  - code: OVERLOAD_VISIBILITY_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-inherent-overload-family-requires-uniform-visibility, TYC-module-overload-family-requires-uniform-visibility]
+    mentioned_only_in: []
+  - code: OWNERSHIP_DISCARD_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-discard-target-cannot-consume-root-even-with-move, OWN-overwriting-root-is-forbidden, OWN-unused-fresh-root-expression-is-forbidden]
+    mentioned_only_in: []
+  - code: OWNERSHIP_DOUBLE_MOVE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-io-time
+        file: core/io_time.yaml
+        test_ids: [IOT-bytereader-repeated-consuming-close-is-ownership-double-move, IOT-bytewriter-repeated-consuming-close-is-ownership-double-move, IOT-textreader-repeated-consuming-close-is-ownership-double-move, IOT-textwriter-repeated-consuming-close-is-ownership-double-move]
+      - id: core-network
+        file: core/network.yaml
+        test_ids: [NET-tcplistener-repeated-consuming-close-is-ownership-double-move, NET-tcpstream-repeated-consuming-close-is-ownership-double-move]
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-earliest-same-class-error-is-primary-within-one-function, OWN-repeated-consuming-move-on-same-root-reports-ownership-double-move]
+    mentioned_only_in: []
+  - code: OWNERSHIP_GUARD_CONSUME_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-guard-cannot-consume-tentative-root]
+    mentioned_only_in: []
+  - code: OWNERSHIP_PATH_UNBALANCED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-bang-functions-must-balance-own-parameters-on-every-typed-exit-path, OWN-break-exits-loop-body-obligation-region, OWN-checked-region-root-must-discharge-before-fault-edge, OWN-conditional-root-must-be-discharged-on-typed-exit, OWN-continue-exits-loop-body-obligation-region, OWN-guarded-match-contributes-guard-true-and-guard-false-ownership-paths, OWN-inner-root-must-discharge-at-nested-yield, OWN-local-root-introduced-by-own-must-be-discharged, OWN-local-root-receiving-move-must-be-discharged, OWN-maybe-consumed-root-is-unbalanced-at-region-exit, OWN-move-free-match-arms-still-participate-in-global-ownership-discharge, OWN-normal-block-completion-exits-local-obligation-region, OWN-ownership-roots-must-discharge-exactly-once-on-every-typed-exit-path, OWN-result-region-root-must-discharge-before-question-exit, OWN-return-exits-all-active-obligation-regions, OWN-unrelated-question-early-exit-must-discharge-live-root]
+    mentioned_only_in: []
+  - code: OWNERSHIP_PROFILE_DISABLED
+    severity: error
+    policy: excluded_nonbaseline
+    status: uncovered
+    asserted_in: []
+    mentioned_only_in: []
+  - code: OWNERSHIP_TRANSFER_REQUIRES_MOVE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-named-conditional-root-question-requires-move, OWN-named-root-call-transfer-requires-explicit-move, OWN-named-root-carrier-construction-requires-explicit-move, OWN-named-root-local-transfer-requires-explicit-move, OWN-named-root-return-requires-explicit-move]
+    mentioned_only_in: []
+  - code: OWNERSHIP_TYPE_POSITION_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-associated-binding-cannot-use-conditional-ownership-carrier, OWN-associated-type-binding-cannot-hide-own-root, OWN-box-payload-cannot-be-ownership-root, OWN-callable-types-cannot-carry-ownership-roots, OWN-closure-cannot-capture-ownership-root, OWN-derived-root-reference-capture-keeps-ownership-diagnostic-primary, OWN-forbidden-aggregate-position-precedes-recursive-layout-analysis, OWN-mutable-root-capture-keeps-ownership-diagnostic-primary, OWN-nested-conditional-carrier-is-forbidden, OWN-ordinary-generic-cannot-be-instantiated-with-root-type, OWN-reference-bearing-root-payload-fails-ownership-validation-first, OWN-res-error-payload-cannot-be-ownership-root, OWN-sequence-elements-cannot-be-ownership-roots, OWN-transparent-alias-cannot-hide-root-type, OWN-tuple-elements-cannot-store-own-root, OWN-user-aggregate-field-cannot-store-own-root]
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-associated-binding-ownership-error-precedes-reference-error]
+    mentioned_only_in: []
+  - code: OWNERSHIP_USE_AFTER_DISCHARGE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-io-time
+        file: core/io_time.yaml
+        test_ids: [IOT-bytewriter-flush-after-consuming-close-is-ownership-use-after-discharge, IOT-bytewriter-write-all-after-consuming-close-is-ownership-use-after-discharge, IOT-read-chunk-after-consuming-close-is-ownership-use-after-discharge, IOT-textreader-read-line-after-consuming-close-is-ownership-use-after-discharge, IOT-textwriter-flush-after-consuming-close-is-ownership-use-after-discharge, IOT-textwriter-write-str-after-consuming-close-is-ownership-use-after-discharge]
+      - id: core-network
+        file: core/network.yaml
+        test_ids: [NET-network-metadata-after-consuming-close-is-ownership-use-after-discharge, NET-tcpstream-io-after-consuming-close-is-ownership-use-after-discharge]
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-borrow-use-after-discharge-reports-ownership-use-after-discharge, OWN-copied-derived-reference-retains-root-provenance, OWN-counted-loop-merge-rejects-maybe-consumed-ownership-use, OWN-derived-reference-use-after-root-move-is-rejected, OWN-own-consumes-source-binding, OWN-path-sensitive-merge-rejects-maybe-consumed-ownership-use]
+    mentioned_only_in: []
+  - code: OWN_REQUIRES_LOCAL_BINDING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-own-requires-consumable-local-or-parameter-binding]
+    mentioned_only_in: []
+  - code: OWN_REQUIRES_NON_OWN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-own-operator-rejects-own-operand]
+    mentioned_only_in: []
+  - code: PACKAGE_DEP_CYCLE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-package-dependency-cycle-fails-with-package-dep-cycle, MOD-path-normalizing-to-root-is-detected-as-a-package-cycle]
+    mentioned_only_in: []
+  - code: PACKAGE_DEP_DUPLICATE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-lexically-equivalent-direct-paths-are-duplicate-dependencies, MOD-registry-aliases-to-one-release-are-duplicate-direct-dependencies, MOD-symlink-equivalent-direct-paths-are-duplicate-dependencies]
+    mentioned_only_in: []
+  - code: PACKAGE_DEP_KEY_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-invalid-lockfile-dependency-key-precedes-lockfile-key-set-mismatch, MOD-invalid-manifest-dependency-key-tie-break-uses-canonical-lexical-decoded-order, MOD-punctuation-bearing-manifest-dependency-key-precedes-selector-and-missing-lock-errors, MOD-quoted-unicode-manifest-dependency-key-is-rejected, MOD-relative-import-root-manifest-dependency-key-is-rejected, MOD-source-keyword-manifest-dependency-key-is-rejected, MOD-standard-library-root-manifest-dependency-key-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_DEP_PATH_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-absolute-posix-manifest-dependency-path-is-invalid, MOD-backslash-manifest-dependency-path-is-invalid, MOD-drive-qualified-manifest-dependency-path-is-invalid, MOD-empty-manifest-dependency-path-is-invalid, MOD-unc-manifest-dependency-path-is-invalid]
+    mentioned_only_in: []
+  - code: PACKAGE_DEP_PATH_UNRESOLVED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-broken-symlink-manifest-dependency-path-is-unresolved, MOD-missing-manifest-dependency-path-is-unresolved, MOD-regular-file-manifest-dependency-target-is-not-a-directory, MOD-symlink-cycle-manifest-dependency-path-is-unresolved]
+    mentioned_only_in: []
+  - code: PACKAGE_DEP_SOURCE_CONFLICT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-package-dependency-entry-with-both-version-and-path-is-rejected, MOD-package-dependency-entry-with-neither-version-nor-path-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_DEP_VERSION_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-malformed-registry-exact-version-is-rejected, MOD-registry-exact-version-with-leading-zero-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_LOCK_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-lockfile-dangling-target-is-invalid, MOD-lockfile-duplicate-registry-coordinate-is-invalid, MOD-lockfile-leading-zero-version-is-invalid, MOD-lockfile-noncanonical-first-discovery-node-label-is-invalid, MOD-lockfile-noncanonical-package-record-order-is-invalid, MOD-lockfile-path-edge-cannot-target-registry-node, MOD-lockfile-registry-coordinate-cannot-contradict-integrity, MOD-lockfile-unreachable-node-is-invalid, MOD-noncanonical-lock-path-is-not-normalized-into-acceptance, MOD-raw-archive-sha256-is-not-valid-registry-tree-integrity]
+    mentioned_only_in: []
+  - code: PACKAGE_LOCK_MISSING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-package-mode-requires-lockfile-in-v0-1-baseline]
+    mentioned_only_in: []
+  - code: PACKAGE_LOCK_OUT_OF_SYNC
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-lockfile-dependency-key-set-mismatch-takes-precedence-over-dependency-selector-mismatch, MOD-lockfile-dependency-selector-mismatch-tie-break-follows-lexicographic-dependency-key-order, MOD-lockfile-manifest-metadata-mismatch-is-rejected-as-out-of-sync, MOD-lockfile-package-metadata-mismatch-takes-precedence-over-dependency-key-set-mismatch, MOD-lockfile-path-false-merge-is-out-of-sync, MOD-lockfile-path-false-split-is-out-of-sync, MOD-nested-lockfile-dependency-selector-mismatch-is-out-of-sync, MOD-registry-release-version-must-match-target-package-metadata]
+    mentioned_only_in: []
+  - code: PACKAGE_MANIFEST_MISSING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-forced-package-mode-without-manifest-fails-with-package-manifest-missing, MOD-registry-valid-tree-without-manifest-retains-package-diagnostic, MOD-resolved-dependency-directory-without-manifest-retains-package-diagnostic]
+    mentioned_only_in: []
+  - code: PACKAGE_MANIFEST_NAME_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-empty-package-name-is-rejected-before-missing-version, MOD-non-string-package-name-is-rejected, MOD-package-name-outside-portable-token-domain-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_MANIFEST_NAME_MISSING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-package-manifest-missing-package-name-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_MANIFEST_PACKAGE_TABLE_MISSING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-package-manifest-missing-package-table-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_MANIFEST_VERSION_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-package-manifest-invalid-package-version-is-rejected, MOD-package-manifest-leading-zero-version-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_MANIFEST_VERSION_MISSING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-package-manifest-missing-package-version-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_NAME_CONFLICT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-dependency-package-name-conflicting-with-root-package-is-rejected, MOD-distinct-package-instances-with-same-name-and-different-versions-are-rejected, MOD-distinct-same-version-path-packages-with-one-name-conflict-by-source, MOD-graph-failure-tie-break-follows-lexicographic-dependency-key-dfs-not-manifest-order, MOD-path-and-registry-packages-never-implicitly-converge]
+    mentioned_only_in: []
+  - code: PACKAGE_REGISTRY_ALIAS_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-invalid-registry-alias-is-rejected-before-lock-validation]
+    mentioned_only_in: []
+  - code: PACKAGE_REGISTRY_INTEGRITY_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-registry-canonical-tree-integrity-mismatch-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_REGISTRY_LIMIT_EXCEEDED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-registry-entry-count-precedes-path-bytes-at-limit, MOD-registry-file-size-precedes-total-file-bytes-at-limit, MOD-registry-link-target-precedes-total-metadata-at-limit, MOD-registry-path-bytes-precede-path-depth-at-limit, MOD-registry-path-depth-precedes-link-target-at-limit, MOD-registry-total-file-bytes-rejects-first-excess-byte, MOD-registry-total-metadata-precedes-file-size-at-limit]
+    mentioned_only_in: []
+  - code: PACKAGE_REGISTRY_RELEASE_MISSING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-registry-missing-release-is-distinct-from-transport-failure]
+    mentioned_only_in: []
+  - code: PACKAGE_REGISTRY_SELECTOR_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-unqualified-registry-package-without-alias-is-rejected]
+    mentioned_only_in: []
+  - code: PACKAGE_REGISTRY_TRANSPORT_FAILED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-registry-entry-count-accepts-portable-maximum, MOD-registry-file-size-accepts-portable-maximum, MOD-registry-link-target-accepts-portable-maximum, MOD-registry-path-bytes-accepts-portable-maximum, MOD-registry-path-depth-accepts-portable-maximum, MOD-registry-total-file-bytes-accepts-portable-maximum, MOD-registry-total-metadata-accepts-portable-maximum, MOD-registry-transport-failure-is-a-closed-outcome]
+    mentioned_only_in: []
+  - code: PACKAGE_REGISTRY_TREE_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-registry-tree-rejects-duplicate-regular-file, MOD-registry-tree-rejects-empty-path, MOD-registry-tree-rejects-file-ancestor-conflict, MOD-registry-tree-rejects-non-utf8-path-bytes, MOD-registry-tree-rejects-unicode-simple-fold-path-collision, MOD-registry-tree-selects-unsupported-entry-kind-deterministically]
+    mentioned_only_in: []
+  - code: PACKAGE_SRC_ROOT_MISSING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-package-mode-without-src-root-fails-with-package-src-root-missing, MOD-resolved-dependency-package-without-src-retains-package-diagnostic]
+    mentioned_only_in: []
+  - code: PACKAGE_VERSION_CONFLICT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-one-registry-package-id-cannot-select-two-exact-versions]
+    mentioned_only_in: []
+  - code: PACKAGE_VERSION_RANGE_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-manifest-dependency-shape-failure-takes-precedence-over-missing-lockfile, MOD-package-dependency-version-range-syntax-is-rejected-in-v0-1]
+    mentioned_only_in: []
+  - code: PARAM_PATTERN_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-parameter-patterns-are-rejected-in-v0-1, TYC-unit-parameter-pattern-is-rejected-in-v0-1]
+    mentioned_only_in: []
+  - code: PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-control-head-ungrouped-named-variant-in-match-requires-grouping, PAR-control-head-ungrouped-struct-literal-requires-grouping, PAR-control-head-ungrouped-trailing-closure-in-for-requires-grouping, PAR-control-head-ungrouped-trailing-closure-in-while-requires-grouping]
+    mentioned_only_in: []
+  - code: PARSE_EXPECTED_EXPRESSION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-leading-dot-numeric-form-is-not-a-float-literal]
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-match-arm-body-requires-an-expression, PAR-missing-expression-reports-parse-diagnostic]
+      - id: core-program
+        file: core/program.yaml
+        test_ids: [PRG-source-error-precedes-entry-missing]
+    mentioned_only_in: []
+  - code: PARSE_EXPECTED_PATTERN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-interpolated-string-is-not-a-literal-pattern, PAR-missing-match-arm-pattern-reports-parse-diagnostic]
+    mentioned_only_in: []
+  - code: PARSE_INVALID_RANGE_SYNTAX
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-chained-range-without-parentheses-is-invalid-syntax, PAR-range-missing-end-bound-is-invalid-syntax]
+    mentioned_only_in: []
+  - code: PARSE_INVALID_REST_POSITION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-named-variant-pattern-rest-may-appear-at-most-once, PAR-positional-rest-must-be-tail-position]
+    mentioned_only_in: []
+  - code: PARSE_RESOURCE_LIMIT_EXCEEDED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-recursive-parser-budget-reports-resource-limit]
+    mentioned_only_in: []
+  - code: PARSE_UNCLOSED_DELIMITER
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-unclosed-delimiter-reports-parse-diagnostic]
+    mentioned_only_in: []
+  - code: PARSE_UNEXPECTED_TOKEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-attributes-must-appear-before-pub, ATR-public-struct-method-cannot-place-attribute-after-visibility]
+      - id: core-lexer
+        file: core/lexer.yaml
+        test_ids: [LEX-block-comment-separates-format-string-prefix, LEX-horizontal-whitespace-separates-format-string-prefix, LEX-inline-block-comment-does-not-separate-line-oriented-statements, LEX-trailing-dot-numeric-form-is-rejected-as-incomplete-postfix-syntax]
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-array-and-map-entry-syntax-cannot-be-mixed, PAR-bare-brace-key-value-form-is-not-a-map-literal, PAR-block-comment-leading-binary-outside-group-is-rejected, PAR-closure-return-type-annotation-is-not-v0-1-syntax, PAR-dangling-attribute-at-end-of-file-is-rejected, PAR-empty-parenthesized-type-is-rejected, PAR-explicit-call-site-type-arguments-must-be-immediate-call, PAR-expression-ascription-is-not-v0-1-syntax, PAR-general-bracket-indexing-is-not-v0-1-syntax, PAR-generic-catalog-owner-member-reference-is-not-a-value-expression, PAR-generic-catalog-owner-type-is-not-a-value-expression, PAR-generic-struct-literal-has-no-constructor-head-type-arguments, PAR-generic-variant-has-no-bracket-constructor-head, PAR-generic-variant-has-no-turbofish-constructor-head, PAR-impl-method-cannot-declare-independent-visibility, PAR-infix-type-union-syntax-is-rejected, PAR-leading-additive-binary-outside-group-is-rejected, PAR-leading-comparison-binary-outside-group-is-rejected, PAR-leading-logical-binary-outside-group-is-rejected, PAR-leading-multiplicative-binary-outside-group-is-rejected, PAR-leading-range-binary-outside-group-is-rejected, PAR-line-oriented-declarations-require-a-real-separator, PAR-line-oriented-statements-require-a-real-separator, PAR-newline-does-not-replace-list-comma, PAR-non-group-delimiter-does-not-authorize-leading-binary, PAR-property-accessor-cannot-declare-independent-visibility, PAR-top-level-inherent-impl-is-not-v0-1-syntax, PAR-trait-method-cannot-declare-independent-visibility, PAR-try-suffix-cannot-cross-newline, PAR-tuple-index-context-does-not-cross-newline-after-dot, PAR-type-argument-call-suffix-cannot-cross-newline, PAR-unexpected-token-reports-parse-diagnostic, PAR-unsafe-fn-declaration-is-not-v0-1-syntax, PAR-unsafe-impl-declaration-is-not-v0-1-syntax, PAR-unsafe-trait-declaration-is-not-v0-1-syntax, PAR-wildcard-import-is-not-v0-1-syntax, PAR-zero-argument-closure-missing-closing-pipe-is-rejected]
+      - id: tensor-contract
+        file: tensor/contract.yaml
+        test_ids: [TCT-contract-rejects-multiple-rhs-axis-lists]
+    mentioned_only_in: []
+  - code: PATTERN_ARITY_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-nested-payload-pattern-rejects-inner-arity-mismatch, CFL-outer-arity-mismatch-precedes-duplicate-binding, CFL-positional-variant-pattern-rejects-arity-mismatch, CFL-tail-rest-pattern-rejects-overlong-explicit-prefix, CFL-tuple-pattern-rejects-fixed-arity-mismatch]
+    mentioned_only_in: []
+  - code: PATTERN_DUPLICATE_BINDING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-alias-pattern-binding-cannot-repeat-in-nested-payload, CFL-pattern-rejects-duplicate-binding-in-one-alternative-path]
+    mentioned_only_in: []
+  - code: PATTERN_DUPLICATE_FIELD
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-struct-pattern-rejects-duplicate-field-before-unknown-or-missing]
+    mentioned_only_in: []
+  - code: PATTERN_MISSING_FIELD
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-named-variant-pattern-without-rest-rejects-missing-field, CFL-pathless-struct-missing-field-blames-opening-pattern-brace, CFL-struct-pattern-without-rest-rejects-missing-field]
+    mentioned_only_in: []
+  - code: PATTERN_PAYLOAD_FORM_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-variant-pattern-must-use-declared-payload-form, CFL-zero-arity-positional-variant-pattern-requires-parentheses]
+    mentioned_only_in: []
+  - code: PATTERN_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-nominal-pattern-type-mismatch-reports-both-types, CFL-tuple-pattern-rejects-non-tuple-scrutinee]
+    mentioned_only_in: []
+  - code: PATTERN_UNKNOWN_FIELD
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-conditionals
+        file: core/conditionals.yaml
+        test_ids: [CFL-struct-pattern-rejects-unknown-field-before-missing]
+    mentioned_only_in: []
+  - code: PLACEHOLDER_INVALID_CONTEXT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-placeholder-hole-cannot-appear-in-arithmetic, TYC-placeholder-hole-cannot-initialize-binding, TYC-placeholder-hole-cannot-stand-alone]
+    mentioned_only_in: []
+  - code: PROGRAM_ENTRY_DUPLICATE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-program
+        file: core/program.yaml
+        test_ids: [PRG-duplicate-entry-is-rejected]
+    mentioned_only_in: []
+  - code: PROGRAM_ENTRY_MISSING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-program
+        file: core/program.yaml
+        test_ids: [PRG-non-bang-main-does-not-satisfy-entry-contract]
+    mentioned_only_in: []
+  - code: PROGRAM_ENTRY_SIGNATURE_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-program
+        file: core/program.yaml
+        test_ids: [PRG-arbitrary-entry-result-is-rejected, PRG-entry-parameters-are-rejected, PRG-generic-entry-is-rejected, PRG-ownership-bearing-entry-result-is-rejected]
+    mentioned_only_in: []
+  - code: PROPERTY_ASSIGN_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-property-assignment-syntax-is-forbidden-even-for-prop-mut]
+    mentioned_only_in: []
+  - code: PROP_ACCESSOR_MISSING
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-prop-mut-declaration-requires-setter-accessor]
+    mentioned_only_in: []
+  - code: PROP_ACCESSOR_SIGNATURE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-extra-misnamed-property-accessor-is-rejected-by-property-contract-validation, TYC-property-accessor-signature-must-match-property-contract]
+    mentioned_only_in: []
+  - code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-effects
+        file: core/effects.yaml
+        test_ids: [EFF-pure-map-rejects-effectful-callback-that-uses-then, EFF-pure-opt-map-rejects-effectful-callback, EFF-pure-res-map-err-rejects-effectful-callback, EFF-pure-tap-rejects-effectful-callback, EFF-pure-traverse-res-rejects-effectful-callback]
+      - id: core-traverse
+        file: core/traverse.yaml
+        test_ids: [TRV-pure-any-rejects-effectful-callback, TRV-pure-filter-map-rejects-effectful-callback, TRV-pure-find-res-rejects-effectful-callback, TRV-pure-group-by-rejects-effectful-callback, TRV-pure-scan-rejects-effectful-callback]
+      - id: core-vec-api
+        file: core/vec_api.yaml
+        test_ids: [VEC-sort-by-bang-rejects-effectful-key-callback]
+      - id: tensor-grad
+        file: tensor/grad.yaml
+        test_ids: [TGD-effectful-callback-precedes-argnum-validation]
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-effectful-callback-precedes-in-axes-arity-validation, TMA-pure-map_axis-rejects-effectful-callback]
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-reduce-by-rejects-effectful-phase-callback]
+    mentioned_only_in: []
+  - code: Q_OUTSIDE_RESULT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-numeric
+        file: core/numeric.yaml
+        test_ids: [NUM-checked-body-does-not-inherit-outer-result-question-mark-context]
+      - id: core-result
+        file: core/result.yaml
+        test_ids: [RES-outside-result-block-is-forbidden]
+    mentioned_only_in: []
+  - code: RANGE_EXPR_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-range-expression-cannot-be-bound-as-value, TYC-range-expression-cannot-be-call-argument]
+    mentioned_only_in: []
+  - code: RAW_POINTER_TYPE_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-explicit-local-raw-pointer-type-remains-unsupported-inside-unsafe, TYC-ordinary-function-parameter-rejects-raw-pointer-type, TYC-struct-field-rejects-raw-pointer-type, TYC-type-alias-rejects-nested-raw-pointer-type]
+    mentioned_only_in: []
+  - code: RAW_POINTER_USE_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-raw-pointer-cannot-be-captured-by-closure, TYC-raw-pointer-cannot-enter-an-ordinary-call, TYC-raw-pointer-cannot-enter-tuple-storage, TYC-raw-pointer-cannot-initialize-mutable-local, TYC-raw-pointer-cannot-instantiate-ordinary-generic, TYC-raw-pointer-cannot-return-from-function, TYC-raw-pointer-comparison-is-unsupported, TYC-raw-pointer-dereference-is-unsupported, TYC-raw-pointer-result-cannot-leave-unsafe-relay-region]
+    mentioned_only_in: []
+  - code: REARRANGE_OUTPUT_DTYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-rearrange-rejects-distinct-unresolved-contributor-projections, XFM-rearrange-rejects-mixed-dtypes-within-one-output]
+    mentioned_only_in: []
+  - code: REDUCE_BY_ARGUMENTS_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-reduce-schema-reduce-by-does-not-fall-back-to-empty-ordinary-call, RDX-user-method-named-reduce-by-rejects-schema-axis-syntax]
+    mentioned_only_in: []
+  - code: REDUCE_BY_PHASE_INCOMPLETE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-reduce-by-phase-coverage-cannot-be-partial]
+    mentioned_only_in: []
+  - code: REDUCE_BY_PHASE_NON_REDUCED_AXIS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-reduce-by-phase-axis-must-be-reduced-axis]
+    mentioned_only_in: []
+  - code: REDUCE_BY_PHASE_OVERLAP
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-phase-partition-validation-precedes-effectful-callback-rejection, RDX-reduce-by-phase-axis-sets-must-be-disjoint]
+    mentioned_only_in: []
+  - code: REDUCTION_EMPTY_DOMAIN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-const-empty-max-domain-fails-before-empty-output-short-circuit, RDX-dynamic-empty-max-domain-returns-shapeerror]
+    mentioned_only_in: []
+  - code: REFERENCE_TARGET_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-invalid-reference-target-precedes-escape-classification, TYC-reference-target-must-be-a-stable-local-place, TYC-writable-reference-target-must-be-writable]
+    mentioned_only_in: []
+  - code: REFERENCE_TYPE_POSITION_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-associated-reference-error-precedes-public-visibility-error, TRT-associated-type-binding-cannot-conceal-shared-reference, TRT-associated-type-binding-checks-callable-components-for-references, TRT-associated-type-binding-expands-alias-before-reference-check, TRT-generic-trait-reference-cannot-conceal-reference]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-expected-fn-cannot-instantiate-generic-with-reference, TYC-explicit-mutable-reference-argument-fails-before-substituted-signature, TYC-inferred-generic-argument-cannot-conceal-shared-reference, TYC-nested-generic-argument-cannot-conceal-reference, TYC-reference-free-validation-precedes-trait-bound-checking]
+    mentioned_only_in: []
+  - code: REF_ESCAPE_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-concurrency
+        file: core/concurrency.yaml
+        test_ids: [CON-task-thunk-cannot-capture-explicit-reference]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-fn-type-rejects-reference-capture-that-escapes, TYC-reference-binding-cannot-outlive-an-inner-block-referent, TYC-returning-explicit-reference-is-forbidden-in-v0-1]
+    mentioned_only_in: []
+  - code: RESERVED_BUILTIN_NAME
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-box-generic-parameter-name-is-reserved, TYC-box-type-alias-name-is-reserved, TYC-box-type-constructor-name-is-reserved, TYC-fn-callable-type-head-name-is-reserved, TYC-never-type-name-is-reserved, TYC-opt-type-constructor-name-is-reserved, TYC-own-type-constructor-name-is-reserved, TYC-res-type-constructor-name-is-reserved, TYC-self-generic-parameter-name-is-reserved, TYC-self-type-alias-name-is-reserved, TYC-self-type-name-is-reserved-for-user-declarations, TYC-union-type-head-name-is-reserved]
+    mentioned_only_in: []
+  - code: RESOURCE_DROP_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-ownership
+        file: core/ownership.yaml
+        test_ids: [OWN-drop-own-cannot-discharge-external-resource-root]
+    mentioned_only_in: []
+  - code: RESULT_BLOCK_MIXED_KINDS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-result
+        file: core/result.yaml
+        test_ids: [RES-mixing-remains-forbidden-even-when-res-and-opt-appear-in-different-if-branches, RES-mixing-remains-forbidden-even-when-res-and-opt-appear-in-different-match-arms, RES-mixing-res-and-opt-in-one-result-block-is-forbidden]
+    mentioned_only_in: []
+  - code: RESULT_MISSING_YIELD
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-result
+        file: core/result.yaml
+        test_ids: [RES-never-expression-does-not-waive-explicit-yield, RES-result-block-requires-explicit-yield]
+    mentioned_only_in: []
+  - code: RETURN_OUTSIDE_FUNCTION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-return-inside-closure-body-is-forbidden, TYC-return-outside-function-body-is-forbidden]
+    mentioned_only_in: []
+  - code: RETURN_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-result
+        file: core/result.yaml
+        test_ids: [RES-question-mark-error-outside-declared-union-is-rejected, RES-result-block-final-yield-does-not-auto-wrap-payload, RES-result-block-final-yield-family-must-match-question-mark-kind]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-block-body-function-does-not-use-implicit-tail-expression-return, TYC-block-fallthrough-type-must-match-function-return-type, TYC-distinct-unresolved-associated-projections-are-not-equal, TYC-expression-body-result-must-match-declared-return-type, TYC-never-bottom-compatibility-does-not-lift-through-result-success, TYC-never-bottom-compatibility-does-not-lift-through-seq, TYC-return-expression-type-must-match-function-return-type, TYC-scoped-failure-does-not-implicitly-convert-to-inner-error]
+    mentioned_only_in: []
+  - code: RETURN_VALUE_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-return-value-is-forbidden-for-unit-return-type, TYC-unit-return-value-form-precedes-never-compatibility]
+    mentioned_only_in: []
+  - code: RETURN_VALUE_REQUIRED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-bare-return-requires-unit-return-type]
+    mentioned_only_in: []
+  - code: RUNTIME_ABORT
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-concurrency
+        file: core/concurrency.yaml
+        test_ids: [CON-unobserved-child-failure-at-scope-exit-terminates-with-fixed-source-tag]
+      - id: core-ffi-linkage-probe
+        file: core/ffi_linkage_probe.yaml
+        precondition: ffi_linkage_probe
+        test_ids: [FFI-unobserved-child-linkage-failure-projects-scope-exit-abort]
+      - id: core-io-time
+        file: core/io_time.yaml
+        test_ids: [IOT-scoped-callback-runtime-abort-remains-runtime-error]
+      - id: core-par-traverse-quiescence-probe
+        file: core/par_traverse_quiescence_probe.yaml
+        precondition: par_traverse_quiescence_probe
+        test_ids: [CON-par-traverse-res-in-flight-runtime-abort-precedes-decisive-typed-error]
+      - id: core-program
+        file: core/program.yaml
+        test_ids: [PRG-never-entry-is-valid-and-has-no-normal-result-projection, PRG-runtime-abort-maps-to-one]
+      - id: core-runtime-errors
+        file: core/runtime_errors.yaml
+        test_ids: [RTE-runtime-abort-is-fail-fast-and-preserves-prior-side-effects-only, RTE-std-test-abort-terminates-execution-with-runtime-error-channel]
+    mentioned_only_in: []
+  - code: SCATTER_SET_DUPLICATE_INDEX
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-indexing
+        file: tensor/indexing.yaml
+        test_ids: [TIX-set-at-assign-with-normalized-aliases-is-compile-time-scatter-set-duplicate-index, TIX-set-at-assign-with-runtime-duplicate-indices-returns-index-error]
+    mentioned_only_in: []
+  - code: SEGMENT_STRADDLE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-cross-input-factoring-reaches-segment-straddle-after-structural-proof, XFM-rearrange-rejects-output-segments-that-straddle-operands, XFM-rearrange-rejects-product-factors-from-distinct-operands]
+    mentioned_only_in: []
+  - code: SELF_TYPE_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-self-projection-in-impl-header-preserves-self-diagnostic]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-self-associated-projection-outside-owner-uses-self-diagnostic, TYC-struct-field-cannot-use-self-type, TYC-top-level-function-cannot-use-self-type]
+    mentioned_only_in: []
+  - code: SLICE_STEP_ZERO
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-indexing
+        file: tensor/indexing.yaml
+        test_ids: [TIX-const-zero-slice-step-is-rejected, TIX-runtime-zero-slice-step-returns-index-error]
+    mentioned_only_in: []
+  - code: SPECIALIZATION_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-complete-error-parameter-specializes-rigid-error-union-header, TRT-specialization-is-forbidden-in-v0-1, TRT-tensor-impl-specialization-is-forbidden-in-v0-1]
+    mentioned_only_in: []
+  - code: STRUCT_FIELD_DEFAULT_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-struct-field-declaration-default-initializer-is-forbidden]
+    mentioned_only_in: []
+  - code: STRUCT_INIT_DUPLICATE_FIELD
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-enum-named-payload-rejects-duplicate-field-initialization, TYC-struct-literal-rejects-duplicate-field-initialization]
+    mentioned_only_in: []
+  - code: STRUCT_INIT_MISSING_FIELD
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-enum-named-payload-requires-all-declared-fields, TYC-struct-literal-rejects-missing-field-initialization]
+    mentioned_only_in: []
+  - code: STRUCT_INIT_PROPERTY_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-struct-literal-cannot-initialize-property-member]
+    mentioned_only_in: []
+  - code: STRUCT_INIT_UNKNOWN_FIELD
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-enum-named-payload-rejects-unknown-field-key, TYC-generic-constructor-shape-error-precedes-owner-inference, TYC-struct-literal-rejects-unknown-field]
+    mentioned_only_in: []
+  - code: TEST_ATTRIBUTE_TARGET_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-attribute-before-public-struct-method-reaches-semantic-validation, ATR-ignore-with-test-on-method-target-uses-test-target-diagnostic, ATR-test-target-must-be-top-level-function]
+    mentioned_only_in: []
+  - code: TEST_FUNCTION_INVALID_SIGNATURE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-test-function-must-have-zero-parameters, ATR-test-function-must-not-be-generic, ATR-test-return-type-does-not-accept-never, ATR-test-return-type-must-be-unit-or-res-unit-e]
+    mentioned_only_in: []
+  - code: TEST_IGNORE_REQUIRES_TEST
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-ignore-requires-same-function-test]
+    mentioned_only_in: []
+  - code: TRAIT_BOUND_INVALID
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-inline-bound-list-rejects-duplicate-trait-references, TRT-inline-bound-must-resolve-to-a-trait]
+    mentioned_only_in: []
+  - code: TRAIT_BOUND_NOT_SATISFIED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-containers
+        file: core/containers.yaml
+        test_ids: [CNT-map-literal-requires-eq-and-hash-key-bounds, CNT-map-type-head-rejects-key-with-eq-but-without-hash, CNT-set-type-head-rejects-element-with-hash-but-without-eq]
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-private-generic-alias-cannot-hide-symbolic-bound]
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-default-body-current-trait-assumption-requires-exact-trait-arguments, TRT-default-body-rejects-recursive-external-obligation, TRT-default-body-requires-explicit-unrelated-trait-assumption, TRT-generic-impl-obligation-must-satisfy-impl-bound, TRT-generic-trait-reference-must-satisfy-declared-bound, TRT-inferred-type-argument-must-satisfy-declared-bound, TRT-leftmost-unsatisfied-bound-is-primary, TRT-prelude-ord-impl-requires-eq, TRT-recursive-bound-during-associated-result-selection-remains-bound-error, TRT-recursive-bound-obligation-does-not-prove-itself, TRT-symbolic-well-formedness-requires-exact-trait-arguments]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-bounded-generic-type-application-rejects-unsatisfied-argument, TYC-expected-fn-instantiation-must-satisfy-generic-bound, TYC-explicit-type-argument-must-satisfy-declared-bound, TYC-inferred-generic-constructor-validates-bound-after-inference, TYC-map-type-head-rejects-unbounded-generic-key, TYC-never-has-no-automatic-trait-implementations]
+      - id: tensor-capabilities
+        file: tensor/capabilities.yaml
+        test_ids: [TCP-readabletensor-does-not-imply-affinetensor]
+    mentioned_only_in: []
+  - code: TRAIT_EFFECT_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-trait-method-ness-cannot-be-changed-by-impl]
+    mentioned_only_in: []
+  - code: TRAIT_IMPL_ASSOC_TYPE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-associated-binding-completeness-precedes-invalid-rhs, TRT-trait-impl-must-bind-every-associated-type, TRT-trait-impl-rejects-duplicate-associated-type-binding, TRT-trait-impl-rejects-unknown-associated-type-binding]
+    mentioned_only_in: []
+  - code: TRAIT_IMPL_DUPLICATE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-attributes
+        file: core/attributes.yaml
+        test_ids: [ATR-repeated-derive-attributes-remain-distinct-coherence-candidates]
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-associated-bindings-do-not-distinguish-duplicate-impl-headers, TRT-duplicate-impl-headers-are-forbidden, TRT-package-mode-detects-duplicate-impls-across-modules, TRT-rigid-error-union-impl-identity-uses-normalized-member-set]
+    mentioned_only_in: []
+  - code: TRAIT_IMPL_MISSING_METHOD
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-impl-must-provide-required-trait-method, TRT-prelude-eq-impl-must-provide-required-method, TRT-prelude-hash-impl-must-provide-required-method, TRT-prelude-ord-impl-must-provide-required-method]
+    mentioned_only_in: []
+  - code: TRAIT_IMPL_OVERLAP
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-bound-only-differences-do-not-make-impl-headers-disjoint, TRT-overlapping-impls-are-forbidden, TRT-package-mode-detects-overlapping-impls-across-modules]
+    mentioned_only_in: []
+  - code: TRAIT_IMPL_SIGNATURE_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-impl-method-generic-bound-set-must-match-trait, TRT-impl-method-parameter-type-must-match-trait-signature, TRT-impl-method-return-type-must-match-trait-signature, TRT-prelude-eq-impl-method-must-match-signature, TRT-prelude-hash-impl-method-must-match-seeded-signature, TRT-prelude-ord-impl-method-must-match-signature, TRT-trait-impl-signature-rejects-mismatch-after-associated-type-normalization]
+    mentioned_only_in: []
+  - code: TRAIT_METHOD_AMBIGUOUS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-default-method-conflict-is-compile-error, TRT-required-method-conflict-is-compile-error]
+    mentioned_only_in: []
+  - code: TRAIT_STATE_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-trait-cannot-declare-field-members, TRT-trait-cannot-declare-property-members]
+    mentioned_only_in: []
+  - code: TRAVERSE_OPT_NONE
+    severity: note
+    policy: optional_emit_if_present
+    status: uncovered
+    asserted_in: []
+    mentioned_only_in: []
+  - code: TRAVERSE_RES_FAIL
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-concurrency
+        file: core/concurrency.yaml
+        test_ids: [CON-par-traverse-res-returns-err-from-earliest-failing-index-not-first-completed-failure]
+      - id: core-par-traverse-quiescence-probe
+        file: core/par_traverse_quiescence_probe.yaml
+        precondition: par_traverse_quiescence_probe
+        test_ids: [CON-par-traverse-res-fail-fast-return-is-quiescent-and-suppresses-unstarted-work]
+      - id: core-traverse
+        file: core/traverse.yaml
+        test_ids: [TRV-diagnostics-include-0-based-index, TRV-filter-map-res-and-partition-res-evaluate-left-to-right-and-preserve-behavior, TRV-filter-map-res-bang-fail-fast-stops-effects-after-first-err, TRV-find-res-fail-fast-returns-first-err-and-reports-index, TRV-partition-res-fail-fast-is-left-to-right-and-stops-later-effects, TRV-sequence-res-stops-at-first-err-and-reports-index, TRV-traverse-res-failure-at-index-0-emits-only-first, TRV-traverse-res-is-left-to-right-and-fail-fast]
+    mentioned_only_in: []
+  - code: TUPLE_PROJECTION_NON_TUPLE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-tuple-projection-rejects-non-tuple-receiver]
+    mentioned_only_in: []
+  - code: TUPLE_PROJECTION_OUT_OF_BOUNDS
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-tuple-projection-rejects-out-of-bounds-index, TYC-unary-tuple-projection-rejects-out-of-bounds-index]
+    mentioned_only_in: []
+  - code: TYPE_ALIAS_CYCLE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-cyclic-type-aliases-are-rejected]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-box-wrapped-alias-cycle-precedes-layout-analysis]
+    mentioned_only_in: []
+  - code: TYPE_ARG_ARITY_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-associated-type-application-rejects-generic-arguments]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-box-arity-error-precedes-layout-analysis, TYC-generic-type-alias-rejects-arity-mismatch, TYC-never-type-rejects-type-arguments]
+      - id: tensor-dtypes
+        file: tensor/dtypes.yaml
+        test_ids: [DTP-bare-dtype-type-is-rejected, DTP-bare-tensor-type-is-rejected]
+    mentioned_only_in: []
+  - code: TYPE_ARG_BRACKET_SYNTAX_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-bracket-only-call-site-type-arguments-are-rejected]
+      - id: tensor-dtypes
+        file: tensor/dtypes.yaml
+        test_ids: [DTP-local-shadowing-removes-dtype-bracket-identity]
+    mentioned_only_in: []
+  - code: TYPE_ARG_INFERENCE_FAILED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-associated-parameter-does-not-reverse-infer-base, TYC-associated-result-does-not-reverse-infer-an-underconstrained-carrier, TYC-bound-does-not-select-an-underconstrained-type-argument, TYC-bound-witness-does-not-infer-phantom-constructor-argument, TYC-expected-fn-projection-does-not-reverse-infer-base, TYC-expected-fn-result-projection-does-not-reverse-infer-base, TYC-generic-function-value-needs-a-complete-expected-fn-type, TYC-generic-phantom-struct-without-expected-owner-fails-inference, TYC-generic-struct-conflicting-field-constraints-fail-inference, TYC-generic-variant-with-unselected-parameter-fails-inference, TYC-generic-zero-field-struct-without-expected-owner-fails-inference, TYC-immediate-result-projection-does-not-reverse-infer-base, TYC-partial-explicit-call-site-type-arguments-are-rejected, TYC-structural-error-union-does-not-infer-nested-parameter, TYC-structural-error-union-inference-is-member-order-invariant, TYC-underconstrained-generic-call-fails-inference]
+      - id: tensor-map-axis
+        file: tensor/map_axis.yaml
+        test_ids: [TMA-map_axis-does-not-infer-generic-callback-from-later-returned-callable-use]
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-reduce-by-does-not-specialize-generic-named-callback]
+    mentioned_only_in: []
+  - code: TYPE_RECURSIVE_LAYOUT_REQUIRES_INDIRECTION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-associated-projection-cannot-hide-recursive-inline-layout, TYC-direct-recursive-struct-layout-requires-indirection, TYC-mixed-struct-enum-layout-cycle-requires-indirection, TYC-mutual-enum-layout-cycle-requires-indirection, TYC-opt-does-not-hide-recursive-layout-cycle, TYC-recursive-enum-named-payload-requires-box-indirection, TYC-recursive-enum-payload-requires-explicit-indirection, TYC-res-does-not-hide-recursive-layout-cycle, TYC-transformed-generic-recursion-requires-indirection, TYC-transparent-alias-does-not-hide-recursive-layout-cycle, TYC-tuple-does-not-hide-recursive-layout-cycle, TYC-user-generic-wrapper-does-not-hide-recursive-layout-cycle]
+    mentioned_only_in: []
+  - code: UNION_TYPE_ARITY_MISMATCH
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-union-type-requires-at-least-two-members]
+    mentioned_only_in: []
+  - code: UNION_TYPE_UNSUPPORTED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-function-parameter-rejects-non-error-channel-union-type, TYC-nested-sequence-rejects-non-error-channel-union-type]
+    mentioned_only_in: []
+  - code: UNSAFE_REQUIRED
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-extern-call-outside-unsafe-block-is-rejected]
+    mentioned_only_in: []
+  - code: VAR_DECL_FORBIDDEN
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-parser
+        file: core/parser.yaml
+        test_ids: [PAR-var-local-declaration-uses-stable-forbidden-code, PAR-var-struct-member-declaration-uses-stable-forbidden-code]
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-local-var-binding-form-is-forbidden-in-v0-1, TYC-struct-member-var-declaration-is-forbidden-in-v0-1]
+    mentioned_only_in: []
+  - code: VISIBILITY_VIOLATION
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-external-struct-literal-cannot-name-private-required-field, MOD-external-struct-literal-cannot-omit-private-required-field, MOD-package-public-api-rejects-private-import-of-foreign-type, MOD-package-public-api-rejects-sibling-foreign-reexport, MOD-package-public-conformance-rejects-unbridged-foreign-target, MOD-package-public-import-of-alias-cannot-replace-foreign-reexport, MOD-private-enum-type-cannot-be-imported-from-another-module, MOD-private-inherent-family-blocks-visible-trait-fallback, MOD-private-inherent-method-is-rejected-across-modules, MOD-private-property-accessor-is-rejected-across-modules, MOD-private-property-read-is-rejected-across-modules, MOD-private-property-setter-is-rejected-across-modules, MOD-private-stored-field-read-is-rejected-across-modules, MOD-private-stored-field-write-is-rejected-across-modules, MOD-private-symbol-access-across-modules-is-rejected, MOD-public-const-cannot-expose-private-nominal, MOD-public-enum-bound-cannot-name-private-trait, MOD-public-enum-payload-cannot-expose-private-nominal, MOD-public-field-cannot-contain-private-nominal, MOD-public-function-cannot-return-private-nominal, MOD-public-generic-bound-cannot-name-private-trait, MOD-public-inherent-method-cannot-expose-private-nominal, MOD-public-member-does-not-escape-private-owner, MOD-public-property-cannot-expose-private-nominal, MOD-public-struct-bound-cannot-name-private-trait, MOD-public-trait-bound-cannot-name-private-trait, MOD-public-trait-method-cannot-expose-private-nominal, MOD-public-type-alias-bound-cannot-name-private-trait, MOD-public-type-alias-cannot-bridge-private-nominal]
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-private-qualified-base-fails-visibility-before-projection-classification, TRT-public-conformance-bound-cannot-name-private-trait, TRT-public-conformance-cannot-expose-private-associated-binding, TRT-public-conformance-checks-nested-associated-binding-visibility, TRT-public-conformance-header-cannot-contain-private-type-argument, TRT-public-conformance-on-intrinsic-target-checks-associated-visibility, TRT-public-conformance-trait-reference-cannot-contain-private-type-argument]
+    mentioned_only_in: []
+  - code: WITH_SIZES_UNKNOWN_KEY
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: tensor-reduce
+        file: tensor/reduce.yaml
+        test_ids: [RDX-reduce-by-runtime-schema-failure-is-transformerror]
+      - id: tensor-xform
+        file: tensor/xform.yaml
+        test_ids: [XFM-with-sizes-rejects-dynamic-unknown-key-at-invocation, XFM-with-sizes-rejects-named-axis-pack-key, XFM-with-sizes-rejects-static-unknown-key-before-solving]
+    mentioned_only_in: []
+optional_probe_summary:
+  mode: non_blocking_warning
+  warning_threshold_min_asserted: 1
+  warning_active: false
+  warning_message: "optional emit-if-present probes meet warning threshold"
+  optional_suites:
+    - id: optional-emit-if-present
+      file: optional/emit_if_present.yaml
+optional_probe_coverage:
+  - code: AXIS_NAMES_DROPPED
+    status: asserted
+    asserted_in:
+      - id: optional-emit-if-present
+        file: optional/emit_if_present.yaml
+        test_ids: [OEP-axis-names-dropped-contract-is-validated-when-emitted]
+    mentioned_only_in: []
+  - code: AXIS_OVERLAY_PERMUTED
+    status: asserted
+    asserted_in:
+      - id: optional-emit-if-present
+        file: optional/emit_if_present.yaml
+        test_ids: [OEP-axis-overlay-permuted-contract-is-validated-when-emitted]
+    mentioned_only_in: []
+  - code: MAP_AXIS_OPT_NONE
+    status: asserted
+    asserted_in:
+      - id: optional-emit-if-present
+        file: optional/emit_if_present.yaml
+        test_ids: [OEP-map_axis-opt-none-contract-is-validated-when-emitted]
+    mentioned_only_in: []
+  - code: TRAVERSE_OPT_NONE
+    status: asserted
+    asserted_in:
+      - id: optional-emit-if-present
+        file: optional/emit_if_present.yaml
+        test_ids: [OEP-traverse-opt-none-contract-is-validated-when-emitted]
+    mentioned_only_in: []
+optional_extension_summary:
+  mode: non_blocking_evidence
+  optional_suites:
+    - id: core-ownership-profile-disabled
+      file: core/ownership_profile_disabled.yaml
+optional_extension_coverage:
+  - code: AXIS_ALIASED_HEADER
+    status: unasserted
+    asserted_in: []
+    mentioned_only_in: []
+  - code: DERIVE_EXPANSION_FORBIDDEN
+    status: unasserted
+    asserted_in: []
+    mentioned_only_in: []
+  - code: GRAD_CUSTOM_KERNEL_NO_VJP
+    status: unasserted
+    asserted_in: []
+    mentioned_only_in: []
+  - code: GRAD_RESULT_SHAPE_MISMATCH
+    status: unasserted
+    asserted_in: []
+    mentioned_only_in: []
+  - code: OWNERSHIP_PROFILE_DISABLED
+    status: asserted
+    asserted_in:
+      - id: core-ownership-profile-disabled
+        file: core/ownership_profile_disabled.yaml
+        test_ids: [OWD-ownership-disabled-profile-rejects-own-and-move-operators, OWD-ownership-disabled-profile-rejects-own-type-constructor-usage]
+    mentioned_only_in: []
+uncovered_codes:
+  - AXIS_ALIASED_HEADER
+  - AXIS_NAMES_DROPPED
+  - AXIS_OVERLAY_PERMUTED
+  - DERIVE_EXPANSION_FORBIDDEN
+  - GRAD_CUSTOM_KERNEL_NO_VJP
+  - GRAD_RESULT_SHAPE_MISMATCH
+  - MAP_AXIS_OPT_NONE
+  - OWNERSHIP_PROFILE_DISABLED
+  - TRAVERSE_OPT_NONE
+hard_gaps:
+conditional_pending:
+optional_emit_unasserted:
+  - AXIS_NAMES_DROPPED
+  - AXIS_OVERLAY_PERMUTED
+  - MAP_AXIS_OPT_NONE
+  - TRAVERSE_OPT_NONE
+excluded_nonbaseline_codes:
+  - AXIS_ALIASED_HEADER
+  - DERIVE_EXPANSION_FORBIDDEN
+  - GRAD_CUSTOM_KERNEL_NO_VJP
+  - GRAD_RESULT_SHAPE_MISMATCH
+  - OWNERSHIP_PROFILE_DISABLED

@@ -1,0 +1,1611 @@
+tests:
+- id: CFL-if-expression-selects-then-branch-when-condition-is-true
+  category: control_flow
+  title: if expression selects then branch when condition is true
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if true { yield 1 } else { yield 2 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: CFL-else-if-chain-desugars-as-nested-if-and-picks-first-true-branch
+  category: control_flow
+  title: else-if chain desugars as nested if and picks first true branch
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if false { yield 1 } else if true { yield 2 } else { yield 3 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: CFL-if-condition-must-be-bool-or-tri
+  category: control_flow
+  title: if condition must be Bool or Tri
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if 1 { yield 1 } else { yield 0 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    compile_error:
+      code: IF_CONDITION_NOT_BOOL
+      message_contains:
+      - if
+      - Bool
+      - Tri
+      - condition
+      data_keys: []
+- id: CFL-if-branch-result-type-mismatch-is-compile-error
+  category: control_flow
+  title: if branch result type mismatch is compile error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if true { yield 1 } else { yield "s" }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: IF_BRANCH_TYPE_MISMATCH
+      message_contains:
+      - if
+      - branch
+      - mismatch
+      data_keys:
+      - left_type
+      - right_type
+      data_equals:
+        left_type: i64
+        right_type: Str
+- id: CFL-value-context-if-requires-else
+  category: control_flow
+  title: value-context if requires else
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if true { yield 1 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    compile_error:
+      code: IF_MISSING_ELSE_VALUE
+      message_contains:
+      - if
+      - else
+      - value
+      data_keys: []
+- id: CFL-match-expression-over-opt-is-exhaustive
+  category: control_flow
+  title: match expression over Opt is exhaustive
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(3)
+      let y = match x {
+        Some(v) => v,
+        None => 0,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: CFL-qualified-user-enum-variant-patterns-match-by-enum-path
+  category: control_flow
+  title: qualified user enum variant patterns match by enum path
+  code: |
+    enum Flag {
+      On
+      Off
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let f = Flag::Off
+      let y = match f {
+        Flag::On => 1,
+        Flag::Off => 2,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: CFL-bare-pattern-name-without-variant-collision-binds-value
+  category: control_flow
+  title: bare pattern name without variant collision binds value
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let n = 4
+      let y = match n {
+        x => wrapping_add(x, 1),
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"5"'
+- id: CFL-bare-user-enum-variant-pattern-name-is-ambiguous
+  category: control_flow
+  title: bare user enum variant pattern name is ambiguous
+  code: |
+    enum Flag {
+      On
+      Off
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let f = Flag::On
+      let y = match f {
+        On => 1,
+        Flag::Off => 0,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: NAME_AMBIGUOUS
+      message_contains:
+      - ambiguous
+      - name
+      data_keys: []
+- id: CFL-explicit-struct-pattern-head-resolves-as-struct
+  category: control_flow
+  title: explicit struct pattern head resolves as struct
+  code: |
+    struct Point {
+      field x: i64
+      field y: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let p = Point{ x: 1, y: 2 }
+      let y = match p {
+        Point{ x, y } => wrapping_add(x, y),
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: CFL-match-non-exhaustive-arms-are-rejected
+  category: control_flow
+  title: match non-exhaustive arms are rejected
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        Some(v) => v,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_NON_EXHAUSTIVE
+      message_contains:
+      - match
+      - non-exhaustive
+      data_keys: []
+- id: CFL-match-guard-must-be-pure-in-v0-1
+  category: control_flow
+  title: match guard must be pure in v0.1
+  code: |
+    import std::io::print!
+
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        Some(v) if {
+          print!("x")
+          yield true
+        } => v,
+        None => 0,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_GUARD_EFFECT
+      message_contains:
+      - match
+      - guard
+      - effect
+      data_keys: []
+- id: CFL-match-guard-must-typecheck-to-bool
+  category: control_flow
+  title: match guard must typecheck to Bool
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        Some(v) if v => v,
+        Some(_) => 0,
+        None => 0,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_GUARD_TYPE_MISMATCH
+      message_contains:
+      - match
+      - guard
+      - Bool
+      - type
+      data_keys:
+      - expected_type
+      - actual_type
+      data_equals:
+        expected_type: Bool
+        actual_type: i64
+- id: CFL-match-guard-does-not-accept-tri-implicitly
+  category: control_flow
+  title: match guard does not accept Tri implicitly
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        Some(v) if Tri::Unknown => v,
+        Some(_) => 0,
+        None => 0,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_GUARD_TYPE_MISMATCH
+      message_contains:
+      - match
+      - guard
+      - Bool
+      - type
+      data_keys:
+      - expected_type
+      - actual_type
+      data_equals:
+        expected_type: Bool
+        actual_type: Tri
+- id: CFL-match-supports-rest-pattern-token
+  category: control_flow
+  title: match supports rest pattern token ..
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let t = (1,2,3)
+      let y = match t {
+        (head, ..) => head,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: CFL-tail-rest-pattern-may-absorb-zero-tuple-elements
+  category: control_flow
+  title: tail rest pattern may absorb zero tuple elements
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = match (7,) {
+        (head, ..) => head,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: CFL-structural-patterns-support-declaration-forms-rest-and-nesting
+  category: control_flow
+  title: structural patterns support variant declaration forms explicit rest and nested payloads
+  code: |
+    struct Point {
+      field x: i64
+      field y: i64
+    }
+
+    enum Shape {
+      Origin
+      Empty()
+      Pair(i64, i64)
+      Tagged { label: Str, point: Point }
+    }
+
+    fn score(shape: Shape) -> i64 = match shape {
+      Shape::Origin => 0,
+      Shape::Empty() => 1,
+      Shape::Pair(left, ..) => left,
+      Shape::Tagged { point: Point { x, .. }, .. } => x,
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let tagged = Shape::Tagged {
+        label: "point",
+        point: Point{ x: 3, y: 4 }
+      }
+      let empty = Shape::Empty()
+      yield Ok(concat([to_str(score(tagged)), to_str(score(empty))]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"31"'
+- id: CFL-or-patterns-may-share-one-binding-name-and-type
+  category: control_flow
+  title: or-pattern alternatives may introduce the same binding name and type
+  code: |
+    enum Number {
+      First(i64)
+      Second(i64)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let number = Number::Second(4)
+      let value = match number {
+        Number::First(value) | Number::Second(value) => value,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"4"'
+- id: CFL-nested-or-pattern-must-preserve-binding-types
+  category: control_flow
+  title: nested or-pattern alternatives must preserve same-named binding types
+  code: |
+    enum Mixed {
+      Integer(i64)
+      Text(Str)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let mixed = Some(Mixed::Integer(1))
+      let value = match mixed {
+        Some(Mixed::Integer(value) | Mixed::Text(value)) => 0,
+        None => 0,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: MATCH_BINDING_MISMATCH
+      message_contains:
+      - match
+      - binding
+      - mismatch
+      data_keys:
+      - reason
+      - binding
+      - left_type
+      - right_type
+      data_equals:
+        reason: binding_type
+- id: CFL-tuple-pattern-rejects-non-tuple-scrutinee
+  category: control_flow
+  title: tuple pattern rejects a non-tuple scrutinee
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = match 1 {
+        (item,) => item, // @primary tuple-pattern-type-mismatch
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_TYPE_MISMATCH
+      message_contains:
+      - pattern
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - pattern_kind
+      - expected_type
+      data_equals:
+        reason: structural_form
+        pattern_kind: tuple
+        expected_type: i64
+      primary_span:
+        marker: tuple-pattern-type-mismatch
+- id: CFL-nominal-pattern-type-mismatch-reports-both-types
+  category: control_flow
+  title: nominal pattern mismatch reports contextual and pattern types
+  code: |
+    enum Left {
+      Value(i64)
+    }
+
+    enum Right {
+      Value(i64)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let item = Left::Value(1)
+      let value = match item {
+        Right::Value(inner) => inner, // @primary nominal-pattern-type-mismatch
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_TYPE_MISMATCH
+      message_contains:
+      - pattern
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - pattern_kind
+      - expected_type
+      - actual_type
+      data_equals:
+        reason: typed_pattern
+        pattern_kind: variant
+        expected_type: Left
+        actual_type: Right
+      primary_span:
+        marker: nominal-pattern-type-mismatch
+- id: CFL-contextual-integer-pattern-retains-overflow-diagnostic
+  category: control_flow
+  title: contextual integer pattern retains its literal overflow diagnostic
+  code: |
+    fn classify(value: i8) -> i64 = match value {
+      128 => 1, // @primary contextual-pattern-overflow
+      _ => 0,
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(classify(0)))
+    }
+  expect:
+    compile_error:
+      code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+      primary_span:
+        marker: contextual-pattern-overflow
+- id: CFL-variant-pattern-must-use-declared-payload-form
+  category: control_flow
+  title: variant pattern must use its declared payload form before field validation
+  code: |
+    enum Token {
+      Pair(i64, i64)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let token = Token::Pair(1, 2)
+      let value = match token {
+        Token::Pair { imaginary } => 0, // @primary variant-payload-form-mismatch
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_PAYLOAD_FORM_MISMATCH
+      message_contains:
+      - pattern
+      - payload
+      - form
+      - mismatch
+      data_keys:
+      - owner
+      - variant
+      - expected_form
+      - actual_form
+      data_equals:
+        owner: Token
+        variant: Pair
+        expected_form: positional
+        actual_form: named
+      primary_span:
+        marker: variant-payload-form-mismatch
+- id: CFL-zero-arity-positional-variant-pattern-requires-parentheses
+  category: control_flow
+  title: zero-arity positional variant pattern is distinct from unit form
+  code: |
+    enum Marker {
+      Empty()
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let marker = Marker::Empty()
+      let value = match marker {
+        Marker::Empty => 0, // @primary bare-variant-payload-form-mismatch
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_PAYLOAD_FORM_MISMATCH
+      message_contains:
+      - pattern
+      - payload
+      - form
+      - mismatch
+      data_keys:
+      - owner
+      - variant
+      - expected_form
+      - actual_form
+      primary_span:
+        marker: bare-variant-payload-form-mismatch
+- id: CFL-tuple-pattern-rejects-fixed-arity-mismatch
+  category: control_flow
+  title: tuple pattern without rest requires exact arity
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = match (1, 2) {
+        (only,) => only, // @primary tuple-pattern-arity-mismatch
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_ARITY_MISMATCH
+      message_contains:
+      - pattern
+      - arity
+      - mismatch
+      data_keys:
+      - expected_count
+      - actual_count
+      data_equals:
+        expected_count: 2
+        actual_count: 1
+      primary_span:
+        marker: tuple-pattern-arity-mismatch
+- id: CFL-positional-variant-pattern-rejects-arity-mismatch
+  category: control_flow
+  title: positional variant pattern without rest requires exact arity
+  code: |
+    enum Token {
+      Pair(i64, i64)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let token = Token::Pair(1, 2)
+      let value = match token {
+        Token::Pair(first) => first,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_ARITY_MISMATCH
+      message_contains:
+      - pattern
+      - arity
+      - mismatch
+      data_keys:
+      - expected_count
+      - actual_count
+- id: CFL-tail-rest-pattern-rejects-overlong-explicit-prefix
+  category: control_flow
+  title: tail rest pattern rejects an explicit prefix longer than tuple arity
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = match (1,) {
+        (first, second, ..) => first,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_ARITY_MISMATCH
+      message_contains:
+      - pattern
+      - arity
+      - mismatch
+      data_keys:
+      - expected_count
+      - actual_count
+- id: CFL-struct-pattern-rejects-duplicate-field-before-unknown-or-missing
+  category: control_flow
+  title: duplicate struct field precedes unknown and missing field validation
+  code: |
+    struct Point {
+      field x: i64
+      field y: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let point = Point{ x: 1, y: 2 }
+      let value = match point {
+        Point{ z, z } => 0, // @primary duplicate-pattern-field
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_DUPLICATE_FIELD
+      message_contains:
+      - pattern
+      - field
+      - duplicate
+      data_keys: []
+      primary_span:
+        marker: duplicate-pattern-field
+- id: CFL-struct-pattern-rejects-unknown-field-before-missing
+  category: control_flow
+  title: unknown struct field precedes missing field validation
+  code: |
+    struct Point {
+      field x: i64
+      field y: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let point = Point{ x: 1, y: 2 }
+      let value = match point {
+        Point{ z } => 0, // @primary unknown-pattern-field
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_UNKNOWN_FIELD
+      message_contains:
+      - pattern
+      - field
+      - unknown
+      data_keys: []
+      primary_span:
+        marker: unknown-pattern-field
+- id: CFL-struct-pattern-without-rest-rejects-missing-field
+  category: control_flow
+  title: struct pattern without rest requires every declared field
+  code: |
+    struct Point {
+      field x: i64
+      field y: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let point = Point{ x: 1, y: 2 }
+      let value = match point {
+        Point{ x } => x, // @primary missing-pattern-field
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_MISSING_FIELD
+      message_contains:
+      - pattern
+      - field
+      - missing
+      data_keys: []
+      primary_span:
+        marker: missing-pattern-field
+- id: CFL-pathless-struct-missing-field-blames-opening-pattern-brace
+  category: control_flow
+  title: pathless struct missing field uses the opening pattern brace as primary span
+  code: |
+    struct Point {
+      field x: i64
+      field y: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let point = Point{ x: 1, y: 2 }
+      let value = match point {
+        { x } => x, // @primary pathless-missing-pattern-field
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_MISSING_FIELD
+      message_contains:
+      - pattern
+      - field
+      - missing
+      data_keys: []
+      primary_span:
+        marker: pathless-missing-pattern-field
+- id: CFL-named-variant-pattern-without-rest-rejects-missing-field
+  category: control_flow
+  title: named variant pattern without rest requires every declared field
+  code: |
+    enum Token {
+      Number { value: i64, negative: Bool }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let token = Token::Number { value: 1, negative: false }
+      let value = match token {
+        Token::Number { value } => value,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_MISSING_FIELD
+      message_contains:
+      - pattern
+      - field
+      - missing
+      data_keys: []
+- id: CFL-pattern-rejects-duplicate-binding-in-one-alternative-path
+  category: control_flow
+  title: one tuple pattern alternative cannot introduce a binding twice
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = match (1, 2) {
+        (item, item) => item, // @primary duplicate-pattern-binding
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_DUPLICATE_BINDING
+      message_contains:
+      - pattern
+      - binding
+      - duplicate
+      data_keys: []
+      primary_span:
+        marker: duplicate-pattern-binding
+- id: CFL-alias-pattern-binding-cannot-repeat-in-nested-payload
+  category: control_flow
+  title: alias binding cannot repeat inside its nested payload pattern
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = match Some(1) {
+        whole @ Some(whole) => 1,
+        None => 0,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_DUPLICATE_BINDING
+      message_contains:
+      - pattern
+      - binding
+      - duplicate
+      data_keys: []
+- id: CFL-outer-arity-mismatch-precedes-duplicate-binding
+  category: control_flow
+  title: outer tuple arity mismatch precedes duplicate binding validation
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = match (1, 2) {
+        (item, item, item) => item,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_ARITY_MISMATCH
+      message_contains:
+      - pattern
+      - arity
+      - mismatch
+      data_keys:
+      - expected_count
+      - actual_count
+- id: CFL-nested-payload-pattern-rejects-inner-arity-mismatch
+  category: control_flow
+  title: nested payload pattern is validated recursively
+  code: |
+    struct Wrapped {
+      field pair: (i64, i64)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let wrapped = Wrapped{ pair: (1, 2) }
+      let value = match wrapped {
+        Wrapped{ pair: (only,) } => only,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PATTERN_ARITY_MISMATCH
+      message_contains:
+      - pattern
+      - arity
+      - mismatch
+      data_keys:
+      - expected_count
+      - actual_count
+- id: CFL-or-pattern-same-name-must-have-same-binding-type
+  category: control_flow
+  title: or-pattern alternatives cannot bind one name at different types
+  code: |
+    enum Mixed {
+      Integer(i64)
+      Text(Str)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let mixed = Mixed::Integer(1)
+      let value = match mixed {
+        Mixed::Integer(value) | Mixed::Text(value) => 0, // @primary or-pattern-binding-type-mismatch
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: MATCH_BINDING_MISMATCH
+      message_contains:
+      - match
+      - binding
+      - mismatch
+      data_keys:
+      - reason
+      - binding
+      - left_type
+      - right_type
+      data_equals:
+        reason: binding_type
+        binding: value
+        left_type: i64
+        right_type: Str
+      primary_span:
+        marker: or-pattern-binding-type-mismatch
+- id: CFL-unreachable-match-arm-is-compile-error
+  category: control_flow
+  title: unreachable match arm is compile error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        _ => 0,
+        Some(v) => v,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_UNREACHABLE_ARM
+      message_contains:
+      - match
+      - unreachable
+      - arm
+      data_keys: []
+- id: CFL-duplicate-literal-match-arm-is-compile-error
+  category: control_flow
+  title: duplicate literal match arm is compile error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let n = 1
+      let y = match n {
+        1 => "a",
+        1 => "b",
+        _ => "c",
+      }
+      yield Ok(y)
+    }
+  expect:
+    compile_error:
+      code: MATCH_UNREACHABLE_ARM
+      message_contains:
+      - match
+      - unreachable
+      - arm
+      data_keys: []
+- id: CFL-shadowed-variant-match-arm-is-compile-error
+  category: control_flow
+  title: shadowed variant match arm is compile error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        Some(_) => 0,
+        Some(v) => v,
+        None => 1,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_UNREACHABLE_ARM
+      message_contains:
+      - match
+      - unreachable
+      - arm
+      data_keys: []
+- id: CFL-match-arm-result-type-mismatch-is-compile-error
+  category: control_flow
+  title: match arm result type mismatch is compile error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        Some(v) => v,
+        None => "none",
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_ARM_TYPE_MISMATCH
+      message_contains:
+      - match
+      - arm
+      - mismatch
+      data_keys:
+      - left_type
+      - right_type
+      data_equals:
+        left_type: i64
+        right_type: Str
+- id: CFL-tri-true-selects-then-branch-when-unknown-arm-is-present
+  category: control_flow
+  title: Tri::True selects then branch when unknown arm is present
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if Tri::True { yield 1 } else { yield 2 } unknown { yield 3 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: CFL-tri-false-selects-else-branch-when-unknown-arm-is-present
+  category: control_flow
+  title: Tri::False selects else branch when unknown arm is present
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if Tri::False { yield 1 } else { yield 2 } unknown { yield 3 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: CFL-tri-unknown-selects-unknown-branch
+  category: control_flow
+  title: Tri::Unknown selects unknown branch
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if Tri::Unknown { yield 1 } else { yield 2 } unknown { yield 3 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: CFL-tri-helper-conversions-cover-coalesce-opt-and-bool
+  category: control_flow
+  title: Tri helper conversions cover coalesce to_opt and Bool.to_tri
+  code: |
+    fn tri_tag(t: Tri) -> Str = match t {
+      Tri::True => "T",
+      Tri::False => "F",
+      Tri::Unknown => "U",
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a = Tri::Unknown.coalesce(true)
+      let b = Tri::Unknown.coalesce(false)
+      let c = Tri::True.to_opt().unwrap_or(false)
+      let d = Tri::False.to_opt().unwrap_or(true)
+      let e = Tri::Unknown.to_opt().is_none()
+      let f = tri_tag(true.to_tri())
+      let g = tri_tag(false.to_tri())
+      yield Ok(concat([to_str(a), to_str(b), to_str(c), to_str(!d), to_str(e), f, g]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"truefalsetruetruetrueTF"'
+- id: CFL-tri-operators-follow-full-k3-truth-tables
+  category: control_flow
+  title: Tri operators follow full K3 truth tables
+  code: |
+    fn tri_tag(t: Tri) -> Str = match t {
+      Tri::True => "T",
+      Tri::False => "F",
+      Tri::Unknown => "U",
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let nots = concat([tri_tag(Tri::True.not()), tri_tag(Tri::False.not()), tri_tag(Tri::Unknown.not())])
+      let ands = concat([
+        tri_tag(Tri::True.and(Tri::True)),
+        tri_tag(Tri::True.and(Tri::False)),
+        tri_tag(Tri::True.and(Tri::Unknown)),
+        tri_tag(Tri::False.and(Tri::True)),
+        tri_tag(Tri::False.and(Tri::False)),
+        tri_tag(Tri::False.and(Tri::Unknown)),
+        tri_tag(Tri::Unknown.and(Tri::True)),
+        tri_tag(Tri::Unknown.and(Tri::False)),
+        tri_tag(Tri::Unknown.and(Tri::Unknown)),
+      ])
+      let ors = concat([
+        tri_tag(Tri::True.or(Tri::True)),
+        tri_tag(Tri::True.or(Tri::False)),
+        tri_tag(Tri::True.or(Tri::Unknown)),
+        tri_tag(Tri::False.or(Tri::True)),
+        tri_tag(Tri::False.or(Tri::False)),
+        tri_tag(Tri::False.or(Tri::Unknown)),
+        tri_tag(Tri::Unknown.or(Tri::True)),
+        tri_tag(Tri::Unknown.or(Tri::False)),
+        tri_tag(Tri::Unknown.or(Tri::Unknown)),
+      ])
+      yield Ok(concat([nots, "|", ands, "|", ors]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"FTU|TFUFFFUFU|TTTTFUTUU"'
+- id: CFL-mixed-bool-tri-method-overloads-lift-bool-operands
+  category: control_flow
+  title: mixed Bool Tri method overloads lift Bool operands to Tri
+  code: |
+    fn tri_tag(t: Tri) -> Str = match t {
+      Tri::True => "T",
+      Tri::False => "F",
+      Tri::Unknown => "U",
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a = tri_tag(Tri::Unknown.and(false))
+      let b = tri_tag(Tri::Unknown.or(true))
+      let c = tri_tag(false.and(Tri::Unknown))
+      let d = tri_tag(true.or(Tri::Unknown))
+      let e = tri_tag(true.and(Tri::Unknown))
+      let f = tri_tag(false.or(Tri::Unknown))
+      yield Ok(concat([a, b, c, d, e, f]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"FTFTUU"'
+- id: CFL-mixed-bool-tri-logical-operators-return-tri
+  category: control_flow
+  title: mixed Bool Tri logical operators return Tri with K3 semantics
+  code: |
+    fn tri_tag(t: Tri) -> Str = match t {
+      Tri::True => "T",
+      Tri::False => "F",
+      Tri::Unknown => "U",
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let a = tri_tag(Tri::Unknown && false)
+      let b = tri_tag(false && Tri::Unknown)
+      let c = tri_tag(Tri::Unknown || true)
+      let d = tri_tag(true || Tri::Unknown)
+      let e = tri_tag(true && Tri::Unknown)
+      let f = tri_tag(false || Tri::Unknown)
+      yield Ok(concat([a, b, c, d, e, f]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"FFTTUU"'
+- id: CFL-bool-and-tri-logical-operators-short-circuit-fixed-results
+  category: control_flow
+  title: Bool and Tri logical operators do not evaluate the right operand when the left fixes the result
+  code: |
+    import std::test::abort!
+
+    fn dead!() -> Bool {
+      abort!("RUNTIME_ABORT", "logical right operand evaluated")
+      yield true
+    }
+
+    fn tri_tag(value: Tri) -> Str = match value {
+      Tri::True => "T",
+      Tri::False => "F",
+      Tri::Unknown => "U",
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let bool_and = false && dead!()
+      let bool_or = true || dead!()
+      let tri_and = tri_tag(Tri::False && dead!())
+      let tri_or = tri_tag(Tri::True || dead!())
+      yield Ok(concat([to_str(bool_and), "|", to_str(bool_or), "|", tri_and, tri_or]))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"false|true|FT"'
+- id: CFL-tri-condition-requires-unknown-branch
+  category: control_flow
+  title: Tri condition requires unknown branch
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if Tri::Unknown { yield 1 } else { yield 2 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    compile_error:
+      code: IF_TRI_UNKNOWN_BRANCH_REQUIRED
+      message_contains:
+      - if
+      - Tri
+      - unknown
+      - required
+      data_keys: []
+- id: CFL-bool-condition-must-not-include-unknown-branch
+  category: control_flow
+  title: Bool condition must not include unknown branch
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = if true { yield 1 } else { yield 2 } unknown { yield 3 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    compile_error:
+      code: IF_BOOL_UNKNOWN_BRANCH_FOR_BOOL
+      message_contains:
+      - if
+      - Bool
+      - unknown
+      - forbidden
+      data_keys: []
+- id: CFL-match-or-pattern-must-bind-identical-names
+  category: control_flow
+  title: match or-pattern must bind identical names
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        Some(v) | None => v, // @primary missing-or-pattern-binding
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_BINDING_MISMATCH
+      message_contains:
+      - match
+      - binding
+      - mismatch
+      data_keys:
+      - reason
+      - binding
+      data_equals:
+        reason: missing_binding
+        binding: v
+      primary_span:
+        marker: missing-or-pattern-binding
+- id: CFL-match-or-pattern-rejects-extra-binding
+  category: control_flow
+  title: match or-pattern rejects a binding absent from its first alternative
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        None | Some(v) => 0, // @primary extra-or-pattern-binding
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_BINDING_MISMATCH
+      message_contains:
+      - match
+      - binding
+      - mismatch
+      data_keys:
+      - reason
+      - binding
+      data_equals:
+        reason: extra_binding
+        binding: v
+      primary_span:
+        marker: extra-or-pattern-binding
+- id: CFL-tri-unknown-and-false-collapses-to-false-under-k3
+  category: control_flow
+  title: Tri Unknown and False collapses to False under K3
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let t = Tri::Unknown.and(Tri::False)
+      let x = if t { yield 1 } else { yield 2 } unknown { yield 3 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: CFL-tri-unknown-or-true-collapses-to-true-under-k3
+  category: control_flow
+  title: Tri Unknown or True collapses to True under K3
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let t = Tri::Unknown.or(Tri::True)
+      let x = if t { yield 1 } else { yield 2 } unknown { yield 3 }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: CFL-immutable-let-reassignment-in-statically-false-if-branch-is-still-rejected
+  category: control_flow
+  title: immutable let reassignment in statically false if branch is still rejected
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 0
+      if false { x = 1 } else { _ = 0 }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: IMMUTABLE_BINDING_ASSIGN
+      message_contains:
+      - immutable
+      - assignment
+      data_keys: []
+- id: CFL-if-expression-with-const-selector-composes-with-let-mut-reassignment
+  category: control_flow
+  title: if expression with const selector composes with let mut reassignment
+  code: |
+    const PICK: Bool = true
+
+    fn main!() -> Res[Str, Str] {
+      let mut acc = 0
+      let inc = if PICK { yield 2 } else { yield 5 }
+      acc = wrapping_add(acc, inc)
+      yield Ok(to_str(acc))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: CFL-match-result-with-const-values-composes-with-let-mut-accumulation
+  category: control_flow
+  title: match result with const values composes with let mut accumulation
+  code: |
+    const BASE: i64 = 10
+
+    fn main!() -> Res[Str, Str] {
+      let mut acc = 1
+      let x = Some(2)
+      let inc = match x {
+        Some(v) => wrapping_add(v, BASE),
+        None => BASE,
+      }
+      acc = wrapping_add(acc, inc)
+      yield Ok(to_str(acc))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"13"'
+- id: CFL-if-evaluates-only-selected-branch-at-runtime
+  category: control_flow
+  title: if evaluates only selected branch at runtime
+  code: |
+    import std::test::abort!
+
+    fn main!() -> Res[Str, Str] {
+      let x = if true { yield 1 } else {
+        abort!("RUNTIME_ABORT", "dead else")
+        yield 0
+      }
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: CFL-match-selects-first-matching-arm-and-does-not-run-later-failing-arm
+  category: control_flow
+  title: match selects first matching arm and does not run later failing arm
+  code: |
+    import std::test::abort!
+
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        Some(v) => v,
+        None => {
+          abort!("RUNTIME_ABORT", "dead none arm")
+          yield 0
+        },
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: CFL-match-guard-false-skips-guarded-arm-and-continues-arm-order
+  category: control_flow
+  title: match guard false skips guarded arm and continues arm order
+  code: |
+    import std::test::abort!
+
+    fn main!() -> Res[Str, Str] {
+      let x = Some(4)
+      let y = match x {
+        Some(v) if false => {
+          abort!("RUNTIME_ABORT", "dead guarded arm")
+          yield v
+        },
+        Some(v) => v,
+        None => 0,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"4"'
+- id: CFL-immutable-field-assignment-in-statically-false-if-branch-is-rejected
+  category: control_flow
+  title: immutable field assignment in statically false if branch is rejected
+  code: |
+    struct Counter {
+      field n: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let mut c = Counter{ n: 0 }
+      if false {
+        c.n = 1
+      } else {
+        _ = 0
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: IMMUTABLE_BINDING_ASSIGN
+      message_contains:
+      - immutable
+      - assignment
+      data_keys: []
+- id: CFL-guarded-arm-does-not-count-as-exhaustive-coverage
+  category: control_flow
+  title: guarded arm does not count as exhaustive coverage
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        Some(v) if v > 10 => v,
+        None => 0,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: MATCH_NON_EXHAUSTIVE
+      message_contains:
+      - match
+      - non-exhaustive
+      data_keys: []
+- id: CFL-empty-match-accepts-empty-enum
+  category: control_flow
+  title: empty match accepts a proven empty enum
+  code: |
+    enum Empty {}
+
+    fn absurd(value: Empty) -> Never = match value {}
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: CFL-empty-match-rejects-inhabited-scrutinee
+  category: control_flow
+  title: empty match rejects an inhabited scrutinee
+  code: |
+    fn invalid(value: Bool) -> Never = match value {}
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    compile_error:
+      code: MATCH_NON_EXHAUSTIVE
+      message_contains:
+      - match
+      - non-exhaustive
+      data_keys: []
+- id: CFL-empty-match-rejects-unknown-generic-inhabitance
+  category: control_flow
+  title: empty match conservatively rejects unknown generic inhabitance
+  code: |
+    fn invalid[T](value: T) -> Never = match value {}
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    compile_error:
+      code: MATCH_NON_EXHAUSTIVE
+      message_contains:
+      - match
+      - non-exhaustive
+      data_keys: []
+- id: CFL-empty-match-accepts-recursive-sum-without-base-variant
+  category: control_flow
+  title: empty match accepts recursive sum without a base value
+  code: |
+    enum Loop {
+      Next(Box[Loop])
+    }
+
+    fn absurd(value: Loop) -> Never = match value {}
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: CFL-empty-match-rejects-recursive-sum-with-base-variant
+  category: control_flow
+  title: empty match rejects recursive sum with a base value
+  code: |
+    enum Loop {
+      Stop
+      Next(Box[Loop])
+    }
+
+    fn invalid(value: Loop) -> Never = match value {}
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    compile_error:
+      code: MATCH_NON_EXHAUSTIVE
+      message_contains:
+      - match
+      - non-exhaustive
+      data_keys: []
+- id: CFL-impossible-payload-variant-needs-no-match-arm
+  category: control_flow
+  title: impossible payload variant contributes no required match coverage
+  code: |
+    enum MaybeCount {
+      Impossible(Never)
+      Present(i64)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let value = MaybeCount::Present(7)
+      let count = match value {
+        MaybeCount::Present(inner) => inner,
+      }
+      yield Ok(to_str(count))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: CFL-explicit-impossible-payload-arm-is-unreachable
+  category: control_flow
+  title: explicit arm for impossible payload variant is unreachable
+  code: |
+    enum MaybeCount {
+      Impossible(Never)
+      Present(i64)
+    }
+
+    fn invalid(value: MaybeCount) -> i64 = match value {
+      MaybeCount::Impossible(_) => 0,
+      MaybeCount::Present(inner) => inner,
+    }
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    compile_error:
+      code: MATCH_UNREACHABLE_ARM
+      message_contains:
+      - match
+      - unreachable
+      - arm
+      data_keys: []
+- id: CFL-empty-container-field-keeps-recursive-struct-inhabited
+  category: control_flow
+  title: empty container field keeps a recursive struct inhabited
+  code: |
+    struct Forest {
+      field children: Seq[Forest]
+    }
+
+    fn invalid(value: Forest) -> Never = match value {}
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    compile_error:
+      code: MATCH_NON_EXHAUSTIVE
+      message_contains:
+      - match
+      - non-exhaustive
+      data_keys: []
+- id: CFL-opt-never-needs-only-none-match-arm
+  category: control_flow
+  title: Opt Never needs only the possible None arm
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value: Opt[Never] = None
+      let count = match value {
+        None => 0,
+      }
+      yield Ok(to_str(count))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"0"'
+- id: CFL-res-never-never-allows-empty-match
+  category: control_flow
+  title: Res Never Never is uninhabited and allows an empty match
+  code: |
+    fn absurd(value: Res[Never, Never]) -> Never = match value {}
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: CFL-no-normal-arm-does-not-widen-match-result
+  category: control_flow
+  title: no-normal arm does not widen a match result after expected-type compatibility
+  code: |
+    enum Empty {}
+
+    fn absurd(value: Empty) -> Never = match value {}
+    fn require_i64(value: i64) -> i64 = value
+
+    fn project(value: Opt[Empty]) -> Str = match value {
+      Some(empty) => require_i64(absurd(empty)),
+      None => "none",
+    }
+
+    fn main!() -> Res[Str, Str] = Ok(project(None))
+  expect:
+    value:
+      kind: Ok
+      repr: '"none"'
+- id: CFL-never-branch-does-not-widen-if-result
+  category: control_flow
+  title: no-normal branch does not widen an if result
+  code: |
+    enum Empty {}
+
+    fn absurd(value: Empty) -> Never = match value {}
+    fn require_i64(value: i64) -> i64 = value
+
+    fn project(value: Empty) -> Str = if true {
+      yield require_i64(absurd(value))
+    } else {
+      yield "unreachable"
+    }
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: CFL-declared-non-never-call-does-not-gain-divergence-from-body
+  category: control_flow
+  title: declared non-Never call does not gain divergence from recursive body
+  code: |
+    fn loops() -> i64 = loops()
+
+    fn invalid(flag: Bool) -> Str = if flag {
+      yield loops()
+    } else {
+      yield "value"
+    }
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    compile_error:
+      code: IF_BRANCH_TYPE_MISMATCH
+      message_contains:
+      - if
+      - branch
+      - mismatch
+      data_keys:
+      - left_type
+      - right_type
+      data_equals:
+        left_type: i64
+        right_type: Str

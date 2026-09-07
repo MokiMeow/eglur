@@ -1,0 +1,2106 @@
+tests:
+- id: PAR-multiplicative-precedence-is-higher-than-additive
+  category: parser
+  title: multiplicative precedence is higher than additive
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 1 + 2 * 3
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: PAR-function-expression-body-with-equals-form-parses
+  category: parser
+  title: function expression body with equals form parses
+  code: |
+    fn inc(x: i64) -> i64 =
+      wrapping_add(x, 1)
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(inc(2)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: PAR-unary-tuple-expression-type-and-pattern-parse
+  category: parser
+  title: unary tuple expression type and pattern parse
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let p: (i64,) = (7,)
+      let (x,) = p
+      yield Ok(to_str(x))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: PAR-unit-expression-and-pattern-parse
+  category: parser
+  title: Unit expression and pattern parse
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value: Unit = ()
+      let out = match value {
+        () => "unit",
+      }
+      yield Ok(out)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"unit"'
+- id: PAR-range-bounds-parse-with-additive-expressions
+  category: parser
+  title: range bounds parse with additive expressions
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let mut s = 0
+      for i in 1+1 ..= 1+3 {
+        s = wrapping_add(s, i)
+      }
+      yield Ok(to_str(s))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"9"'
+- id: PAR-unexpected-token-reports-parse-diagnostic
+  category: parser
+  title: unexpected token reports parse diagnostic
+  code: |
+    fn main!() -> Res[Str, Str] {
+      ,
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-unclosed-delimiter-reports-parse-diagnostic
+  category: parser
+  title: unclosed delimiter reports parse diagnostic
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = (1 + 2
+      yield Ok(to_str(x))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNCLOSED_DELIMITER
+      message_contains:
+      - parse
+      - unclosed
+      - delimiter
+      data_keys: []
+- id: PAR-recursive-parser-budget-reports-resource-limit
+  category: parser
+  title: recursive parser budget reports a structured resource limit
+  code: |
+    fn main() -> Bool = !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!true
+  expect:
+    compile_error:
+      code: PARSE_RESOURCE_LIMIT_EXCEEDED
+      message_contains:
+      - parse
+      - resource
+      - limit
+      - exceeded
+      data_keys:
+      - resource
+      - limit
+      - observed_at_least
+      data_equals:
+        resource: recursive_depth
+        limit: 256
+        observed_at_least: 257
+- id: PAR-missing-expression-reports-parse-diagnostic
+  category: parser
+  title: missing expression reports parse diagnostic
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x =
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_EXPECTED_EXPRESSION
+      message_contains:
+      - parse
+      - expected
+      - expression
+      data_keys: []
+- id: PAR-empty-parenthesized-type-is-rejected
+  category: parser
+  title: empty parenthesized type is rejected
+  code: |
+    fn bad() -> () = ()
+
+    fn main!() -> Unit = ()
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-missing-match-arm-pattern-reports-parse-diagnostic
+  category: parser
+  title: missing match arm pattern reports parse diagnostic
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = Some(1)
+      let y = match x {
+        => 0,
+        Some(v) => v,
+        None => 0,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: PARSE_EXPECTED_PATTERN
+      message_contains:
+      - parse
+      - expected
+      - pattern
+      data_keys: []
+- id: PAR-match-arm-arrow-owns-following-newlines
+  category: parser
+  title: match arm arrow owns following newlines
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = match Some(3) {
+        Some(n) =>
+          wrapping_add(n, 1),
+        None => 0,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"4"'
+- id: PAR-match-arm-body-requires-an-expression
+  category: parser
+  title: match arm body requires an expression rather than a yield statement
+  code: |
+    fn main!() -> Res[Str, Str] {
+      yield match Some(1) {
+        Some(value) => yield Ok(to_str(value)),
+        None => Ok("none"),
+      }
+    }
+  expect:
+    compile_error:
+      code: PARSE_EXPECTED_EXPRESSION
+      message_contains:
+      - parse
+      - expected
+      - expression
+      data_keys: []
+- id: PAR-positional-rest-must-be-tail-position
+  category: parser
+  title: positional rest must be tail position
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let t = (1,2,3)
+      let y = match t {
+        (.., tail) => tail,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    compile_error:
+      code: PARSE_INVALID_REST_POSITION
+      message_contains:
+      - parse
+      - rest
+      - position
+      data_keys: []
+- id: PAR-named-variant-pattern-rest-may-appear-at-most-once
+  category: parser
+  title: named variant pattern rest may appear at most once
+  code: |
+    enum Token {
+      Number { value: i64 }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let token = Token::Number { value: 1 }
+      let value = match token {
+        Token::Number { .., .. } => 0,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_INVALID_REST_POSITION
+      message_contains:
+      - parse
+      - rest
+      - position
+      data_keys: []
+- id: PAR-interpolated-string-is-not-a-literal-pattern
+  category: parser
+  title: interpolated string is expression-only and not a literal pattern
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let text = "x"
+      let value = match text {
+        f"{text}" => 1,
+        _ => 0,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_EXPECTED_PATTERN
+      message_contains:
+      - parse
+      - expected
+      - pattern
+      data_keys: []
+- id: PAR-range-missing-end-bound-is-invalid-syntax
+  category: parser
+  title: range missing end bound is invalid syntax
+  code: |
+    fn main!() -> Res[Str, Str] {
+      for i in 0 .. {
+        _ = i
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_INVALID_RANGE_SYNTAX
+      message_contains:
+      - parse
+      - range
+      - syntax
+      data_keys: []
+- id: PAR-chained-range-without-parentheses-is-invalid-syntax
+  category: parser
+  title: chained range without parentheses is invalid syntax
+  code: |
+    fn main!() -> Res[Str, Str] {
+      for i in 0 .. 1 .. 2 {
+        _ = i
+      }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_INVALID_RANGE_SYNTAX
+      message_contains:
+      - parse
+      - range
+      - syntax
+      data_keys: []
+- id: PAR-fractional-division-operator-produces-non-integer-quotient-for-int-operands
+  category: parser
+  title: fractional division operator produces non-integer quotient for int operands
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let q = 5 /. 2
+      let ok = (q > 2.0) && (q < 3.0)
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: PAR-fractional-division-operator-has-multiplicative-precedence
+  category: parser
+  title: fractional division operator has multiplicative precedence
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 1 + 6 /. 2
+      yield Ok(to_str(x == 4.0))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: PAR-var-local-declaration-uses-stable-forbidden-code
+  category: parser
+  title: var local declaration uses stable forbidden code
+  code: |
+    fn main!() -> Res[Str, Str] {
+      var x: i64 = 0
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: VAR_DECL_FORBIDDEN
+      message_contains:
+      - var
+      - forbidden
+      data_keys: []
+- id: PAR-var-struct-member-declaration-uses-stable-forbidden-code
+  category: parser
+  title: var struct member declaration uses stable forbidden code
+  code: |
+    struct C {
+      var n: i64
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: VAR_DECL_FORBIDDEN
+      message_contains:
+      - var
+      - forbidden
+      data_keys: []
+- id: PAR-enum-declaration-with-qualified-constructor-usage-parses-and-matches
+  category: parser
+  title: enum declaration with qualified constructor usage parses and matches
+  code: |
+    enum MaybeInt {
+      Empty
+      SomeInt(i64)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let x = MaybeInt::SomeInt(3)
+      let y = match x {
+        MaybeInt::SomeInt(v) => v,
+        MaybeInt::Empty => 0,
+      }
+      yield Ok(to_str(y))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: PAR-enum-variant-level-visibility-is-forbidden-in-v0-1
+  category: parser
+  title: enum variant-level visibility is forbidden in v0.1
+  code: |
+    enum Mode {
+      pub On
+      Off
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: ENUM_VARIANT_VISIBILITY_FORBIDDEN
+      message_contains:
+      - enum
+      - variant
+      - visibility
+      - forbidden
+      data_keys: []
+- id: PAR-return-with-expression-parses-in-function-body
+  category: parser
+  title: return with expression parses in function body
+  code: |
+    fn f() -> i64 {
+      return 3
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(f()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: PAR-bare-return-parses-in-unit-returning-function-body
+  category: parser
+  title: bare return parses in Unit-returning function body
+  code: |
+    fn touch() -> Unit {
+      return
+    }
+
+    fn main!() -> Res[Str, Str] {
+      touch()
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: PAR-enum-declaration-with-named-payload-variant-parses-and-matches
+  category: parser
+  title: enum declaration with named payload variant parses and matches
+  code: |
+    enum Token {
+      Number { value: i64, neg: Bool }
+      End
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let t = Token::Number { value: 3, neg: false }
+      let out = match t {
+        Token::Number { value, neg } => if neg { yield wrapping_sub(0, value) } else { yield value },
+        Token::End => 0,
+      }
+      yield Ok(to_str(out))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: PAR-tensor-transform-axis-pack-token-parses-in-pattern-literals
+  category: parser
+  title: tensor transform axis-pack token parses in pattern literals
+  code: |
+    import std::tensor::{TransformError, ones}
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let x = ones[f32](2,3,4)
+        let y = x.then(rearrange{ b ...tail -> ...tail b })?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[3,4,2]"'
+- id: PAR-named-arguments-parse-in-general-call-surface
+  category: parser
+  title: named arguments parse in general call surface
+  code: |
+    fn add2(x: i64, y: i64) -> i64 {
+      yield wrapping_add(x, y)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let v = add2(y=2, x=1)
+      yield Ok(to_str(v))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: PAR-trailing-closure-argument-with-block-lambda-body-parses
+  category: parser
+  title: trailing closure argument with block lambda body parses
+  code: |
+    fn run(f: Fn(i64) -> i64) -> i64 {
+      yield f(4)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let v = run { |x|
+        let y: i64 = wrapping_add(x, 1)
+        wrapping_mul(y, 2)
+      }
+      yield Ok(to_str(v))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"10"'
+- id: PAR-closure-parameter-annotation-parses-in-trailing-closure-surface
+  category: parser
+  title: closure parameter annotation parses in trailing closure surface
+  code: |
+    fn run(f: Fn(i64) -> i64) -> i64 {
+      yield f(4)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let v = run { |x: i64| wrapping_add(x, 3) }
+      yield Ok(to_str(v))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: PAR-discard-closure-parameter-parses-with-optional-annotation
+  category: parser
+  title: discard closure parameters parse with optional annotations
+  code: |
+    fn run(f: Fn(i64, i64) -> i64) -> i64 = f(4, 5)
+
+    fn main!() -> Res[Str, Str] {
+      let v = run { |_, _: i64| 7 }
+      yield Ok(to_str(v))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: PAR-infix-type-union-syntax-is-rejected
+  category: parser
+  title: infix type union syntax is rejected
+  code: |
+    fn legacy() -> Res[Str, Str | i64] {
+      yield Ok("x")
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield legacy()
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-explicit-call-site-type-arguments-parse-on-immediate-call
+  category: parser
+  title: explicit call-site type arguments parse on immediate call
+  code: |
+    fn id[T](x: T) -> T = x
+
+    fn main!() -> Res[Str, Str] {
+      let y = id::[i64](7)
+      yield Ok(to_str(y))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: PAR-explicit-call-site-type-arguments-must-be-immediate-call
+  category: parser
+  title: explicit call-site type arguments must be immediate call
+  code: |
+    fn id[T](x: T) -> T = x
+
+    fn main!() -> Res[Str, Str] {
+      let g = id::[i64]
+      yield Ok(to_str(g(7)))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-generic-struct-literal-has-no-constructor-head-type-arguments
+  category: parser
+  title: generic struct literal has no constructor head type arguments
+  code: |
+    struct Cell[T] {
+      field value: T
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let cell = Cell[i64] { value: 7 }
+      yield Ok(to_str(cell.value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-generic-variant-has-no-turbofish-constructor-head
+  category: parser
+  title: generic variant has no turbofish constructor head
+  code: |
+    enum Choice[T] {
+      Value(T)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let choice = Choice::[i64]::Value(7)
+      yield Ok(to_str(choice))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-generic-variant-has-no-bracket-constructor-head
+  category: parser
+  title: generic variant has no bracket constructor head
+  code: |
+    enum Choice[T] {
+      Value(T)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let choice = Choice[i64]::Value(7)
+      yield Ok(to_str(choice))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-f-string-named-placeholder-parses
+  category: parser
+  title: f-string named placeholder parses
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 3
+      let s = f"n={x}"
+      yield Ok(s)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"n=3"'
+- id: PAR-if-expression-with-tri-unknown-arm-parses
+  category: parser
+  title: if expression with Tri unknown arm parses
+  code: |
+    import std::logic::Tri
+
+    fn main!() -> Res[Str, Str] {
+      let t = Tri::Unknown
+      let s = if t { yield "t" } else { yield "f" } unknown { yield "u" }
+      yield Ok(s)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"u"'
+- id: PAR-concat-over-sequence-of-strings-parses-and-evaluates
+  category: parser
+  title: concat over sequence of strings parses and evaluates
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let s = concat(["a", "b", "c"])
+      yield Ok(s)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"abc"'
+- id: PAR-format-with-named-placeholder-parses-and-returns-ok
+  category: parser
+  title: format with named placeholder parses and returns Ok
+  code: |
+    import std::str::FormatError
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        let s = format("x={x}", x=7)?
+        yield Ok(s)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x=7"'
+- id: PAR-format-with-debug-placeholder-parses
+  category: parser
+  title: format with debug placeholder parses
+  code: |
+    import std::str::FormatError
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        let s = format("x={x:?}", x=7)?
+        yield Ok(s)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x=7"'
+- id: PAR-f-string-literal-braces-use-doubled-brace-escape
+  category: parser
+  title: f-string literal braces use doubled-brace escape
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 7
+      let s = f"{{x}}={x}"
+      yield Ok(s)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"{x}=7"'
+- id: PAR-format-literal-braces-use-doubled-brace-escape
+  category: parser
+  title: format literal braces use doubled-brace escape
+  code: |
+    import std::str::FormatError
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        let s = format("{{x}}={x}", x=7)?
+        yield Ok(s)
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"{x}=7"'
+- id: PAR-format-mismatch-returns-err-in-value-channel
+  category: parser
+  title: format mismatch returns Err in value channel
+  code: |
+    import std::str::FormatError
+
+    fn main!() -> Res[Str, FormatError] =
+      result {
+        _ = format("x={x}", x=7, y=9)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: FormatError
+- id: PAR-extern-declaration-and-unsafe-block-expression-parse
+  category: parser
+  title: extern declaration and unsafe block expression parse
+  code: |
+    extern "C" fn c_abs(x: i64) -> i64
+
+    fn main!() -> Res[Str, Str] {
+      unsafe {
+        _ = 1
+      }
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: PAR-extern-declaration-with-raw-pointer-type-parse
+  category: parser
+  title: extern declaration with raw pointer type parse
+  code: |
+    extern "C" fn c_strlen(p: *const u8) -> i64
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: PAR-unsafe-fn-declaration-is-not-v0-1-syntax
+  category: parser
+  title: unsafe fn declaration is not v0.1 syntax
+  code: |
+    unsafe fn f() -> i64 = 1
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-unsafe-impl-declaration-is-not-v0-1-syntax
+  category: parser
+  title: unsafe impl declaration is not v0.1 syntax
+  code: |
+    struct C {}
+    trait T {}
+
+    unsafe impl T for C {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-unsafe-trait-declaration-is-not-v0-1-syntax
+  category: parser
+  title: unsafe trait declaration is not v0.1 syntax
+  code: |
+    unsafe trait T {}
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-expression-ascription-is-not-v0-1-syntax
+  category: parser
+  title: expression ascription is not v0.1 syntax
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 1: i64
+      yield Ok(to_str(x))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-closure-return-type-annotation-is-not-v0-1-syntax
+  category: parser
+  title: closure return-type annotation is not v0.1 syntax
+  code: |
+    fn run(f: Fn(i64) -> i64) -> i64 {
+      yield f(4)
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let v = run { |x| -> i64 x }
+      yield Ok(to_str(v))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-wildcard-import-is-not-v0-1-syntax
+  category: parser
+  title: wildcard import is not v0.1 syntax
+  code: |
+    import std::parse::*
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-top-level-inherent-impl-is-not-v0-1-syntax
+  category: parser
+  title: top-level inherent impl is not v0.1 syntax
+  code: |
+    struct C {}
+
+    impl C {
+      fn id(self: &Self) -> i64 = 1
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-bracket-map-literals-are-distinct-from-array-literals
+  category: parser
+  title: bracket map literals are distinct from array literals
+  code: |
+    import std::map::Map
+
+    fn main!() -> Res[Str, Str] {
+      let values = [1, 2]
+      let labels = [
+        "first":
+          values.at(0).unwrap_or(0),
+        "second": values.at(1).unwrap_or(0),
+      ]
+      let empty: Map[Str, i64] = [:]
+      let ok = (labels.get(&"second") == Some(2)) && empty.is_empty()
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: PAR-bare-brace-key-value-form-is-not-a-map-literal
+  category: parser
+  title: bare brace key value form is not a map literal
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let invalid = { "key": 1 }
+      yield Ok(to_str(invalid))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-array-and-map-entry-syntax-cannot-be-mixed
+  category: parser
+  title: array and map entry syntax cannot be mixed in one literal
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let invalid = [1, 2: 3]
+      yield Ok(to_str(invalid))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-general-bracket-indexing-is-not-v0-1-syntax
+  category: parser
+  title: general bracket indexing is not v0.1 syntax
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let xs = [1, 2, 3]
+      let x = xs[0]
+      yield Ok(to_str(x))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-transform-contextual-spellings-remain-ordinary-callable-names
+  category: parser
+  title: transform contextual spellings remain ordinary callable names
+  code: |
+    fn view(f: Fn(i64) -> i64) -> i64 = f(0)
+    fn rearrange(x: i64) -> i64 = x
+    fn inflate(x: i64) -> i64 = x
+    fn reduce(x: i64) -> i64 = x
+    fn contract(x: i64) -> i64 = x
+    fn einop(x: i64) -> i64 = x
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let from_trailing = view { |_x: i64| 7 }
+        let ok = (
+          (from_trailing == 7)
+          && (rearrange(1) == 1)
+          && (inflate(2) == 2)
+          && (reduce(3) == 3)
+          && (contract(4) == 4)
+          && (einop(5) == 5)
+        )
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PAR-container-newlines-cover-attributes-items-and-nested-blocks
+  category: parser
+  title: container newlines cover attributes items and nested blocks
+  code: |
+
+    #[derive(Clone)]
+    // The attribute remains attached across the line comment.
+    struct Counter {
+      field value: i64
+    }
+
+    fn raise_to_two(start: i64) -> i64 {
+      let mut value = start
+
+      while value < 2 {
+        value = wrapping_add(value, 1)
+      }
+
+      yield value
+    }
+
+    // A block-bodied declaration may be followed by blank lines.
+    fn main!() -> Res[Str, Str] {
+      let counter = Counter { value: raise_to_two(0) }
+      yield Ok(to_str(counter.value))
+    }
+
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+
+- id: PAR-bracket-delimited-comma-lists-own-newlines
+  category: parser
+  title: bracket delimited comma lists own newlines around entries and separators
+  code: |
+    import std::logic::{
+      Tri
+      ,
+    }
+
+    #[derive(
+      Clone
+      ,
+    )]
+    struct Marker {}
+
+    struct Pair[
+      T
+      ,
+    ] {
+      field left: T
+      field right: T
+    }
+
+    enum NumberPair {
+      Positional(
+        i64
+        ,
+        i64
+        ,
+      )
+      Named {
+        left: i64
+        ,
+        right: i64
+        ,
+      }
+    }
+
+    fn add(
+      left: i64
+      ,
+      right: i64
+      ,
+    ) -> i64 = wrapping_add(
+      left
+      ,
+      right
+    )
+
+    fn invoke(
+      f: Fn(
+        i64
+        ,
+        i64
+        ,
+      ) -> i64
+      ,
+      left: i64
+      ,
+      right: i64
+    ) -> i64 = f(
+      left
+      ,
+      right
+      ,
+    )
+
+    fn identity[
+      T
+      ,
+    ](
+      value: T
+      ,
+    ) -> T = value
+
+    fn main!(
+    ) -> Res[
+      Str
+      ,
+      Str
+    ] {
+      let pair = Pair {
+        left: 1
+        ,
+        right: 2
+      }
+      let variant = NumberPair::Named {
+        left: pair.left
+        ,
+        right: pair.right
+        ,
+      }
+      let values: (
+        i64
+        ,
+        i64
+        ,
+      ) = match variant {
+        NumberPair::Named {
+          left
+          ,
+          right
+          ,
+        } => (
+          left
+          ,
+          right
+        ),
+        NumberPair::Positional(
+          left
+          ,
+          right
+        ) => (
+          left
+          ,
+          right
+        ),
+      }
+      let total = invoke(
+        add
+        ,
+        values.0
+        ,
+        values.1
+      )
+      let same = identity::[
+        i64
+        ,
+      ](
+        total
+      )
+      let unused = [
+        same
+        ,
+      ]
+      let unit: Unit = (
+      )
+      _ = unused
+      _ = unit
+      yield Ok(to_str(same))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+
+- id: PAR-block-comment-newlines-compose-with-delimited-lists
+  category: parser
+  title: block comment newlines compose with delimiter owned list positions
+  code: |
+    fn add(left: i64, right: i64) -> i64 = wrapping_add(left, right)
+
+    fn main!() -> Res[Str, Str] {
+      let total = add(/* leading
+      */1/* before comma
+      */,/* after comma
+      */2/* trailing
+      */)
+      yield Ok(to_str(total))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+
+- id: PAR-newline-does-not-replace-list-comma
+  category: parser
+  title: newline does not replace a comma between list entries
+  code: |
+    fn add(left: i64, right: i64) -> i64 = wrapping_add(left, right)
+
+    fn main!() -> Res[Str, Str] {
+      let total = add(
+        1
+        2
+      )
+      yield Ok(to_str(total))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-parenthesized-group-owns-leading-binary-newlines
+  category: parser
+  title: parenthesized groups own leading newlines for every binary operator
+  code: |
+    fn add(left: i64, right: i64) -> i64 = wrapping_add(left, right)
+
+    fn main!() -> Res[Str, Str] {
+      let quotient = (
+        20
+    / 4
+      )
+      let fractional = (
+        5
+    /. 2
+      )
+      let remainder = (
+        20
+    % 6
+      )
+      let sum = (
+        quotient
+    + remainder
+      )
+      let difference = (
+        sum
+    - 1
+      )
+      let product = (
+        difference
+    * 2
+      )
+      let equal = (
+        difference
+    == 6
+      )
+      let unequal = (
+        difference
+    != 7
+      )
+      let less = (
+        difference
+    < 7
+      )
+      let less_equal = (
+        difference
+    <= 6
+      )
+      let greater = (
+        difference
+    > 5
+      )
+      let greater_equal = (
+        difference
+    >= 6
+      )
+      let both = (
+        equal
+    && unequal
+      )
+      let either = (
+        false
+    || both
+      )
+      let nested = add(
+        (
+          1
+          + 2
+        ),
+        3,
+      )
+      let mut exclusive_total = 0
+      for value in (
+        0
+    .. 3
+      ) {
+        exclusive_total = wrapping_add(exclusive_total, value)
+      }
+      let mut inclusive_total = 0
+      for value in (
+        0
+    ..= 2
+      ) {
+        inclusive_total = wrapping_add(inclusive_total, value)
+      }
+      let ok = (
+        either
+        && less
+        && less_equal
+        && greater
+        && greater_equal
+        && (product == 12)
+        && (nested == 6)
+        && (fractional == 2.5)
+        && (exclusive_total == 3)
+        && (inclusive_total == 3)
+      )
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PAR-leading-logical-binary-outside-group-is-rejected
+  category: parser
+  title: leading logical binary operator outside a group does not continue
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = true
+        && true
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-leading-comparison-binary-outside-group-is-rejected
+  category: parser
+  title: leading comparison binary operator outside a group does not continue
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = 1
+        == 1
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-leading-range-binary-outside-group-is-rejected
+  category: parser
+  title: leading range binary operator outside a group does not continue
+  code: |
+    fn main!() -> Res[Str, Str] {
+      for value in 0
+        .. 3 {
+        _ = value
+      }
+      yield Ok("ok")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-leading-additive-binary-outside-group-is-rejected
+  category: parser
+  title: leading additive binary operator outside a group does not continue
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = 1
+        + 2
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-leading-multiplicative-binary-outside-group-is-rejected
+  category: parser
+  title: leading multiplicative binary operator outside a group does not continue
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = 4
+        / 2
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-non-group-delimiter-does-not-authorize-leading-binary
+  category: parser
+  title: call argument delimiter does not authorize leading binary continuation
+  code: |
+    fn add(left: i64, right: i64) -> i64 = wrapping_add(left, right)
+
+    fn main!() -> Res[Str, Str] {
+      let value = add(
+        1
+        + 2,
+        3,
+      )
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-trailing-binary-operators-own-newlines
+  category: parser
+  title: every trailing binary operator owns the following newline
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let addition = 1 +
+    2
+      let subtraction = 5 -
+    3
+      let multiplication = 3 *
+    4
+      let quotient = 20 /
+    5
+      let fractional = 5 /.
+    2
+      let remainder = 20 %
+    6
+      let equal = addition ==
+    3
+      let unequal = addition !=
+    4
+      let less = addition <
+    4
+      let less_equal = addition <=
+    3
+      let greater = multiplication >
+    11
+      let greater_equal = multiplication >=
+    12
+      let both = equal &&
+    unequal
+      let either = false ||
+    both
+      let mut exclusive_total = 0
+      for value in 0 ..
+    3 {
+        exclusive_total = wrapping_add(exclusive_total, value)
+      }
+      let mut inclusive_total = 0
+      for value in 0 ..=
+    2 {
+        inclusive_total = wrapping_add(inclusive_total, value)
+      }
+      let ok = (
+        either
+        && less
+        && less_equal
+        && greater
+        && greater_equal
+        && (subtraction == 2)
+        && (quotient == 4)
+        && (fractional == 2.5)
+        && (remainder == 2)
+        && (exclusive_total == 3)
+        && (inclusive_total == 3)
+      )
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PAR-dot-led-postfix-suffixes-own-preceding-newlines
+  category: parser
+  title: dot led member projection and reduce_by suffixes own preceding newlines
+  code: |
+    struct Counter {
+      field base: i64
+
+      fn reduce_by(self: &Self, pair: (i64, i64)) -> i64 =
+        wrapping_add(self.base, wrapping_add(pair.0, pair.1))
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let pair = ((2, 3), (5, 7))
+      let first = pair
+    .0.1
+      let counter = Counter{ base: 4 }
+      let base = counter
+    .base
+      let total = counter
+    .reduce_by((first, pair.1.0))
+      let rendered = total
+    .to_str()
+      let ok = (base == 4) && (rendered == "12")
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PAR-ambiguous-prefix-and-postfix-openers-start-new-statements
+  category: parser
+  title: ambiguous prefix and postfix openers start new statements after newlines
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let source = 4
+      let pointer = &source
+      let left = 7
+      -2
+      let right = 9
+      *pointer
+      let called = 11
+      (1)
+      let closure_owner = 13
+      { 2 }
+      let array_owner = 15
+      [3]
+      let ok = (
+        (left == 7)
+        && (right == 9)
+        && (called == 11)
+        && (closure_owner == 13)
+        && (array_owner == 15)
+      )
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PAR-try-suffix-cannot-cross-newline
+  category: parser
+  title: try suffix cannot cross a preceding newline
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = Some(1)
+      ?
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-type-argument-call-suffix-cannot-cross-newline
+  category: parser
+  title: type argument call suffix cannot cross a preceding newline
+  code: |
+    fn identity[T](value: T) -> T = value
+
+    fn main!() -> Res[Str, Str] {
+      let value = identity
+      ::[i64](1)
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-block-comment-newlines-follow-expression-continuation-rules
+  category: parser
+  title: block comment newlines follow expression continuation rules
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let grouped = (
+        true/* grouped leading operator
+        */&& true
+      )
+      let line_grouped = (
+        true // grouped line-comment continuation
+        && true
+      )
+      let trailing = true &&/* trailing operator
+      */true
+      let sum = 1 +/* trailing additive operator
+      */2
+      let rendered = sum/* dot continuation
+      */.to_str()
+      let separate = 7/* unary boundary
+      */-2
+      let ok = grouped && line_grouped && trailing && (rendered == "3") && (separate == 7)
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PAR-block-comment-leading-binary-outside-group-is-rejected
+  category: parser
+  title: block comment newline cannot hide leading binary outside a group
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = true/* ungrouped leading operator
+      */&& true
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-dangling-attribute-at-end-of-file-is-rejected
+  category: parser
+  title: dangling attribute at end of file is rejected
+  code: |
+    #[derive(Clone)]
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-generic-catalog-owner-associated-calls-parse
+  category: parser
+  title: generic catalog owner associated calls parse
+  code: |
+    import std::map::Map
+    import std::set::Set
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let vector = Vec[i64].new()
+      let map = Map[Str, i64].new()
+      let set = Set[Str].new()
+      let empty = (vector.len() == 0) && (map.len() == 0) && (set.len() == 0)
+      yield Ok(to_str(empty))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PAR-generic-catalog-owner-type-is-not-a-value-expression
+  category: parser
+  title: generic catalog owner type is not a value expression
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let owner = Vec[i64]
+      yield Ok(to_str(owner))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-generic-catalog-owner-member-reference-is-not-a-value-expression
+  category: parser
+  title: generic catalog owner member reference is not a value expression
+  code: |
+    import std::vec::Vec
+
+    fn main!() -> Res[Str, Str] {
+      let constructor = Vec[i64].new
+      yield Ok(to_str(constructor))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-zero-argument-closure-compact-and-spaced-forms-parse
+  category: parser
+  title: zero argument closure compact and spaced forms parse
+  code: |
+    fn invoke(f: Fn() -> i64) -> i64 = f()
+
+    fn main!() -> Res[Str, Str] {
+      let compact = invoke({ || 1 })
+      let spaced = invoke({ | | 2 })
+      yield Ok(to_str(wrapping_add(compact, spaced)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+
+- id: PAR-zero-argument-closure-missing-closing-pipe-is-rejected
+  category: parser
+  title: zero argument closure missing closing pipe is rejected
+  code: |
+    fn invoke(f: Fn() -> i64) -> i64 = f()
+
+    fn main!() -> Res[Str, Str] {
+      let value = invoke({ | value })
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-expression-body-may-end-at-eof-without-final-newline
+  category: parser
+  title: expression body may end at EOF without final newline
+  code: |-
+    fn main!() -> Res[Str, Str] = Ok("ok")
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PAR-line-oriented-declarations-require-a-real-separator
+  category: parser
+  title: line oriented declarations require a real separator
+  code: |
+    fn first() -> i64 = 1 fn second() -> i64 = 2
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(wrapping_add(first(), second())))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-line-oriented-statements-require-a-real-separator
+  category: parser
+  title: line oriented statements require a real separator
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let first = 1 let second = 2
+      yield Ok(to_str(wrapping_add(first, second)))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+
+- id: PAR-control-head-ordinary-brace-opens-if-body
+  category: parser
+  title: ordinary brace after a control head opens the if body
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let ready = true
+      if ready {}
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PAR-control-head-parentheses-admit-struct-literal
+  category: parser
+  title: parentheses admit a struct literal in an if control head
+  code: |
+    struct FlagBox {
+      field value: Bool
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let selected = if (FlagBox{ value: true }.value) {
+        yield 1
+      } else {
+        yield 0
+      }
+      yield Ok(to_str(selected))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+
+- id: PAR-control-head-parentheses-admit-trailing-closure-in-while
+  category: parser
+  title: parentheses admit a trailing closure in a while control head
+  code: |
+    fn run(f: Fn(i64) -> Bool) -> Bool = f(1)
+
+    fn main!() -> Res[Str, Str] {
+      let mut count = 0
+      while (run { |x: i64| (x > count) && (count == 0) }) {
+        count = wrapping_add(count, 1)
+      }
+      yield Ok(to_str(count))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+
+- id: PAR-control-head-parentheses-admit-trailing-closure-in-for
+  category: parser
+  title: parentheses admit a trailing closure in a for iterable
+  code: |
+    fn build(f: Fn(i64) -> i64) -> Seq[i64] = [f(1), f(2)]
+
+    fn main!() -> Res[Str, Str] {
+      let mut total = 0
+      for value in (build { |x: i64| wrapping_add(x, 1) }) {
+        total = wrapping_add(total, value)
+      }
+      yield Ok(to_str(total))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"5"'
+
+- id: PAR-control-head-parentheses-admit-named-variant-in-match
+  category: parser
+  title: parentheses admit a named payload variant in a match scrutinee
+  code: |
+    enum Token {
+      Number { value: i64 }
+      End
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let selected = match (Token::Number { value: 3 }) {
+        Token::Number { value } => value,
+        Token::End => 0,
+      }
+      yield Ok(to_str(selected))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+
+- id: PAR-control-head-may-begin-with-block-expression
+  category: parser
+  title: a control head may begin with a block expression
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let selected = if { yield true } {
+        yield "yes"
+      } else {
+        yield "no"
+      }
+      yield Ok(selected)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"yes"'
+
+- id: PAR-control-head-ungrouped-struct-literal-requires-grouping
+  category: parser
+  title: ungrouped struct literal in an if control head requires grouping
+  code: |
+    struct FlagBox {
+      field value: Bool
+    }
+
+    fn main!() -> Res[Str, Str] {
+      if FlagBox{ value: true }.value {
+        yield Ok("x")
+      }
+      yield Ok("ok")
+    }
+  expect:
+    compile_error:
+      code: PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING
+      message_contains:
+      - parse
+      - control head
+      - brace
+      - grouping
+      data_keys: []
+
+- id: PAR-control-head-ungrouped-trailing-closure-in-while-requires-grouping
+  category: parser
+  title: ungrouped trailing closure in a while control head requires grouping
+  code: |
+    fn run(f: Fn(i64) -> Bool) -> Bool = f(1)
+
+    fn main!() -> Res[Str, Str] {
+      while run { |x: i64| x > 0 } {
+        break
+      }
+      yield Ok("ok")
+    }
+  expect:
+    compile_error:
+      code: PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING
+      message_contains:
+      - parse
+      - control head
+      - brace
+      - grouping
+      data_keys: []
+
+- id: PAR-control-head-ungrouped-trailing-closure-in-for-requires-grouping
+  category: parser
+  title: ungrouped trailing closure in a for iterable requires grouping
+  code: |
+    fn build(f: Fn(i64) -> Seq[i64]) -> Seq[i64] = f(1)
+
+    fn main!() -> Res[Str, Str] {
+      for value in build { |x: i64| [x] } {
+        _ = value
+      }
+      yield Ok("ok")
+    }
+  expect:
+    compile_error:
+      code: PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING
+      message_contains:
+      - parse
+      - control head
+      - brace
+      - grouping
+      data_keys: []
+
+- id: PAR-control-head-ungrouped-named-variant-in-match-requires-grouping
+  category: parser
+  title: ungrouped named payload variant in a match scrutinee requires grouping
+  code: |
+    enum Token {
+      Number { value: i64 }
+      End
+    }
+
+    fn main!() -> Res[Str, Str] {
+      let selected = match Token::Number { value: 3 } {
+        Token::Number { value } => value,
+        Token::End => 0,
+      }
+      yield Ok(to_str(selected))
+    }
+  expect:
+    compile_error:
+      code: PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING
+      message_contains:
+      - parse
+      - control head
+      - brace
+      - grouping
+      data_keys: []
+
+- id: PAR-tuple-index-context-does-not-cross-newline-after-dot
+  category: parser
+  title: tuple index context does not cross newline after dot
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let pair = ((1, 2), (3, 4))
+      let value = pair.
+    0.1
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-property-accessor-cannot-declare-independent-visibility
+  category: parser
+  title: property accessor cannot declare independent visibility
+  code: |
+    struct Counter {
+      field n: i64
+
+      prop count: i64 {
+        pub fn get_count(self: &Self) -> i64 = self.n
+      }
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-trait-method-cannot-declare-independent-visibility
+  category: parser
+  title: trait method cannot declare independent visibility
+  code: |
+    pub trait Render {
+      pub fn render(self: &Self) -> Str
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-impl-method-cannot-declare-independent-visibility
+  category: parser
+  title: impl method cannot declare independent visibility
+  code: |
+    trait Render {
+      fn render(self: &Self) -> Str
+    }
+
+    struct Doc {}
+
+    impl Render for Doc {
+      pub fn render(self: &Self) -> Str = "ok"
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []

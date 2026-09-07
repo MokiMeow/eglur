@@ -1,0 +1,863 @@
+# Suite: tensor/contract.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: TCT-tensorview-operands-materialize-contract-result
+  category: tensor_contract
+  title: TensorView operands are read directly and contract materializes its result
+  code: |
+    import std::tensor::{AxisError, ContractError, ShapeError, Tensor, ones}
+    import std::tensor::prim::permute
+
+    fn is_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, ShapeError]] =
+      result {
+        let view = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let out = contract{ i j, i j -> }(view, ones[f32](3,2))?
+        yield Ok(to_str(is_tensor(out) && (out.rank() == 0)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-integer-contract-overflow-returns-numericerror
+  category: tensor_contract
+  title: mixed-width integer contract fails at the checked promoted-dtype sum step
+  code: |
+    import std::tensor::{ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{wrapping_add, wrapping_sub}
+
+    fn left_fold_overflow_input() -> Res[Tensor[i8], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let mut thirty_two = ones[i8]()
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        let sixty_four = wrapping_add(thirty_two, thirty_two)?
+        let ninety_six = wrapping_add(sixty_four, thirty_two)?
+        let minus_thirty_two = wrapping_sub(zeros[i8](), thirty_two)?
+        let minus_ninety_six = wrapping_sub(zeros[i8](), ninety_six)?
+
+        // [64, -32, 96, -96] has exact sum 32 but overflows at the third left-fold step.
+        let mut x = zeros[i8](4)
+        x = set_at(x, [IndexItem::At(0)].to_vec(), sixty_four, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1)].to_vec(), minus_thirty_two, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(2)].to_vec(), ninety_six, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(3)].to_vec(), minus_ninety_six, mode=ScatterMode::Assign)?
+        yield Ok(x)
+      }
+
+    fn main!() -> Res[Str, Union[ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        _ = contract{ i, i -> }(left_fold_overflow_input()?, ones[u8](4))?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+      data_equals:
+        operation: contract
+        dtype: i8
+
+- id: TCT-contract-matmul-preset-style-succeeds-for-compatible-shapes
+  category: tensor_contract
+  title: contract matmul preset style succeeds for compatible shapes
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'a, #1:'k])?
+        let w = ones[f32](3,4).with_names([#0:'k, #1:'b])?
+        let op = contract{ a k, k b -> a b }.strict_names()
+        let y = op(x, w)?
+        _ = y.axis_of('a)?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: TCT-strict-names-rejects-mismatched-semantic-names
+  category: tensor_contract
+  title: strict_names rejects mismatched semantic names
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'a, #1:'k1])?
+        let w = ones[f32](3,4).with_names([#0:'k2, #1:'b])?
+        let op = contract{ a k, k b -> a b }.strict_names()
+        _ = op(x, w)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ContractError
+    value_diagnostics:
+    - code: AXIS_MISMATCH
+      message_contains: []
+      data_keys:
+      - operation
+      - expected_axes
+      - actual_axes
+- id: TCT-relax-names-allows-semantic-name-mismatch-when-dimensions-match
+  category: tensor_contract
+  title: relax_names allows semantic-name mismatch when dimensions match
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'a, #1:'k1])?
+        let w = ones[f32](3,4).with_names([#0:'k2, #1:'b])?
+        let op = contract{ a k, k b -> a b }.relax_names()
+        _ = op(x, w)?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: TCT-default-name-mode-accepts-unnamed-inputs
+  category: tensor_contract
+  title: a fresh contract schema accepts unnamed inputs in relaxed-name mode
+  code: |
+    import std::tensor::{ContractError, ones}
+
+    fn main!() -> Res[Str, ContractError] =
+      result {
+        let y = contract{ a k, k b -> a b }(ones[f32](2,3), ones[f32](3,4))?
+        let ok = (to_str(y.shape()) == "[2, 4]") && (y.names().len() == 0)
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-default-name-mode-preserves-consistent-names
+  category: tensor_contract
+  title: a fresh contract schema preserves consistent surviving names
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'a, #1:'k])?
+        let w = ones[f32](3,4).with_names([#0:'k, #1:'b])?
+        let y = contract{ a k, k b -> a b }(x, w)?
+        let ok = ((y.names().len() == 2)
+          && (y.axis_of('a)? == #0)
+          && (y.axis_of('b)? == #1))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-default-name-mode-allows-conflicting-names
+  category: tensor_contract
+  title: a fresh contract schema allows conflicting names when dimensions match
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'a, #1:'k1])?
+        let w = ones[f32](3,4).with_names([#0:'k2, #1:'b])?
+        let y = contract{ a k, k b -> a b }(x, w)?
+        let ok = to_str(y.shape()) == "[2, 4]"
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-contract-name-mode-modifier-does-not-leak
+  category: tensor_contract
+  title: strict-name mode on one schema does not leak to a fresh contract schema
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x1 = ones[f32](2,3).with_names([#0:'a, #1:'k1])?
+        let w1 = ones[f32](3,4).with_names([#0:'k2, #1:'b])?
+        let strict_op = contract{ a k, k b -> a b }.strict_names()
+        let strict_failed = strict_op(x1, w1).is_err()
+
+        let x2 = ones[f32](2,3).with_names([#0:'a, #1:'k1])?
+        let w2 = ones[f32](3,4).with_names([#0:'k2, #1:'b])?
+        let fresh_op = contract{ a k, k b -> a b }
+        let fresh_succeeded = fresh_op(x2, w2).is_ok()
+
+        yield Ok(to_str(strict_failed && fresh_succeeded))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-with-aliases-accepts-external-axis-names-in-strict-mode
+  category: tensor_contract
+  title: with_aliases accepts external axis names in strict mode
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'row, #1:'feature])?
+        let w = ones[f32](3,4).with_names([#0:'feature, #1:'col])?
+        let op = contract{ a k, k b -> a b }.with_aliases(['row:'a, 'feature:'k, 'col:'b]).strict_names()
+        let y = op(x, w)?
+        let ok = y.axis_of('a).is_ok() && y.axis_of('b).is_ok() && y.axis_of('row).is_err()
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-with-aliases-rejects-target-outside-contract-labels
+  category: tensor_contract
+  title: with_aliases rejects target outside contract labels
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'row, #1:'feature])?
+        let w = ones[f32](3,4).with_names([#0:'feature, #1:'col])?
+        let op = contract{ a k, k b -> a b }.with_aliases(['row:'a, 'feature:'hidden, 'col:'b]).strict_names()
+        _ = op(x, w)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ContractError
+    value_diagnostics:
+    - code: AXIS_MISMATCH
+      message_contains: []
+      data_keys:
+      - operation
+      - expected_axes
+      - actual_axes
+- id: TCT-with-aliases-rejects-canonical-label-remap
+  category: tensor_contract
+  title: with_aliases rejects canonical label remap
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'a, #1:'k])?
+        let w = ones[f32](3,4).with_names([#0:'k, #1:'b])?
+        let op = contract{ a k, k b -> a b }.with_aliases(['k:'a]).strict_names()
+        _ = op(x, w)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ContractError
+    value_diagnostics:
+    - code: AXIS_MISMATCH
+      message_contains: []
+      data_keys:
+      - operation
+      - expected_axes
+      - actual_axes
+- id: TCT-strict-names-prefers-axis-mismatch-over-shape-mismatch-when-both-are-possible
+  category: tensor_contract
+  title: strict_names prefers axis mismatch over shape mismatch when both are possible
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'a, #1:'k1])?
+        let w = ones[f32](4,4).with_names([#0:'k2, #1:'b])?
+        let op = contract{ a k, k b -> a b }.strict_names()
+        _ = op(x, w)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ContractError
+    value_diagnostics:
+    - code: AXIS_MISMATCH
+      message_contains: []
+      data_keys:
+      - operation
+      - expected_axes
+      - actual_axes
+- id: TCT-contract-with-empty-rhs-returns-rank-0-tensor
+  category: tensor_contract
+  title: contract with empty RHS returns rank-0 tensor
+  code: |
+    import std::tensor::{ContractError, ones}
+
+    fn main!() -> Res[Str, ContractError] =
+      result {
+        let x = ones[f32](3)
+        let op = contract{ i, i -> }
+        let y = op(x, x)?
+        yield Ok(to_str(y.rank()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"0"'
+
+- id: TCT-empty-contract-reduction-uses-promoted-additive-identity
+  category: tensor_contract
+  title: empty contract reduction uses promoted additive identity
+  code: |
+    import std::tensor::{ContractError, IndexError, NumericError, zeros}
+
+    fn main!() -> Res[Str, Union[ContractError, IndexError, NumericError]] =
+      result {
+        let scalar = contract{ k, k -> }(zeros[i8](0), zeros[u16](0))?
+        let retained_empty = contract{ batch k, k -> batch }(zeros[i8](0,0), zeros[u16](0))?
+        let ok = ((to_str(scalar.dtype()) == "u16")
+          && (scalar.item()? == 0)
+          && (to_str(retained_empty.dtype()) == "u16")
+          && (to_str(retained_empty.shape()) == "[0]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-contract-allows-empty-lhs-axis-list-for-scalar-tensor-scaling
+  category: tensor_contract
+  title: contract allows empty LHS axis list for scalar-tensor scaling
+  code: |
+    import std::tensor::{ContractError, ones}
+
+    fn main!() -> Res[Str, ContractError] =
+      result {
+        let x = ones[f32](3)
+        let dot = contract{ i, i -> }(x, x)?
+        let op = contract{ , i -> i }
+        let y = op(dot, x)?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[3]"'
+
+- id: TCT-item-extracts-scalar-from-rank-0-tensor
+  category: tensor_contract
+  title: item extracts scalar from rank-0 tensor
+  code: |
+    import std::tensor::{ContractError, IndexError, NumericError, ones}
+
+    fn main!() -> Res[Str, Union[ContractError, IndexError, NumericError]] =
+      result {
+        let x = ones[i32](3)
+        let y = contract{ i, i -> }(x, x)?
+        let v = y.item()?
+        yield Ok(to_str(v))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+
+- id: TCT-item-rejects-non-rank-0-tensor
+  category: tensor_contract
+  title: item rejects non-rank-0 tensor
+  code: |
+    import std::tensor::{IndexError, ones}
+
+    fn main!() -> Res[Str, IndexError] =
+      result {
+        let x = ones[f32](2)
+        _ = x.item()?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: IndexError
+    value_diagnostics:
+    - code: ITEM_REQUIRES_RANK0
+      message_contains:
+      - item
+      - rank
+      - '0'
+      data_keys:
+      - rank
+- id: TCT-unary-contract-with-repeated-labels-is-allowed-trace-style
+  category: tensor_contract
+  title: unary repeated-label contract selects nonuniform diagonal values
+  code: |
+    import std::tensor::{ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, ones, zeros}
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Str, Union[ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let one = ones[i32]()
+        let mut x = zeros[i32](2,2)
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(0)].to_vec(), one, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(1)].to_vec(), one, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1), IndexItem::At(0)].to_vec(), one, mode=ScatterMode::Assign)?
+
+        let retained = contract{ i i -> i }(x)?
+        let trace = contract{ i i -> }(x)?
+        let first = get_at(retained, [IndexItem::At(0)].to_vec())?.item()?
+        let second = get_at(retained, [IndexItem::At(1)].to_vec())?.item()?
+        let ok = ((to_str(retained.shape()) == "[2]")
+          && (first == 1)
+          && (second == 0)
+          && (trace.item()? == 1))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-batched-repeated-label-contract-preserves-batch-coordinates
+  category: tensor_contract
+  title: batched repeated-label contract selects a diagonal independently per batch
+  code: |
+    import std::tensor::{ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, ones, zeros}
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Str, Union[ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let one = ones[i32]()
+        let mut x = zeros[i32](2,2,2)
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(0), IndexItem::At(0)].to_vec(), one, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1), IndexItem::At(0), IndexItem::At(1)].to_vec(), one, mode=ScatterMode::Assign)?
+
+        let out = contract{ batch i i -> batch }(x)?
+        let first = get_at(out, [IndexItem::At(0)].to_vec())?.item()?
+        let second = get_at(out, [IndexItem::At(1)].to_vec())?.item()?
+        let ok = ((to_str(out.shape()) == "[2]")
+          && (first == 1)
+          && (second == 0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-interleaved-repeated-label-retains-first-source-position
+  category: tensor_contract
+  title: interleaved repeated label retains its first source-axis position
+  code: |
+    import std::tensor::{ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, ones, zeros}
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Str, Union[ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let one = ones[i32]()
+        let mut x = zeros[i32](2,3,2)
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(1), IndexItem::At(0)].to_vec(), one, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1), IndexItem::At(2), IndexItem::At(1)].to_vec(), one, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(0), IndexItem::At(1)].to_vec(), one, mode=ScatterMode::Assign)?
+
+        let out = contract{ i batch i -> i batch }(x)?
+        let first = get_at(out, [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+        let second = get_at(out, [IndexItem::At(1), IndexItem::At(2)].to_vec())?.item()?
+        let excluded = get_at(out, [IndexItem::At(0), IndexItem::At(0)].to_vec())?.item()?
+        let ok = ((to_str(out.shape()) == "[2,3]")
+          && (first == 1)
+          && (second == 1)
+          && (excluded == 0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-three-repeated-label-occurrences-share-one-coordinate
+  category: tensor_contract
+  title: three repeated label occurrences select only all-equal coordinates
+  code: |
+    import std::tensor::{ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, ones, zeros}
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Str, Union[ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let one = ones[i32]()
+        let mut x = zeros[i32](2,2,2)
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(0), IndexItem::At(0)].to_vec(), one, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1), IndexItem::At(1), IndexItem::At(0)].to_vec(), one, mode=ScatterMode::Assign)?
+
+        let out = contract{ i i i -> i }(x)?
+        let first = get_at(out, [IndexItem::At(0)].to_vec())?.item()?
+        let second = get_at(out, [IndexItem::At(1)].to_vec())?.item()?
+        let ok = ((to_str(out.shape()) == "[2]")
+          && (first == 1)
+          && (second == 0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-multiple-repeated-label-groups-use-original-axis-positions
+  category: tensor_contract
+  title: multiple repeated-label groups retain original first positions after remapping
+  code: |
+    import std::tensor::{ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, ones, zeros}
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Str, Union[ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let one = ones[i32]()
+        let mut x = zeros[i32](2,3,2,3)
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(1), IndexItem::At(0), IndexItem::At(1)].to_vec(), one, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1), IndexItem::At(2), IndexItem::At(1), IndexItem::At(2)].to_vec(), one, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(0), IndexItem::At(0), IndexItem::At(1), IndexItem::At(0)].to_vec(), one, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1), IndexItem::At(0), IndexItem::At(1), IndexItem::At(1)].to_vec(), one, mode=ScatterMode::Assign)?
+
+        let out = contract{ i j i j -> i j }(x)?
+        let first = get_at(out, [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+        let second = get_at(out, [IndexItem::At(1), IndexItem::At(2)].to_vec())?.item()?
+        let unequal_i = get_at(out, [IndexItem::At(0), IndexItem::At(0)].to_vec())?.item()?
+        let unequal_j = get_at(out, [IndexItem::At(1), IndexItem::At(0)].to_vec())?.item()?
+        let ok = ((to_str(out.shape()) == "[2,3]")
+          && (first == 1)
+          && (second == 1)
+          && (unequal_i == 0)
+          && (unequal_j == 0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-repeated-label-strict-names-canonicalize-many-to-one-aliases
+  category: tensor_contract
+  title: repeated-label strict names canonicalize many external aliases to one output name
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,2).with_names([#0:'row, #1:'col])?
+        let op = contract{ i i -> i }.with_aliases(['row:'i, 'col:'i]).strict_names()
+        let out = op(x)?
+        let ok = ((to_str(out.shape()) == "[2]")
+          && out.axis_of('i).is_ok()
+          && out.axis_of('row).is_err()
+          && out.axis_of('col).is_err())
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-repeated-label-strict-names-check-later-occurrences
+  category: tensor_contract
+  title: repeated-label strict names validate later occurrences before diagonal normalization
+  code: |
+    import std::tensor::{AxisError, ContractError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError]] =
+      result {
+        let x = ones[f32](2,2).with_names([#0:'row, #1:'wrong])?
+        let op = contract{ i i -> i }.with_aliases(['row:'i]).strict_names()
+        _ = op(x)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ContractError
+    value_diagnostics:
+    - code: AXIS_MISMATCH
+      message_contains: []
+      data_keys:
+      - operation
+      - expected_axes
+      - actual_axes
+
+- id: TCT-zero-extent-repeated-label-supports-retained-and-reduced-results
+  category: tensor_contract
+  title: zero-extent repeated label produces an empty diagonal and additive identity
+  code: |
+    import std::tensor::{ContractError, IndexError, NumericError, zeros}
+
+    fn main!() -> Res[Str, Union[ContractError, IndexError, NumericError]] =
+      result {
+        let retained = contract{ i i -> i }(zeros[i32](0,0))?
+        let reduced = contract{ i i -> }(zeros[i32](0,0))?
+        let ok = ((to_str(retained.shape()) == "[0]")
+          && (reduced.item()? == 0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: TCT-contract-output-label-must-not-be-duplicated
+  category: tensor_contract
+  title: contract output label must not be duplicated
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = contract{ i -> i i } // @primary duplicate-contract-output-label
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: CONTRACT_OUTPUT_LABEL_DUPLICATE
+      message_contains:
+      - contract
+      - output
+      - label
+      - duplicate
+      data_keys: []
+      primary_span:
+        marker: duplicate-contract-output-label
+
+- id: TCT-contract-unbound-output-precedes-duplicate-unbound-label
+  category: tensor_contract
+  title: unbound output validation precedes duplication of the same unbound label
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = contract{ i -> j j } // @primary first-unbound-contract-output-label
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: CONTRACT_OUTPUT_LABEL_UNBOUND
+      message_contains:
+      - contract
+      - output
+      - label
+      data_keys: []
+      primary_span:
+        marker: first-unbound-contract-output-label
+
+- id: TCT-contract-earlier-duplicate-precedes-later-unbound-label
+  category: tensor_contract
+  title: earlier bound output duplication precedes a later unbound label
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = contract{ i -> i i j } // @primary earlier-duplicate-contract-output-label
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: CONTRACT_OUTPUT_LABEL_DUPLICATE
+      message_contains:
+      - contract
+      - output
+      - label
+      - duplicate
+      data_keys: []
+      primary_span:
+        marker: earlier-duplicate-contract-output-label
+
+- id: TCT-contract-rejects-multiple-rhs-axis-lists
+  category: tensor_contract
+  title: contract rejects a second RHS axis list at parse time
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = contract{ i -> i, i } // @primary multiple-contract-output-lists
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+      primary_span:
+        marker: multiple-contract-output-lists
+
+- id: TCT-contract-output-label-must-be-bound-on-input-side
+  category: tensor_contract
+  title: contract output label must be bound on input side
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = contract{ i -> j }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: CONTRACT_OUTPUT_LABEL_UNBOUND
+      message_contains:
+      - contract
+      - output
+      - label
+      data_keys: []
+
+- id: TCT-repeated-label-dimension-mismatch-returns-contract-error
+  category: tensor_contract
+  title: repeated label dimension mismatch returns ContractError
+  code: |
+    import std::io::{IoError, args!}
+    import std::tensor::{ContractError, ones}
+
+    fn main!() -> Res[Str, Union[IoError, ContractError, DomainError]] =
+      result {
+        let argc = args!()?.len().to_i64()
+        let n = Nat.from_i64(wrapping_add(wrapping_sub(argc, argc), 1))?
+        let m = Nat.from_i64(wrapping_add(wrapping_sub(argc, argc), 3))?
+        let x = ones[f32](n, m)
+        _ = contract{ i i -> }(x)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ContractError
+    value_diagnostics:
+    - code: CONTRACT_REPEATED_LABEL_DIM_MISMATCH
+      message_contains:
+      - contract
+      - repeated
+      - label
+      - mismatch
+      data_keys:
+      - operation
+      - label
+      - expected_dim
+      - actual_dim
+      data_equals:
+        operation: contract
+        label: i
+        expected_dim: 1
+        actual_dim: 3
+
+- id: TCT-cross-operand-size-one-repeated-label-does-not-broadcast
+  category: tensor_contract
+  title: cross-operand repeated label rejects size-one broadcasting
+  code: |
+    import std::io::{IoError, args!}
+    import std::tensor::{ContractError, ones}
+
+    fn main!() -> Res[Str, Union[IoError, ContractError, DomainError]] =
+      result {
+        let argc = args!()?.len().to_i64()
+        let one = Nat.from_i64(wrapping_add(wrapping_sub(argc, argc), 1))?
+        let three = Nat.from_i64(wrapping_add(wrapping_sub(argc, argc), 3))?
+        _ = contract{ i, i -> i }(ones[f32](one), ones[f32](three))?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ContractError
+    value_diagnostics:
+    - code: CONTRACT_REPEATED_LABEL_DIM_MISMATCH
+      message_contains:
+      - contract
+      - repeated
+      - label
+      - mismatch
+      data_keys:
+      - operation
+      - label
+      - expected_dim
+      - actual_dim
+      data_equals:
+        operation: contract
+        label: i
+        expected_dim: 1
+        actual_dim: 3
+
+- id: TCT-first-repeated-label-mismatch-rejects-size-one-to-zero-broadcast
+  category: tensor_contract
+  title: first repeated-label mismatch rejects size-one to zero broadcasting
+  code: |
+    import std::io::{IoError, args!}
+    import std::tensor::{ContractError, ones}
+
+    fn main!() -> Res[Str, Union[IoError, ContractError, DomainError]] =
+      result {
+        let argc = args!()?.len().to_i64()
+        let base = wrapping_sub(argc, argc)
+        let one = Nat.from_i64(wrapping_add(base, 1))?
+        let two = Nat.from_i64(wrapping_add(base, 2))?
+        let zero = Nat.from_i64(base)?
+        let three = Nat.from_i64(wrapping_add(base, 3))?
+        _ = contract{ i j i j -> i j }(ones[f32](one, two, zero, three))?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ContractError
+    value_diagnostics:
+    - code: CONTRACT_REPEATED_LABEL_DIM_MISMATCH
+      message_contains:
+      - contract
+      - repeated
+      - label
+      - mismatch
+      data_keys:
+      - operation
+      - label
+      - expected_dim
+      - actual_dim
+      data_equals:
+        operation: contract
+        label: i
+        expected_dim: 1
+        actual_dim: 0
+
+- id: TCT-matmul-accepts-later-tensorview-operand-and-returns-owning-tensor
+  category: tensor_contract
+  title: matmul accepts TensorView in its later operand and returns owning Tensor
+  code: |
+    import std::tensor::{AxisError, ContractError, ShapeError, Tensor, ones}
+    import std::tensor::linalg::matmul
+    import std::tensor::prim::permute
+
+    fn is_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, ShapeError]] =
+      result {
+        let right_view = permute(ones[f32](4,3), [#1, #0].to_vec())?
+        let out = matmul(ones[f32](2,3), right_view)?
+        let ok = is_tensor(out) && (to_str(out.shape()) == "[2,4]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

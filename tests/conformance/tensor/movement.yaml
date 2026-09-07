@@ -1,0 +1,630 @@
+# Suite: tensor/movement.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: AX-movement-primitives-return-tensorview-values
+  category: axes
+  title: movement primitives return TensorView values
+  code: |
+    import std::tensor::{AxisError, IndexError, ShapeError, TensorView, ones}
+    import std::tensor::index::IndexItem
+    import std::tensor::prim::{expand, permute, reshape, slice, squeeze, unsqueeze}
+
+    fn is_view(_x: TensorView[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, IndexError, ShapeError]] =
+      result {
+        let permuted = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let reshaped = reshape(ones[f32](2,3), [6].to_vec())?
+        let unsqueezed = unsqueeze(ones[f32](2,3), #0)?
+        let squeezed = squeeze(ones[f32](1,3), #0)?
+        let expanded = expand(ones[f32](1,3), [2,3].to_vec())?
+        let sliced = slice(ones[f32](2,3), [IndexItem::All, IndexItem::Slice(0, 2)].to_vec())?
+        let _device = permuted.device()
+        let ok = ((permuted.rank() == 2)
+          && is_view(permuted)
+          && is_view(reshaped)
+          && is_view(unsqueezed)
+          && is_view(squeezed)
+          && is_view(expanded)
+          && is_view(sliced))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-movement-affine-mappings-preserve-values-after-explicit-materialization
+  category: axes
+  title: movement affine mappings preserve values after explicit materialization
+  code: |
+    import std::tensor::{AxisError, DTypeError, DeterminismError, IndexError, ShapeError, ones, zeros}
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{expand, permute, reshape, slice, squeeze, unsqueeze}
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, DeterminismError, IndexError, ShapeError]] =
+      result {
+        let matrix = set_at(
+          zeros[f32](2,3),
+          [IndexItem::At(0), IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign
+        )?
+
+        let permuted = permute(matrix, [#1, #0].to_vec())?.materialize()
+        let permuted_mark = get_at(permuted, [IndexItem::At(1), IndexItem::At(0)].to_vec())?.item()?
+
+        let reshaped = reshape(matrix, [3,2].to_vec())?.materialize()
+        let reshaped_mark = get_at(reshaped, [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+
+        let unsqueezed = unsqueeze(matrix, #1)?.materialize()
+        let unsqueezed_mark = get_at(unsqueezed, [IndexItem::At(0), IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+
+        let cube = set_at(
+          zeros[f32](1,2,3),
+          [IndexItem::At(0), IndexItem::At(1), IndexItem::At(2)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign
+        )?
+        let squeezed = squeeze(cube, #0)?.materialize()
+        let squeezed_mark = get_at(squeezed, [IndexItem::At(1), IndexItem::At(2)].to_vec())?.item()?
+
+        let row = set_at(
+          zeros[f32](1,3),
+          [IndexItem::At(0), IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign
+        )?
+        let expanded = expand(row, [2,3].to_vec())?.materialize()
+        let expanded_first = get_at(expanded, [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+        let expanded_second = get_at(expanded, [IndexItem::At(1), IndexItem::At(1)].to_vec())?.item()?
+
+        let vector = set_at(
+          zeros[f32](5),
+          [IndexItem::At(0)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign
+        )?
+        let reversed_step = slice(vector, [IndexItem::Slice(None, None, -2)].to_vec())?.materialize()
+        let sliced_mark = get_at(reversed_step, [IndexItem::At(2)].to_vec())?.item()?
+
+        let ok = ((permuted_mark == 1.0)
+          && (reshaped_mark == 1.0)
+          && (unsqueezed_mark == 1.0)
+          && (squeezed_mark == 1.0)
+          && (expanded_first == 1.0)
+          && (expanded_second == 1.0)
+          && (sliced_mark == 1.0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-movement-primitives-chain-over-tensorview-without-materialization
+  category: axes
+  title: movement primitives chain over TensorView without materialization
+  code: |
+    import std::tensor::{AxisError, ShapeError, TensorView, ones}
+    import std::tensor::prim::{squeeze, unsqueeze}
+
+    fn is_view(_x: TensorView[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError]] =
+      result {
+        let view = unsqueeze(ones[f32](2,3), #0)?
+        let restored = squeeze(view, #0)?
+        yield Ok(to_str(is_view(restored) && (to_str(restored.shape()) == "[2,3]")))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-permute-remaps-overlay-indices
+  category: axes
+  title: permute remaps overlay indices
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::permute
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError]] =
+      result {
+        let t = zeros[f32](2,3,4).with_names([#0:'B, #1:'T, #2:'C])?
+        let u = permute(t, [#0, #2, #1].to_vec())?
+        let ok = ((u.names().len() == 3)
+          && (u.axis_of('B)? == #0)
+          && (u.axis_of('C)? == #1)
+          && (u.axis_of('T)? == #2))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: AX-reshape-merge-drops-complete-overlay
+  category: axes
+  title: reshape merge drops complete overlay
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::reshape
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, Str]] =
+      result {
+        let t = zeros[f32](2,3).with_names([#0:'mol, #1:'task])?
+        let u = reshape(t, [6].to_vec())?
+        let dropped = ((u.names().len() == 0)
+          && u.axis_of('mol).is_err()
+          && u.axis_of('task).is_err())
+        yield Ok(to_str(dropped))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-reshape-exact-shape-preserves-complete-overlay
+  category: axes
+  title: reshape exact shape preserves complete overlay
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::reshape
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError]] =
+      result {
+        let t = zeros[f32](2,3).with_names([#0:'batch, #1:'feature])?
+        let u = reshape(t, [2,3].to_vec())?
+        let ok = ((u.names().len() == 2)
+          && (u.axis_of('batch)? == #0)
+          && (u.axis_of('feature)? == #1))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-reshape-split-drops-complete-overlay
+  category: axes
+  title: reshape split drops complete overlay
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::reshape
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, Str]] =
+      result {
+        let t = zeros[f32](6).with_names([#0:'flat])?
+        let u = reshape(t, [2,3].to_vec())?
+        let dropped = (u.names().len() == 0) && u.axis_of('flat).is_err()
+        yield Ok(to_str(dropped))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-reshape-singleton-insertion-drops-complete-overlay
+  category: axes
+  title: reshape singleton insertion drops complete overlay
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::reshape
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, Str]] =
+      result {
+        let t = zeros[f32](2,3).with_names([#0:'batch, #1:'feature])?
+        let u = reshape(t, [1,2,3].to_vec())?
+        let dropped = ((u.names().len() == 0)
+          && u.axis_of('batch).is_err()
+          && u.axis_of('feature).is_err())
+        yield Ok(to_str(dropped))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-reshape-singleton-removal-drops-complete-overlay
+  category: axes
+  title: reshape singleton removal drops complete overlay
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::reshape
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, Str]] =
+      result {
+        let t = zeros[f32](1,2,3)
+          .with_names([#0:'singleton, #1:'batch, #2:'feature])?
+        let u = reshape(t, [2,3].to_vec())?
+        let dropped = ((u.names().len() == 0)
+          && u.axis_of('singleton).is_err()
+          && u.axis_of('batch).is_err()
+          && u.axis_of('feature).is_err())
+        yield Ok(to_str(dropped))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-reshape-rank-preserving-shape-change-drops-complete-overlay
+  category: axes
+  title: reshape rank preserving shape change drops complete overlay
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::reshape
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, Str]] =
+      result {
+        let t = zeros[f32](2,6).with_names([#0:'row, #1:'feature])?
+        let u = reshape(t, [3,4].to_vec())?
+        let dropped = ((u.names().len() == 0)
+          && u.axis_of('row).is_err()
+          && u.axis_of('feature).is_err())
+        yield Ok(to_str(dropped))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-unsqueeze-and-squeeze-round-trip-shape
+  category: axes
+  title: unsqueeze and squeeze round-trip shape
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::{unsqueeze, squeeze}
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError, Str]] =
+      result {
+        let x = zeros[f32](2,3)
+        let y = unsqueeze(x, #0)?
+        let expanded_shape = to_str(y.shape())
+        let z = squeeze(y, #0)?
+        let ok = (expanded_shape == "[1,2,3]") && (to_str(z.shape()) == "[2,3]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-unsqueeze-and-squeeze-remap-overlay-indices
+  category: axes
+  title: unsqueeze and squeeze remap overlay indices
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::{unsqueeze, squeeze}
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError]] =
+      result {
+        let x = zeros[f32](2,3).with_names([#0:'row, #1:'col])?
+        let y = unsqueeze(x, #1)?
+        let inserted_ok = ((y.names().len() == 2)
+          && (y.axis_of('row)? == #0)
+          && (y.axis_of('col)? == #2))
+
+        let z = squeeze(y, #1)?
+        let restored_ok = ((z.names().len() == 2)
+          && (z.axis_of('row)? == #0)
+          && (z.axis_of('col)? == #1))
+        yield Ok(to_str(inserted_ok && restored_ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-reshape-of-noncontiguous-tensorview-returns-not-a-view
+  category: axes
+  title: reshape of non-contiguous TensorView returns NotAView instead of copying
+  code: |
+    import std::tensor::{AxisError, NotAView, ShapeError, ones}
+    import std::tensor::prim::{permute, reshape}
+
+    fn main!() -> Res[Str, Union[AxisError, NotAView, ShapeError]] =
+      result {
+        let transposed = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        _ = reshape(transposed, [6].to_vec())?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NotAView
+    value_diagnostics:
+    - code: NOT_A_VIEW
+      message_contains:
+      - view
+      - affine
+      data_keys: []
+
+- id: AX-reshape-shape-error-precedes-tensorview-affine-failure
+  category: axes
+  title: reshape shape validation precedes TensorView affine failure
+  code: |
+    import std::tensor::{AxisError, NotAView, ShapeError, ones}
+    import std::tensor::prim::{permute, reshape}
+
+    fn main!() -> Res[Str, Union[AxisError, NotAView, ShapeError]] =
+      result {
+        let transposed = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        _ = reshape(transposed, [5].to_vec())?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ShapeError
+
+- id: AX-squeeze-drops-removed-axis-name-and-shifts-later-overlays
+  category: axes
+  title: squeeze drops removed axis name and shifts later overlays
+  code: |
+    import std::tensor::{AxisError, ShapeError, zeros}
+    import std::tensor::prim::squeeze
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError]] =
+      result {
+        let x = zeros[f32](2,1,3).with_names([#0:'row, #1:'singleton, #2:'col])?
+        let y = squeeze(x, #1)?
+        let ok = ((y.names().len() == 2)
+          && y.axis_of('singleton).is_err()
+          && (y.axis_of('row)? == #0)
+          && (y.axis_of('col)? == #1))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-expand-broadcasts-size-one-axis-to-requested-shape
+  category: axes
+  title: expand broadcasts size-one axis to requested shape
+  code: |
+    import std::tensor::{ShapeError, ones}
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Union[ShapeError, Str]] =
+      result {
+        let x = ones[f32](1,2)
+        let y = expand(x, [3,2].to_vec())?
+        let ok = (to_str(y.shape()) == "[3,2]") && (to_str(y.dtype()) == "f32")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-expand-right-aligns-lower-rank-source
+  category: axes
+  title: expand right aligns lower rank source
+  code: |
+    import std::tensor::{ShapeError, ones}
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Union[ShapeError, Str]] =
+      result {
+        let out = expand(ones[f32](3), [2,3].to_vec())?
+        yield Ok(to_str(out.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,3]"'
+
+- id: AX-expand-broadcasts-rank-zero-source
+  category: axes
+  title: expand broadcasts rank zero source
+  code: |
+    import std::tensor::{ShapeError, ones}
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Union[ShapeError, Str]] =
+      result {
+        let out = expand(ones[f32](), [2,3].to_vec())?
+        yield Ok(to_str(out.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,3]"'
+
+- id: AX-expand-allows-singleton-to-zero
+  category: axes
+  title: expand allows singleton to zero
+  code: |
+    import std::tensor::{ShapeError, ones}
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Union[ShapeError, Str]] =
+      result {
+        let empty = expand(ones[f32](1,3), [0,3].to_vec())?
+        yield Ok(to_str(empty.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[0,3]"'
+
+- id: AX-expand-right-shifts-overlay-after-rank-promotion
+  category: axes
+  title: expand right shifts overlay after rank promotion
+  code: |
+    import std::tensor::{AxisError, ShapeError, ones}
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError]] =
+      result {
+        let x = ones[f32](3).with_names([#0:'feature])?
+        let y = expand(x, [8,3].to_vec())?
+        let ok = (y.names().len() == 1) && (y.axis_of('feature)? == #1)
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-expand-preserves-names-on-expanded-and-zero-sized-axes
+  category: axes
+  title: expand preserves names on expanded and zero sized axes
+  code: |
+    import std::tensor::{AxisError, ShapeError, ones}
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Union[AxisError, ShapeError]] =
+      result {
+        let x = ones[f32](1,3).with_names([#0:'batch, #1:'feature])?
+        let grown = expand(x, [8,3].to_vec())?
+        let empty = expand(x, [0,3].to_vec())?
+        let grown_ok = ((grown.names().len() == 2)
+          && (grown.axis_of('batch)? == #0)
+          && (grown.axis_of('feature)? == #1))
+        let empty_ok = ((empty.names().len() == 2)
+          && (empty.axis_of('batch)? == #0)
+          && (empty.axis_of('feature)? == #1))
+        yield Ok(to_str(grown_ok && empty_ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: AX-static-expand-rejects-rank-shrink
+  category: axes
+  title: static expand rejects rank shrink
+  code: |
+    import std::tensor::ones
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = expand(ones[f32](2,3), [3].to_vec())?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: BROADCAST_SHAPE_MISMATCH
+      message_contains:
+      - broadcast
+      - shape
+      - mismatch
+      data_keys:
+      - operation
+
+- id: AX-static-expand-rejects-non-singleton-replacement
+  category: axes
+  title: static expand rejects non singleton replacement
+  code: |
+    import std::tensor::ones
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = expand(ones[f32](2,3), [2,4].to_vec())?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: BROADCAST_SHAPE_MISMATCH
+      message_contains:
+      - broadcast
+      - shape
+      - mismatch
+      data_keys:
+      - operation
+
+- id: AX-static-expand-rejects-zero-to-nonzero
+  category: axes
+  title: static expand rejects zero to nonzero
+  code: |
+    import std::tensor::zeros
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = expand(zeros[f32](0,3), [1,3].to_vec())?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: BROADCAST_SHAPE_MISMATCH
+      message_contains:
+      - broadcast
+      - shape
+      - mismatch
+      data_keys:
+      - operation
+
+- id: AX-runtime-expand-rejects-non-singleton-replacement
+  category: axes
+  title: runtime expand rejects non singleton replacement
+  code: |
+    import std::io::{IoError, args!}
+    import std::tensor::{ShapeError, ones}
+    import std::tensor::prim::expand
+
+    fn main!() -> Res[Str, Union[DomainError, IoError, ShapeError]] =
+      result {
+        let argc = args!()?.len().to_i64()
+        let two = Nat.from_i64(wrapping_add(wrapping_sub(argc, argc), 2))?
+        let four = Nat.from_i64(wrapping_add(wrapping_sub(argc, argc), 4))?
+        _ = expand(ones[f32](2,3), [two, four].to_vec())?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ShapeError
+    value_diagnostics:
+    - code: BROADCAST_SHAPE_MISMATCH
+      message_contains:
+      - broadcast
+      - shape
+      - mismatch
+      data_keys:
+      - operation
+- id: AX-every-affine-movement-accepts-tensorview-input
+  category: axes
+  title: every affine movement primitive accepts TensorView input and returns TensorView
+  code: |
+    import std::tensor::{AxisError, IndexError, NotAView, ShapeError, TensorView, ones}
+    import std::tensor::index::IndexItem
+    import std::tensor::prim::{expand, permute, reshape, slice, squeeze, unsqueeze}
+
+    fn is_view(_x: TensorView[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, IndexError, NotAView, ShapeError]] =
+      result {
+        let source = slice(ones[f32](2,3), [IndexItem::All, IndexItem::All].to_vec())?
+        let permuted = permute(source, [#1, #0].to_vec())?
+        let reshaped = reshape(source, [6].to_vec())?
+        let unsqueezed = unsqueeze(source, #0)?
+        let squeezed = squeeze(unsqueezed, #0)?
+        let expandable = slice(ones[f32](1,3), [IndexItem::All, IndexItem::All].to_vec())?
+        let expanded = expand(expandable, [2,3].to_vec())?
+        let sliced = slice(source, [IndexItem::All, IndexItem::Slice(0, 2)].to_vec())?
+        let ok = (is_view(permuted)
+          && is_view(reshaped)
+          && is_view(unsqueezed)
+          && is_view(squeezed)
+          && is_view(expanded)
+          && is_view(sliced)
+          && (to_str(permuted.shape()) == "[3,2]")
+          && (to_str(reshaped.shape()) == "[6]")
+          && (to_str(expanded.shape()) == "[2,3]")
+          && (to_str(sliced.shape()) == "[2,2]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

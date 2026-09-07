@@ -1,0 +1,635 @@
+# Suite: core/numeric.yaml
+
+tests:
+- id: NUM-checked-dynamic-arithmetic-returns-ok
+  category: scalar_numeric
+  title: checked dynamic arithmetic returns Ok
+  code: |
+    fn affine(a: i64, b: i64, c: i64) -> Res[i64, NumericError] =
+      checked {
+        let product = a * b
+        yield product + c
+      }
+
+    fn main!() -> Res[Str, NumericError] =
+      result {
+        let value = affine(6, 7, 0)?
+        yield Ok(to_str(value))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"42"'
+
+- id: NUM-checked-without-yield-returns-ok-unit
+  category: scalar_numeric
+  title: checked without yield returns Ok(())
+  code: |
+    fn noop() -> Res[Unit, NumericError] = checked {}
+
+    fn main!() -> Res[Str, NumericError] =
+      result {
+        _ = noop()?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: NUM-checked-dynamic-overflow-returns-numericerror
+  category: scalar_numeric
+  title: checked dynamic overflow returns NumericError
+  code: |
+    fn double(x: i8) -> Res[i8, NumericError] =
+      checked {
+        yield x + x
+      }
+
+    fn main!() -> Res[Str, NumericError] =
+      result {
+        _ = double(64)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-checked-dynamic-unary-negation-overflow-returns-numericerror
+  category: scalar_numeric
+  title: checked dynamic unary negation overflow returns NumericError
+  code: |
+    fn negate(x: i8) -> Res[i8, NumericError] =
+      checked {
+        yield -x
+      }
+
+    fn main!() -> Res[Str, NumericError] =
+      result {
+        let min: i8 = wrapping_add(127, 1)
+        _ = negate(min)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-checked-promotion-conversion-overflow-returns-numericerror
+  category: scalar_numeric
+  title: checked promotion conversion overflow returns NumericError
+  code: |
+    fn add_mixed(lhs: i8, rhs: u8) -> Res[i8, NumericError] =
+      checked {
+        yield lhs + rhs
+      }
+
+    fn main!() -> Res[Str, NumericError] =
+      result {
+        _ = add_mixed(0, 255)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-checked-dynamic-division-by-zero-returns-numericerror
+  category: scalar_numeric
+  title: checked dynamic division by zero returns NumericError
+  code: |
+    fn quotient(lhs: i64, rhs: i64) -> Res[i64, NumericError] =
+      checked {
+        yield lhs / rhs
+      }
+
+    fn main!() -> Res[Str, NumericError] =
+      result {
+        _ = quotient(1, 0)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_DIV_BY_ZERO
+      message_contains:
+      - int
+      - div
+      - zero
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-checked-dynamic-remainder-by-zero-returns-numericerror
+  category: scalar_numeric
+  title: checked dynamic remainder by zero returns NumericError
+  code: |
+    fn remainder(lhs: i64, rhs: i64) -> Res[i64, NumericError] =
+      checked {
+        yield lhs % rhs
+      }
+
+    fn main!() -> Res[Str, NumericError] =
+      result {
+        _ = remainder(1, 0)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_REM_BY_ZERO
+      message_contains:
+      - int
+      - rem
+      - zero
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-signed-division-and-remainder-truncate-quotient-toward-zero
+  category: scalar_numeric
+  title: signed division and remainder truncate quotient toward zero
+  code: |
+    fn div_rem(lhs: i64, rhs: i64) -> Res[(i64, i64), NumericError] =
+      checked {
+        let quotient = lhs / rhs
+        let remainder = lhs % rhs
+        yield (quotient, remainder)
+      }
+
+    fn main!() -> Res[Str, NumericError] =
+      result {
+        let pos_pos = div_rem(7, 3)?
+        let neg_pos = div_rem(-7, 3)?
+        let pos_neg = div_rem(7, -3)?
+        let neg_neg = div_rem(-7, -3)?
+        let ok = ((pos_pos.0 == 2) && (pos_pos.1 == 1)
+          && (neg_pos.0 == -2) && (neg_pos.1 == -1)
+          && (pos_neg.0 == -2) && (pos_neg.1 == 1)
+          && (neg_neg.0 == 2) && (neg_neg.1 == -1))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: NUM-signed-minimum-divided-by-minus-one-returns-int-overflow
+  category: scalar_numeric
+  title: signed minimum divided by minus one returns INT_OVERFLOW
+  code: |
+    fn quotient(lhs: i8, rhs: i8) -> Res[i8, NumericError] =
+      checked {
+        yield lhs / rhs
+      }
+
+    fn main!() -> Res[Str, NumericError] =
+      result {
+        let minimum: i8 = wrapping_add(127, 1)
+        _ = quotient(minimum, -1)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-signed-minimum-remainder-by-minus-one-is-zero-outside-checked
+  category: scalar_numeric
+  title: signed minimum remainder by minus one is zero outside checked
+  code: |
+    fn remainder_by_minus_one(value: i8) -> i8 = value % -1
+
+    fn main!() -> Res[i8, Str] {
+      let minimum: i8 = wrapping_add(127, 1)
+      yield Ok(remainder_by_minus_one(minimum))
+    }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: i8
+        expected: 0
+        mode: exact
+
+- id: NUM-dynamic-faulting-operator-outside-checked-is-rejected
+  category: scalar_numeric
+  title: dynamic faulting operator outside checked is rejected
+  code: |
+    fn add(lhs: i64, rhs: i64) -> i64 = lhs + rhs
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: NUMERIC_CHECKED_CONTEXT_REQUIRED
+      message_contains:
+      - numeric
+      - checked
+      data_keys: []
+
+- id: NUM-const-overflow-retains-int-overflow-code
+  category: scalar_numeric
+  title: const overflow retains INT_OVERFLOW code
+  code: |
+    const VALUE: i8 = 127 + 1 // @primary const-int-overflow
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(VALUE))
+    }
+  expect:
+    compile_error:
+      code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+      primary_span:
+        marker: const-int-overflow
+
+- id: NUM-const-division-by-zero-retains-int-div-by-zero-code
+  category: scalar_numeric
+  title: const division by zero retains INT_DIV_BY_ZERO code
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = 1 / 0 // @primary const-int-division-by-zero
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: INT_DIV_BY_ZERO
+      message_contains:
+      - int
+      - div
+      - zero
+      data_keys:
+      - operation
+      - dtype
+      primary_span:
+        marker: const-int-division-by-zero
+
+- id: NUM-const-remainder-by-zero-retains-int-rem-by-zero-code
+  category: scalar_numeric
+  title: const remainder by zero retains INT_REM_BY_ZERO code
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = 7 % 0 // @primary const-int-remainder-by-zero
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: INT_REM_BY_ZERO
+      message_contains:
+      - int
+      - rem
+      - zero
+      data_keys:
+      - operation
+      - dtype
+      primary_span:
+        marker: const-int-remainder-by-zero
+
+- id: NUM-const-signed-minimum-divided-by-minus-one-retains-int-overflow
+  category: scalar_numeric
+  title: const signed minimum divided by minus one retains INT_OVERFLOW
+  code: |
+    const MINIMUM: i8 = -128
+    const QUOTIENT: i8 = MINIMUM / -1
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(QUOTIENT))
+    }
+  expect:
+    compile_error:
+      code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-const-signed-minimum-remainder-by-minus-one-is-zero
+  category: scalar_numeric
+  title: const signed minimum remainder by minus one is zero
+  code: |
+    const MINIMUM: i8 = -128
+    const REMAINDER: i8 = MINIMUM % -1
+
+    fn main!() -> Res[i8, Str] {
+      yield Ok(REMAINDER)
+    }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: i8
+        expected: 0
+        mode: exact
+
+- id: NUM-checked-boundary-does-not-cross-closure-body
+  category: scalar_numeric
+  title: checked boundary does not cross closure body
+  code: |
+    fn make_adder() -> Res[Fn(i64) -> i64, NumericError] =
+      checked {
+        let add_one = { |x| x + 1 }
+        yield add_one
+      }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: NUMERIC_CHECKED_CONTEXT_REQUIRED
+      message_contains:
+      - numeric
+      - checked
+      data_keys: []
+
+- id: NUM-checked-body-does-not-inherit-outer-result-question-mark-context
+  category: scalar_numeric
+  title: checked body does not inherit outer result question mark context
+  code: |
+    fn source() -> Res[i64, Str] = Ok(1)
+
+    fn main!() -> Res[Str, Union[Str, NumericError]] =
+      result {
+        let value = checked {
+          let inner = source()?
+          yield inner
+        }?
+        yield Ok(to_str(value))
+      }
+  expect:
+    compile_error:
+      code: Q_OUTSIDE_RESULT
+      message_contains:
+      - '?'
+      - result
+      data_keys: []
+
+- id: NUM-scalar-wrapping-arithmetic-is-total-outside-checked
+  category: scalar_numeric
+  title: scalar wrapping arithmetic is total outside checked
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let max: i8 = 127
+      let min: i8 = -128
+      let add_wrapped = wrapping_add(max, 1)
+      let sub_wrapped = wrapping_sub(min, 1)
+      let mul_wrapped = wrapping_mul::[i8](64, 2)
+      let ok = (add_wrapped == min) && (sub_wrapped == max) && (mul_wrapped == min)
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: NUM-wrapping-literal-operands-default-to-i64
+  category: scalar_numeric
+  title: wrapping literal operands default to i64
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = wrapping_mul(64, 2)
+      yield Ok(to_str(value))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"128"'
+
+- id: NUM-expected-result-types-wrapping-literals-as-i8
+  category: scalar_numeric
+  title: expected result types wrapping literals as i8
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value: i8 = wrapping_mul(64, 2)
+      yield Ok(to_str(value))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"-128"'
+
+- id: NUM-contextual-fixed-width-literal-rejects-out-of-range-value
+  category: scalar_numeric
+  title: contextual fixed width literal rejects out of range value
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value: i8 = 128
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-default-integer-type-does-not-search-wider-fixed-width-dtypes
+  category: scalar_numeric
+  title: default integer type does not search wider fixed width dtypes
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = wrapping_mul(9223372036854775808, 1)
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-integer-literal-outside-all-fixed-width-ranges-is-rejected
+  category: scalar_numeric
+  title: integer literal outside all fixed width ranges is rejected
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = wrapping_mul(18446744073709551616, 1)
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+
+- id: NUM-tensor-re-export-shares-prelude-numericerror-identity
+  category: scalar_numeric
+  title: tensor re-export shares prelude NumericError identity
+  code: |
+    import std::tensor::NumericError as TensorNumericError
+
+    fn double(x: i8) -> Res[i8, TensorNumericError] =
+      checked {
+        yield x + x
+      }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(double(64).is_err()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: NUM-statically-total-division-and-remainder-do-not-require-checked
+  category: scalar_numeric
+  title: statically total division and remainder do not require checked
+  code: |
+    fn classify(x: i64) -> i64 {
+      let half = x / 2
+      yield half % 3
+    }
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(classify(14)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+
+- id: NUM-statically-total-division-allows-successful-const-promotion
+  category: scalar_numeric
+  title: statically total division allows successful const promotion
+  code: |
+    const ONE: u8 = 1
+
+    fn quotient(value: i8) -> i8 = value / ONE
+
+    fn main!() -> Res[i8, Str] {
+      yield Ok(quotient(-7))
+    }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: i8
+        expected: -7
+        mode: exact
+
+- id: NUM-remainder-total-divisor-does-not-exempt-fallible-promotion
+  category: scalar_numeric
+  title: remainder total divisor does not exempt fallible promotion
+  code: |
+    const ONE: i8 = 1
+
+    fn remainder(value: u8) -> i8 = value % ONE
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: NUMERIC_CHECKED_CONTEXT_REQUIRED
+      message_contains:
+      - numeric
+      - checked
+      data_keys: []
+
+- id: NUM-division-total-divisor-does-not-exempt-fallible-promotion
+  category: scalar_numeric
+  title: division total divisor does not exempt fallible promotion
+  code: |
+    const ONE: i8 = 1
+
+    fn quotient(value: u8) -> i8 = value / ONE
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: NUMERIC_CHECKED_CONTEXT_REQUIRED
+      message_contains:
+      - numeric
+      - checked
+      data_keys: []
+
+- id: NUM-fractional-division-does-not-require-checked
+  category: scalar_numeric
+  title: fractional division does not require checked
+  code: |
+    fn ratio(lhs: i64, rhs: i64) -> f64 = lhs /. rhs
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(ratio(5, 2)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2.5"'
+- id: NUM-checked-never-paths-retain-static-success-types
+  category: scalar_numeric
+  title: checked Never paths retain explicit or default static success types
+  code: |
+    import std::test::abort!
+
+    fn explicit!() -> Res[Never, NumericError] = checked {
+      yield abort!("RUNTIME_ABORT", "not executed")
+    }
+
+    fn default_unit!() -> Res[Unit, NumericError] = checked {
+      abort!("RUNTIME_ABORT", "not executed")
+    }
+
+    fn main!() -> Res[Str, Str] = Ok("x")
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'

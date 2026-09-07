@@ -1,0 +1,57 @@
+# Suite: tensor/determinism_unavailable.yaml
+# This suite is conditionally required only when precondition
+# `strict_unavailable_path` is active in the conformance harness.
+
+tests:
+- id: TDU-strict-determinism-profile-unavailable-must-fail-explicitly
+  category: tensor_determinism
+  title: strict determinism profile unavailable must fail explicitly
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::DeterminismProfile
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{add, div, mul}
+
+    fn schedule_sensitive_values() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let one = ones[f32]()
+        let two = add(one, one)?
+        let four = mul(two, two)?
+        let sixteen = mul(four, four)?
+        let two_fifty_six = mul(sixteen, sixteen)?
+        let sixty_five_thousand_five_hundred_thirty_six = mul(two_fifty_six, two_fifty_six)?
+        let two_to_twenty_four = mul(sixty_five_thousand_five_hundred_thirty_six, two_fifty_six)?
+        let half_ulp_at_one = div(one, two_to_twenty_four)?
+        yield set_at(
+          ones[f32](3),
+          [IndexItem::Take([1,2])].to_vec(),
+          half_ulp_at_one,
+          mode=ScatterMode::Assign
+        )
+      }
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let values = schedule_sensitive_values()?
+        let spec = [IndexItem::Take([0,0,0])].to_vec()
+        yield set_at(
+          zeros[f32](1),
+          spec,
+          values,
+          mode=ScatterMode::Add,
+          profile=DeterminismProfile::Strict
+        )
+      }
+  expect:
+    value:
+      kind: Err
+    value_diagnostics:
+    - code: DETERMINISM_UNAVAILABLE
+      message_contains:
+      - determinism
+      - strict
+      - unavailable
+      data_keys:
+      - profile
+      - backend
+      - device

@@ -1,0 +1,246 @@
+# Suite: tensor/overlay.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: AX-with-names-axis-of-resolves-semantic-axis-name
+  category: axes
+  title: with_names + axis_of resolves semantic axis name
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        let t = ones[f32](2,3).with_names([#0:'mol, #1:'task])?
+        _ = t.axis_of('task)?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: AX-with-names-partial-patch-preserves-omitted-names
+  category: axes
+  title: partial with_names patch preserves names at omitted axis indices
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        let x = ones[f32](2,3,4).with_names([#0:'row, #1:'col, #2:'time])?
+        let y = x.with_names([#1:'feature])?
+        let ok = ((y.names().len() == 3)
+          && (y.axis_of('row)? == #0)
+          && (y.axis_of('feature)? == #1)
+          && (y.axis_of('time)? == #2)
+          && y.axis_of('col).is_err())
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: AX-with-names-empty-patch-is-no-op
+  category: axes
+  title: empty with_names patch preserves the complete existing overlay
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        let x = ones[f32](2,3,4).with_names([#0:'row, #2:'time])?
+        let y = x.with_names([:])?
+        let ok = ((y.names().len() == 2)
+          && (y.axis_of('row)? == #0)
+          && (y.axis_of('time)? == #2))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: AX-with-names-patch-applies-simultaneously-for-name-swap
+  category: axes
+  title: with_names patch applies simultaneously and permits a valid name swap
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'row, #1:'col])?
+        let y = x.with_names([#0:'col, #1:'row])?
+        let ok = (y.axis_of('col)? == #0) && (y.axis_of('row)? == #1)
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: AX-with-names-patch-checks-retained-names-in-axis-order
+  category: axes
+  title: with_names patch reports the lowest-axis duplicate against retained names
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        let x = ones[f32](2,3,4,5).with_names([#0:'row, #1:'col, #2:'time, #3:'channel])?
+        _ = x.with_names([#1:'row, #3:'time])?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: AxisError
+    value_diagnostics:
+    - code: AXIS_DUPLICATE_NAME
+      message_contains:
+      - duplicate
+      data_keys: []
+- id: AX-with-names-bounds-failure-precedes-patched-duplicate
+  category: axes
+  title: with_names patch validates bounds before final duplicate names
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'row, #1:'col])?
+        _ = x.with_names([#1:'row, #2:'oops])?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: AxisError
+    value_diagnostics:
+    - code: AXIS_OUT_OF_RANGE
+      message_contains:
+      - axis
+      - rank
+      data_keys:
+      - axis
+      - rank
+- id: AX-with-names-bang-failure-leaves-overlay-unchanged
+  category: axes
+  title: failed with_names bang patch leaves the receiver overlay unchanged
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        let mut x = ones[f32](2,3).with_names([#0:'row, #1:'col])?
+        let failed = x.with_names!([#1:'row]).is_err()
+        let unchanged = ((x.names().len() == 2)
+          && (x.axis_of('row)? == #0)
+          && (x.axis_of('col)? == #1))
+        yield Ok(to_str(failed && unchanged))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: AX-in-place-name-update-remains-valid-after-value-assignment-copy
+  category: axes
+  title: in-place name update remains valid after value assignment copy
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        let mut x = ones[f32](2,3)
+        let alias = x
+        _ = x.with_names!([#0:'row, #1:'col])?
+        let receiver_updated = ((x.names().len() == 2)
+          && (x.axis_of('row)? == #0)
+          && (x.axis_of('col)? == #1))
+        let alias_unchanged = ((alias.names().len() == 0)
+          && alias.axis_of('row).is_err()
+          && alias.axis_of('col).is_err())
+        yield Ok(to_str(receiver_updated && alias_unchanged))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: AX-with-names-rejects-duplicate-axisname-in-overlay
+  category: axes
+  title: with_names rejects duplicate AxisName in overlay
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        _ = ones[f32](2,3).with_names([#0:'x, #1:'x])?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: AxisError
+    value_diagnostics:
+    - code: AXIS_DUPLICATE_NAME
+      message_contains:
+      - duplicate
+      data_keys: []
+- id: AX-with-names-validates-axisindex-bounds
+  category: axes
+  title: with_names validates AxisIndex bounds
+  code: |
+    import std::tensor::{AxisError, zeros}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        _ = zeros[f32](2,3).with_names([#2:'oops])?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: AxisError
+    value_diagnostics:
+    - code: AXIS_OUT_OF_RANGE
+      message_contains:
+      - axis
+      - rank
+      data_keys:
+      - axis
+      - rank
+- id: AX-tensorview-does-not-expose-owning-name-overlay-update
+  category: axes
+  title: TensorView does not expose the owning with_names API
+  code: |
+    import std::tensor::TensorView
+
+    fn add_names(view: TensorView[f32]) -> Unit {
+      _ = view.with_names([#0:'row])
+    }
+
+    fn main!() -> Unit = ()
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+- id: AX-axis-literals-ignore-same-spelled-user-types
+  category: axes
+  title: axis literals retain canonical tensor identity despite user type names
+  code: |
+    import std::tensor::{AxisIndex as CanonicalAxisIndex, AxisName as CanonicalAxisName}
+
+    struct AxisIndex {}
+    struct AxisName {}
+
+    fn is_index(_value: CanonicalAxisIndex) -> Bool = true
+    fn is_name(_value: CanonicalAxisName) -> Bool = true
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        yield Ok(to_str(is_index(#0) && is_name('batch)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

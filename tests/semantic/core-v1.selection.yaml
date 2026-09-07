@@ -1,0 +1,25 @@
+version: '0.1'
+fixtures:
+- core-conditionals/CFL-if-evaluates-only-selected-branch-at-runtime
+- core-conditionals/CFL-match-expression-over-opt-is-exhaustive
+- core-conditionals/CFL-match-non-exhaustive-arms-are-rejected
+- core-effects/EFF-bounded-generic-bang-trait-call-has-unknown-summary
+- core-effects/EFF-imported-localizable-state-summary-allows-non-bang-local-call
+- core-effects/EFF-imported-transitive-io-summary-rejects-non-bang-local-call
+- core-effects/EFF-non-bang-dead-if-branch-cannot-hide-effectful-call
+- core-numeric/NUM-checked-dynamic-overflow-returns-numericerror
+- core-ownership/OWN-balanced-ownership-discharge-across-return-paths-is-accepted
+- core-ownership/OWN-path-sensitive-merge-rejects-maybe-consumed-ownership-use
+- core-ownership/OWN-repeated-consuming-move-on-same-root-reports-ownership-double-move
+- core-program/PRG-ok-entry-maps-to-zero-and-preserves-value
+- core-program/PRG-source-error-precedes-entry-missing
+- core-result/RES-res-propagates-err
+- core-traits/TRT-explicit-bounds-and-associated-types-preserve-carrier-and-result-types
+- core-traits/TRT-inferred-type-argument-must-satisfy-declared-bound
+- core-traits/TRT-trait-method-call-works-when-trait-is-imported-at-call-site
+- core-typecheck/TYC-call-argument-type-mismatch-is-rejected
+- core-typecheck/TYC-expression-body-result-must-match-declared-return-type
+- core-typecheck/TYC-generic-type-argument-infers-from-call-argument
+- core-typecheck/TYC-later-local-declaration-is-not-hoisted
+- core-typecheck/TYC-redeclaration-precedes-invalid-initializer
+- core-typecheck/TYC-underconstrained-generic-call-fails-inference

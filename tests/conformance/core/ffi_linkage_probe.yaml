@@ -1,0 +1,76 @@
+tests:
+- id: FFI-unresolved-extern-symbol-surfaces-extern-linkage-failed-at-runtime
+  category: ffi_linkage
+  title: unresolved extern symbol surfaces EXTERN_LINKAGE_FAILED at runtime
+  code: |
+    extern "C" fn eglur_missing_ffi_symbol_for_probe() -> i64
+
+    fn main!() -> Res[Str, Str] {
+      unsafe {
+        _ = eglur_missing_ffi_symbol_for_probe()
+      }
+      yield Ok("unreachable")
+    }
+  expect:
+    runtime_error:
+      code: EXTERN_LINKAGE_FAILED
+      message_contains:
+      - extern
+      - linkage
+      - failed
+      data_keys:
+      - symbol
+      - abi
+
+- id: FFI-unobserved-child-linkage-failure-projects-scope-exit-abort
+  category: ffi_linkage
+  title: unobserved child linkage failure projects scope-exit abort
+  code: |
+    import std::concurrency::spawn!
+
+    extern "C" fn eglur_missing_child_ffi_symbol_for_probe() -> i64
+
+    fn main!() -> Res[Str, Str] {
+      _ = spawn! {
+        unsafe {
+          _ = eglur_missing_child_ffi_symbol_for_probe()
+        }
+        0
+      }
+      yield Ok("unreachable")
+    }
+  expect:
+    runtime_error:
+      code: RUNTIME_ABORT
+      message_contains:
+      - abort
+      data_keys:
+      - source
+      data_equals:
+        source: std::concurrency::scope_exit_join
+
+- id: FFI-explicit-join-observes-child-linkage-failure-as-joinerror
+  category: ffi_linkage
+  title: explicit join observes child linkage failure as JoinError
+  code: |
+    import std::concurrency::{JoinError, join!, spawn!}
+
+    extern "C" fn eglur_missing_joined_child_ffi_symbol_for_probe() -> i64
+
+    fn join_err(_error: JoinError) -> Str = "join_error"
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let task = spawn! {
+          unsafe {
+            _ = eglur_missing_joined_child_ffi_symbol_for_probe()
+          }
+          0
+        }
+        _ = join!(&task).map_err { join_err(_) }?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"join_error"'

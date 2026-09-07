@@ -1,0 +1,470 @@
+# Suite: core/parse.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - parse_* helpers are pure and expose failures via value channel (`Res::Err`).
+
+tests:
+- id: PRS-parse-i8-accepts-canonical-signed-decimal-text
+  category: parse
+  title: parse_i8 accepts canonical signed decimal text
+  code: |
+    import std::parse::{parse_i8, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_i8("-128")?
+        _ = parse_i8("127")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-i8-rejects-out-of-range-integer-text-in-value-channel
+  category: parse
+  title: parse_i8 rejects out-of-range integer text in value channel
+  code: |
+    import std::parse::{parse_i8, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_i8("128")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError
+
+- id: PRS-parse-i16-accepts-interior-underscores
+  category: parse
+  title: parse_i16 accepts interior underscores
+  code: |
+    import std::parse::{parse_i16, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_i16("-32_768")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-i32-accepts-explicit-leading-sign
+  category: parse
+  title: parse_i32 accepts explicit leading sign
+  code: |
+    import std::parse::{parse_i32, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_i32("+1024")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-i64-rejects-malformed-integer-grammar-in-value-channel
+  category: parse
+  title: parse_i64 rejects malformed integer grammar in value channel
+  code: |
+    import std::parse::{parse_i64, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_i64("9_")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError
+
+- id: PRS-integer-parsers-reject-non-interior-separators
+  category: parse
+  title: integer parsers reject non-interior separators
+  code: |
+    import std::parse::parse_i64
+
+    fn main!() -> Res[Str, Str] {
+      let leading = parse_i64("_9")
+      let consecutive = parse_i64("9__0")
+      let trailing = parse_i64("9_")
+      yield Ok(to_str(leading.is_err() && consecutive.is_err() && trailing.is_err()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-u8-accepts-canonical-unsigned-decimal-text
+  category: parse
+  title: parse_u8 accepts canonical unsigned decimal text
+  code: |
+    import std::parse::{parse_u8, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_u8("255")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-u8-rejects-explicit-sign
+  category: parse
+  title: parse_u8 rejects explicit sign
+  code: |
+    import std::parse::{parse_u8, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_u8("-1")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError
+
+- id: PRS-parse-u16-accepts-interior-underscores
+  category: parse
+  title: parse_u16 accepts interior underscores
+  code: |
+    import std::parse::{parse_u16, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_u16("65_535")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-u32-accepts-max-range-canonical-text
+  category: parse
+  title: parse_u32 accepts max-range canonical text
+  code: |
+    import std::parse::{parse_u32, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_u32("4_294_967_295")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-u64-accepts-max-range-canonical-text
+  category: parse
+  title: parse_u64 accepts max-range canonical text
+  code: |
+    import std::parse::{parse_u64, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_u64("18446744073709551615")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-u64-rejects-out-of-range-value
+  category: parse
+  title: parse_u64 rejects out-of-range value
+  code: |
+    import std::parse::{parse_u64, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_u64("18446744073709551616")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError
+
+- id: PRS-parse-int-is-required-alias-of-parse-i64
+  category: parse
+  title: parse_int is required alias of parse_i64
+  code: |
+    import std::parse::{parse_int, parse_i64, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        let a = parse_int("-77")?
+        let b = parse_i64("-77")?
+        yield Ok(to_str(a == b))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-f16-accepts-signed-infinity-token
+  category: parse
+  title: parse_f16 accepts signed infinity token
+  code: |
+    import std::parse::parse_f16
+
+    fn main!() -> Res[Str, Str] {
+      let r = parse_f16("-Inf")
+      yield Ok(to_str(r.is_ok()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-bf16-accepts-signed-nan-token
+  category: parse
+  title: parse_bf16 accepts signed NaN token
+  code: |
+    import std::parse::parse_bf16
+
+    fn main!() -> Res[Str, Str] {
+      let r = parse_bf16("+NaN")
+      yield Ok(to_str(r.is_ok()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-f32-accepts-exponent-form
+  category: parse
+  title: parse_f32 accepts exponent form
+  code: |
+    import std::parse::{parse_f32, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        let x = parse_f32("1.25e+2")?
+        yield Ok(to_str(x == 125.0))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-f32-accepts-interior-separators-in-every-decimal-component
+  category: parse
+  title: parse_f32 accepts interior separators in every decimal component
+  code: |
+    import std::parse::parse_f32
+
+    fn main!() -> Res[Str, Str] {
+      let value = parse_f32("1_0.2_5e+1_0")
+      yield Ok(to_str(value.is_ok()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-f32-rejects-malformed-float-grammar
+  category: parse
+  title: parse_f32 rejects malformed float grammar
+  code: |
+    import std::parse::{parse_f32, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_f32("1e")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError
+
+- id: PRS-parse-f32-rejects-separators-at-component-boundaries
+  category: parse
+  title: parse_f32 rejects separators at component boundaries
+  code: |
+    import std::parse::parse_f32
+
+    fn main!() -> Res[Str, Str] {
+      let leading = parse_f32("_1.0")
+      let before_point = parse_f32("1_.0")
+      let after_point = parse_f32("1._0")
+      let before_exponent = parse_f32("1.0_e1")
+      let after_exponent = parse_f32("1.0e_1")
+      let trailing = parse_f32("1.0e1_")
+      let rejected = leading.is_err() &&
+        before_point.is_err() &&
+        after_point.is_err() &&
+        before_exponent.is_err() &&
+        after_exponent.is_err() &&
+        trailing.is_err()
+      yield Ok(to_str(rejected))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-f64-accepts-case-insensitive-signed-infinity-token
+  category: parse
+  title: parse_f64 accepts case-insensitive signed infinity token
+  code: |
+    import std::parse::{parse_f64, ParseError}
+
+    fn main!() -> Res[Str, Str] {
+      let r = parse_f64("+INF")
+      yield Ok(to_str(r.is_ok()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-f64-rejects-leading-or-trailing-whitespace
+  category: parse
+  title: parse_f64 rejects leading or trailing whitespace
+  code: |
+    import std::parse::{parse_f64, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_f64(" inf")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError
+
+- id: PRS-parse-complex64-accepts-real-imag-cartesian-and-tuple-forms
+  category: parse
+  title: parse_complex64 accepts real imag cartesian and tuple forms
+  code: |
+    import std::parse::{parse_complex64, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_complex64("3.0")?
+        _ = parse_complex64("2.5i")?
+        _ = parse_complex64("1.0-2.0i")?
+        _ = parse_complex64("(1.0,2.0)")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-complex64-components-accept-floating-special-tokens
+  category: parse
+  title: parse_complex64 components accept floating special tokens
+  code: |
+    import std::parse::parse_complex64
+
+    fn main!() -> Res[Str, Str] {
+      let r = parse_complex64("(nan,-inf)")
+      yield Ok(to_str(r.is_ok()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-complex128-accepts-real-imag-cartesian-and-tuple-forms
+  category: parse
+  title: parse_complex128 accepts real imag cartesian and tuple forms
+  code: |
+    import std::parse::{parse_complex128, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_complex128("-4")?
+        _ = parse_complex128("-4i")?
+        _ = parse_complex128("1+2i")?
+        _ = parse_complex128("(+inf,-nan)")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-complex128-rejects-malformed-complex-grammar
+  category: parse
+  title: parse_complex128 rejects malformed complex grammar
+  code: |
+    import std::parse::{parse_complex128, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_complex128("1+2")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError
+
+- id: PRS-parse-complex128-rejects-double-sign-cartesian-forms
+  category: parse
+  title: parse_complex128 rejects double sign cartesian forms
+  code: |
+    import std::parse::parse_complex128
+
+    fn main!() -> Res[Str, Str] {
+      let rejected = parse_complex128("1+-2i").is_err() &&
+        parse_complex128("1-+2i").is_err() &&
+        parse_complex128("1++2i").is_err() &&
+        parse_complex128("1--2i").is_err()
+      yield Ok(to_str(rejected))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: PRS-parse-bool-accepts-only-lowercase-true-and-false
+  category: parse
+  title: parse_bool accepts only lowercase true and false
+  code: |
+    import std::parse::{parse_bool, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_bool("true")?
+        _ = parse_bool("false")?
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: PRS-parse-bool-rejects-non-lowercase-text-in-value-channel
+  category: parse
+  title: parse_bool rejects non-lowercase text in value channel
+  code: |
+    import std::parse::{parse_bool, ParseError}
+
+    fn main!() -> Res[Str, ParseError] =
+      result {
+        _ = parse_bool("True")?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: ParseError

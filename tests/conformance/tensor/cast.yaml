@@ -1,0 +1,300 @@
+tests:
+- id: CST-tensorview-cast-input-materializes-owning-result
+  category: tensor_cast
+  title: TensorView cast input materializes an owning Tensor result
+  code: |
+    import std::tensor::{AxisError, CastError, ShapeError, Tensor, f64, ones}
+    import std::tensor::prim::{astype, permute}
+
+    fn is_tensor(_x: Tensor[f64]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, CastError, ShapeError]] =
+      result {
+        let view = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let out = astype(view, f64)?
+        let ok = (is_tensor(out)
+          && (to_str(out.shape()) == "[3,2]")
+          && (to_str(out.dtype()) == "f64"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: CST-forbidden-dtype-pair-fails-with-cast-invalid-dtype-pair-in-const-evaluable-context
+  category: tensor_cast
+  title: forbidden dtype pair fails with CAST_INVALID_DTYPE_PAIR in const-evaluable context
+  code: |
+    import std::tensor::{bool, ones}
+    import std::tensor::prim::astype
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](1)
+        _ = astype(x, bool)? // @primary forbidden-cast-dtype-pair
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: CAST_INVALID_DTYPE_PAIR
+      message_contains:
+      - cast
+      - dtype
+      - pair
+      data_keys:
+      - src_dtype
+      - dst_dtype
+      primary_span:
+        marker: forbidden-cast-dtype-pair
+
+- id: CST-const-evaluable-nan-to-int-cast-fails-with-cast-invalid-value
+  category: tensor_cast
+  title: const-evaluable NaN to int cast fails with CAST_INVALID_VALUE
+  code: |
+    import std::tensor::{i32, nan}
+    import std::tensor::prim::astype
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = nan[f32](1)
+        _ = astype(x, i32)? // @primary invalid-const-cast-value
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: CAST_INVALID_VALUE
+      message_contains:
+      - cast
+      - invalid
+      - value
+      data_keys:
+      - src_dtype
+      - dst_dtype
+      primary_span:
+        marker: invalid-const-cast-value
+
+- id: CST-non-const-evaluable-cast-value-failure-returns-err-channel
+  category: tensor_cast
+  title: non-const-evaluable cast value failure returns Err channel
+  code: |
+    import std::tensor::{bool, ones}
+    import std::tensor::prim::{add, astype}
+    import std::time::now!
+    import std::tensor::{CastError, DTypeError, NumericError, ShapeError, Tensor}
+
+    fn make_two!() -> Res[Tensor[i32], Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        _ = now!()
+        let o = ones[i32](1)
+        let two = add(o, o)?
+        yield Ok(two)
+      }
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError, CastError]] =
+      result {
+        let x = make_two!()?
+        _ = astype(x, bool)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: CastError
+    value_diagnostics:
+    - code: CAST_INVALID_VALUE
+      message_contains:
+      - cast
+      - invalid
+      - value
+      data_keys:
+      - src_dtype
+      - dst_dtype
+- id: CST-explicit-lossy-narrowing-succeeds-for-representable-values
+  category: tensor_cast
+  title: explicit lossy narrowing succeeds for representable values
+  code: |
+    import std::tensor::{CastError, IndexError, ShapeError, i8, ones}
+    import std::tensor::prim::astype
+    import std::tensor::index::{get_at, IndexItem}
+
+    fn main!() -> Res[Str, Union[CastError, IndexError, ShapeError]] =
+      result {
+        let x = ones[i16](1)
+        let y = astype(x, i8)?
+        let s = get_at(y, [IndexItem::At(0)].to_vec())?
+        let v = s.item()?
+        yield Ok(to_str(v))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+
+- id: CST-explicit-lossy-narrowing-fails-for-out-of-range-values-at-runtime
+  category: tensor_cast
+  title: explicit lossy narrowing fails for out-of-range values at runtime
+  code: |
+    import std::tensor::{i8, ones}
+    import std::tensor::prim::{add, astype}
+    import std::time::now!
+    import std::tensor::{CastError, DTypeError, NumericError, ShapeError, Tensor}
+
+    fn make_large!() -> Res[Tensor[i16], Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        _ = now!()
+        let mut x = ones[i16](1)
+        x = add(x, x)?
+        x = add(x, x)?
+        x = add(x, x)?
+        x = add(x, x)?
+        x = add(x, x)?
+        x = add(x, x)?
+        x = add(x, x)?
+        x = add(x, x)?      // 256
+        yield Ok(x)
+      }
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError, CastError]] =
+      result {
+        let x = make_large!()?
+        _ = astype(x, i8)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: CastError
+    value_diagnostics:
+    - code: CAST_INVALID_VALUE
+      message_contains:
+      - cast
+      - invalid
+      - value
+      data_keys:
+      - src_dtype
+      - dst_dtype
+- id: CST-wrapping-cast-illegal-pair-is-cast-invalid-dtype-pair-and-never-cast-invalid-value
+  category: tensor_cast
+  title: wrapping_cast illegal pair is CAST_INVALID_DTYPE_PAIR and never CAST_INVALID_VALUE
+  code: |
+    import std::tensor::{i32, ones}
+    import std::tensor::prim::wrapping_cast
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](1)
+        _ = wrapping_cast(x, i32)?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: CAST_INVALID_DTYPE_PAIR
+      message_contains:
+      - cast
+      - dtype
+      - pair
+      data_keys:
+      - src_dtype
+      - dst_dtype
+
+- id: CST-bitcast-unequal-widths-fail-with-cast-invalid-dtype-pair
+  category: tensor_cast
+  title: bitcast unequal widths fail with CAST_INVALID_DTYPE_PAIR
+  code: |
+    import std::tensor::{i64, ones}
+    import std::tensor::prim::bitcast
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](1)
+        _ = bitcast(x, i64)?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: CAST_INVALID_DTYPE_PAIR
+      message_contains:
+      - cast
+      - dtype
+      - pair
+      data_keys:
+      - src_dtype
+      - dst_dtype
+
+- id: CST-typed-dtype-witness-fixes-cast-result-type
+  category: tensor_cast
+  title: Typed dtype witness fixes the successful cast result type
+  code: |
+    import std::tensor::{CastError, Tensor, f32, ones}
+    import std::tensor::prim::astype
+
+    fn accepts_f32(_x: Tensor[f32]) -> Unit = ()
+
+    fn main!() -> Res[Str, CastError] =
+      result {
+        let x = ones[i32](1)
+        let y = astype(x, f32)?
+        accepts_f32(y)
+        yield Ok("ok")
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: CST-mixed-cast-result-branches-do-not-erase-dtype
+  category: tensor_cast
+  title: Mixed cast result branches do not erase dtype
+  code: |
+    import std::tensor::{CastError, Tensor, f32, i32}
+    import std::tensor::prim::astype
+
+    fn choose(x: Tensor[i32], condition: Bool) -> Res[Tensor[i32], CastError] =
+      result {
+        let y = if condition { yield astype(x, i32)? } else { yield astype(x, f32)? }
+        yield Ok(y)
+      }
+
+    fn main!() -> Unit = ()
+  expect:
+    compile_error:
+      code: IF_BRANCH_TYPE_MISMATCH
+      message_contains:
+      - if
+      - branch
+      - mismatch
+      data_keys:
+      - left_type
+      - right_type
+
+- id: CST-all-cast-families-read-tensorview-and-return-owning-tensor
+  category: tensor_cast
+  title: astype bitcast and wrapping_cast read TensorView and return owning Tensor
+  code: |
+    import std::tensor::{AxisError, CastError, ShapeError, Tensor, f64, i16, i32, ones}
+    import std::tensor::prim::{astype, bitcast, permute, wrapping_cast}
+
+    fn is_f64_tensor(_x: Tensor[f64]) -> Bool = true
+    fn is_i32_tensor(_x: Tensor[i32]) -> Bool = true
+    fn is_i16_tensor(_x: Tensor[i16]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, CastError, ShapeError]] =
+      result {
+        let float_view = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let converted = astype(float_view, f64)?
+        let reinterpreted = bitcast(float_view, i32)?
+        let integer_view = permute(ones[i32](2,3), [#1, #0].to_vec())?
+        let wrapped = wrapping_cast(integer_view, i16)?
+        let ok = (is_f64_tensor(converted)
+          && is_i32_tensor(reinterpreted)
+          && is_i16_tensor(wrapped)
+          && (to_str(converted.shape()) == "[3,2]")
+          && (to_str(reinterpreted.shape()) == "[3,2]")
+          && (to_str(wrapped.shape()) == "[3,2]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

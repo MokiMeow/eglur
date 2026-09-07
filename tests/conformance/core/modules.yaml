@@ -1,0 +1,7747 @@
+tests:
+- id: MOD-module-declaration-and-bang-alias-import-parse-and-execute
+  category: modules
+  title: module declaration and bang alias import parse and execute
+  code: |
+    module app::demo
+    import std::io::print! as log!
+
+    fn main!() -> Res[Str, Str] {
+      log!("hi")
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: MOD-pub-import-is-valid-top-level-item
+  category: modules
+  title: pub import is valid top-level item
+  code: |
+    module app::demo
+    pub import std::parse::parse_int as parse_int
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: MOD-bang-import-alias-must-remain-bang
+  category: modules
+  title: bang import alias must remain bang
+  code: |
+    import std::io::print! as print
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: IMPORT_BANG_ALIAS_MUST_BANG
+      message_contains:
+      - bang
+      - alias
+      - '!'
+      data_keys: []
+- id: MOD-super-import-at-root-module-is-invalid
+  category: modules
+  title: super import at root module is invalid
+  code: |
+    module app
+    import super::peer::x
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: IMPORT_SUPER_AT_ROOT
+      message_contains:
+      - super
+      - root
+      - import
+      data_keys: []
+- id: MOD-unresolved-import-symbol-reports-import-not-found
+  category: modules
+  title: unresolved import symbol reports import not found
+  code: |
+    import std::parse::parse_not_real
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: IMPORT_NOT_FOUND
+      message_contains:
+      - import
+      - not found
+      data_keys: []
+- id: MOD-local-declaration-shadows-imported-name
+  category: modules
+  title: local declaration shadows imported name
+  code: |
+    import std::parse::parse_int
+
+    fn parse_int(_s: Str) -> Res[i64, Str] = Ok(9)
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = parse_int("1")?
+        yield Ok(to_str(x))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"9"'
+- id: MOD-duplicate-imported-binding-name-is-ambiguous
+  category: modules
+  title: duplicate imported binding name is ambiguous
+  code: |
+    import std::parse::parse_int as parse
+    import std::parse::parse_f64 as parse
+
+    fn main!() -> Res[Str, Str] {
+      _ = parse("1")
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: NAME_AMBIGUOUS
+      message_contains:
+      - ambiguous
+      - name
+      data_keys: []
+- id: MOD-cyclic-type-aliases-are-rejected
+  category: modules
+  title: cyclic type aliases are rejected
+  code: |
+    type A = B
+    type B = A
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TYPE_ALIAS_CYCLE
+      message_contains:
+      - type
+      - alias
+      - cycle
+      data_keys: []
+- id: MOD-module-declaration-path-must-match-canonical-file-path
+  category: modules
+  title: module declaration path must match canonical file path
+  files:
+    app/net/http.eglur: |
+      module app::net::ftp
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/net/http.eglur
+  expect:
+    compile_error:
+      code: MODULE_PATH_MISMATCH
+      message_contains:
+      - module
+      - path
+      - mismatch
+      data_keys: []
+- id: MOD-file-set-unicode-module-path-component-is-invalid
+  category: modules
+  title: file-set Unicode module path component is invalid
+  mode: file-set
+  file_set_root: .
+  files:
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    δ/item.eglur: |
+      module wrong
+
+      pub const VALUE: i64 = 7
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: MODULE_PATH_COMPONENT_INVALID
+      message_contains:
+      - module
+      - path
+      - component
+      - invalid
+      data_keys:
+      - name
+      - index
+      data_equals:
+        name: δ
+        index: 0
+      primary_span:
+        source: δ/item.eglur
+        bytes: {start: 0, end: 0}
+- id: MOD-file-set-lone-underscore-module-path-component-is-invalid
+  category: modules
+  title: file-set lone underscore module path component is invalid
+  mode: file-set
+  file_set_root: .
+  files:
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    _/item.eglur: |
+      module wrong
+
+      pub const VALUE: i64 = 7
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: MODULE_PATH_COMPONENT_INVALID
+      message_contains:
+      - module
+      - path
+      - component
+      - invalid
+      data_keys:
+      - name
+      - index
+      data_equals:
+        name: _
+        index: 0
+      primary_span:
+        source: _/item.eglur
+        bytes: {start: 0, end: 0}
+- id: MOD-file-set-keyword-module-path-component-is-invalid
+  category: modules
+  title: file-set reserved keyword module path component is invalid
+  mode: file-set
+  file_set_root: .
+  files:
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    match/item.eglur: |
+      module wrong
+
+      pub const VALUE: i64 = 7
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: MODULE_PATH_COMPONENT_INVALID
+      message_contains:
+      - module
+      - path
+      - component
+      - invalid
+      data_keys:
+      - name
+      - index
+      data_equals:
+        name: match
+        index: 0
+      primary_span:
+        source: match/item.eglur
+        bytes: {start: 0, end: 0}
+- id: MOD-file-set-relative-root-module-path-component-is-invalid
+  category: modules
+  title: file-set relative import root as first module path component is invalid
+  mode: file-set
+  file_set_root: .
+  files:
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    self/item.eglur: |
+      module wrong
+
+      pub const VALUE: i64 = 7
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: MODULE_PATH_COMPONENT_INVALID
+      message_contains:
+      - module
+      - path
+      - component
+      - invalid
+      data_keys:
+      - name
+      - index
+      data_equals:
+        name: self
+        index: 0
+      primary_span:
+        source: self/item.eglur
+        bytes: {start: 0, end: 0}
+- id: MOD-file-set-contextual-module-path-components-are-addressable
+  category: modules
+  title: file-set contextual module path components remain addressable
+  mode: file-set
+  file_set_root: .
+  files:
+    app/main.eglur: |
+      module app::main
+      import closed::self::VALUE
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(VALUE))
+      }
+    closed/self.eglur: |
+      module closed::self
+
+      pub const VALUE: i64 = 7
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: MOD-file-set-local-standard-library-root-is-reserved
+  category: modules
+  title: file-set local standard-library root is reserved
+  mode: file-set
+  file_set_root: .
+  files:
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    std/tools.eglur: |
+      module std::tools
+
+      pub fn value() -> i64 = 7
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: MODULE_ROOT_RESERVED
+      message_contains:
+      - module
+      - root
+      - std
+      - reserved
+      data_keys:
+      - name
+      data_equals:
+        name: std
+      primary_span:
+        source: std/tools.eglur
+        bytes: {start: 0, end: 0}
+- id: MOD-private-symbol-access-across-modules-is-rejected
+  category: modules
+  title: private symbol access across modules is rejected
+  file_set_root: .
+  files:
+    app/internal.eglur: |
+      module app::internal
+
+      fn secret() -> i64 = 7
+    app/main.eglur: |
+      module app::main
+      import app::internal::secret
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(secret()))
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: MOD-cross-module-const-dependency-cycle-is-rejected
+  category: modules
+  title: cross-module const dependency cycle is rejected
+  file_set_root: .
+  files:
+    app/a.eglur: |
+      module app::a
+      import app::b::B
+
+      pub const A: i64 = B + 1
+    app/b.eglur: |
+      module app::b
+      import app::a::A
+
+      pub const B: i64 = A + 1
+    app/main.eglur: |
+      module app::main
+      import app::a::A
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(A))
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: CONST_CYCLE
+      message_contains:
+      - const
+      - cycle
+      - dependency
+      data_keys: []
+- id: MOD-pub-const-may-be-re-exported-and-imported-through-module-chain
+  category: modules
+  title: pub const may be re-exported and imported through module chain
+  file_set_root: .
+  files:
+    app/core.eglur: |
+      module app::core
+
+      pub const PORT: i64 = 8080
+    app/prelude.eglur: |
+      module app::prelude
+      pub import app::core::PORT
+    app/main.eglur: |
+      module app::main
+      import app::prelude::PORT
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(PORT))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"8080"'
+- id: MOD-private-enum-type-cannot-be-imported-from-another-module
+  category: modules
+  title: private enum type cannot be imported from another module
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      enum Flag {
+        On
+        Off
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Flag
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: MOD-pub-enum-exports-constructors-through-enum-qualified-visibility
+  category: modules
+  title: pub enum exports constructors through enum-qualified visibility
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub enum Flag {
+        On
+        Off
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Flag
+
+      fn main!() -> Res[Str, Str] {
+        let f: Flag = Flag::On
+        let value = match f {
+          Flag::On => 1,
+          Flag::Off => 0,
+        }
+        yield Ok(to_str(value))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+- id: MOD-qualified-braced-expression-classifies-public-struct
+  category: modules
+  title: qualified braced expression classifies a public struct path
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Point {
+        pub field x: i64
+        pub field y: i64
+      }
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        _ = app::model::Point { x: 3, y: 4 }
+        yield Ok("ok")
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: MOD-direct-import-of-user-enum-variant-constructor-is-invalid
+  category: modules
+  title: direct import of user enum variant constructor is invalid
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub enum Flag {
+        On
+        Off
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::On
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: IMPORT_NOT_FOUND
+      message_contains:
+      - import
+      - not found
+      data_keys: []
+- id: MOD-direct-import-of-catalog-sum-variant-is-invalid
+  category: modules
+  title: direct import of catalog sum variant is invalid
+  code: |
+    import std::tensor::index::At
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: IMPORT_NOT_FOUND
+      message_contains:
+      - import
+      - not found
+      data_keys: []
+- id: MOD-explicit-file-set-root-defines-multi-root-module-paths
+  category: modules
+  title: explicit file-set root defines manifest-less multi-root module paths
+  file_set_root: .
+  files:
+    workspace/app/main.eglur: |
+      module workspace::app::main
+      import workspace::lib::value::VALUE
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(VALUE))
+      }
+    workspace/lib/value.eglur: |
+      module workspace::lib::value
+
+      pub const VALUE: i64 = 7
+  entry: workspace/app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: MOD-package-mode-allows-importing-modules-from-direct-path-dependency
+  category: modules
+  title: package mode allows importing modules from direct path dependency
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { path = "deps/dep_math" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_math = { target = "$root/dep_math", path = "deps/dep_math" }
+
+      [[packages]]
+      node = "$root/dep_math"
+      name = "dep_math"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_math::api::double
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(double(3)))
+      }
+    deps/dep_math/Eglur.toml: |
+      [package]
+      name = "dep_math"
+      version = "1.0.0"
+    deps/dep_math/src/api.eglur: |
+      module api
+
+      pub fn double(x: i64) -> i64 = x * 2
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"6"'
+- id: MOD-quoted-manifest-dependency-key-matches-bare-lock-key-and-source-import-root
+  category: modules
+  title: quoted manifest dependency key matches bare lock key and source import root
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      "dep_math" = { path = "deps/dep_math" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_math = { target = "$root/dep_math", path = "deps/dep_math" }
+
+      [[packages]]
+      node = "$root/dep_math"
+      name = "dep_math"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_math::api::double
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(double(3)))
+      }
+    deps/dep_math/Eglur.toml: |
+      [package]
+      name = "dep_math"
+      version = "1.0.0"
+    deps/dep_math/src/api.eglur: |
+      module api
+
+      pub fn double(x: i64) -> i64 = x * 2
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"6"'
+- id: MOD-package-mode-forbids-importing-transitive-only-dependency-modules
+  category: modules
+  title: package mode forbids importing transitive-only dependency modules
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_a = { path = "deps/dep_a" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_a = { target = "$root/dep_a", path = "deps/dep_a" }
+
+      [[packages]]
+      node = "$root/dep_a"
+      name = "dep_a"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      dep_b = { target = "$root/dep_a/dep_b", path = "../dep_b" }
+
+      [[packages]]
+      node = "$root/dep_a/dep_b"
+      name = "dep_b"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_b::util::k
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(k()))
+      }
+    deps/dep_a/Eglur.toml: |
+      [package]
+      name = "dep_a"
+      version = "1.0.0"
+
+      [dependencies]
+      dep_b = { path = "../dep_b" }
+    deps/dep_a/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+    deps/dep_b/Eglur.toml: |
+      [package]
+      name = "dep_b"
+      version = "1.0.0"
+    deps/dep_b/src/util.eglur: |
+      module util
+
+      pub fn k() -> i64 = 7
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: IMPORT_NOT_FOUND
+      message_contains:
+      - import
+      - not found
+      data_keys: []
+- id: MOD-package-mode-import-root-conflict-between-dependency-key-and-local-module-path-is-rejected
+  category: modules
+  title: package mode import root conflict between dependency key and local module path is rejected
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { path = "deps/dep_math" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_math = { target = "$root/dep_math", path = "deps/dep_math" }
+
+      [[packages]]
+      node = "$root/dep_math"
+      name = "dep_math"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_math::api::double
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(double(3)))
+      }
+    src/dep_math/api.eglur: |
+      module dep_math::api
+
+      pub fn double(x: i64) -> i64 = x + 1000
+    deps/dep_math/Eglur.toml: |
+      [package]
+      name = "dep_math"
+      version = "1.0.0"
+    deps/dep_math/src/api.eglur: |
+      module api
+
+      pub fn double(x: i64) -> i64 = x * 2
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: IMPORT_ROOT_CONFLICT
+      message_contains:
+      - import
+      - root
+      - conflict
+      data_keys: []
+- id: MOD-package-local-standard-library-root-precedes-header-mismatch-and-uses-lexical-path-order
+  category: modules
+  title: package local standard-library root precedes header mismatch and uses lexical path order
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    src/std/z.eglur: |
+      module std::z
+
+      pub fn z() -> i64 = 26
+    src/std/a-bad.eglur: |
+      module wrong
+
+      pub fn a() -> i64 = 1
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: MODULE_ROOT_RESERVED
+      message_contains:
+      - module
+      - root
+      - std
+      - reserved
+      data_keys:
+      - name
+      data_equals:
+        name: std
+      primary_span:
+        source: src/std/a-bad.eglur
+        bytes: {start: 0, end: 0}
+- id: MOD-package-invalid-module-path-selection-is-deterministic
+  category: modules
+  title: package invalid module path selection and component blame are deterministic
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    src/z-bad/item.eglur: |
+      module also_wrong
+
+      pub const VALUE: i64 = 26
+    src/a_bad/bad-name/later-bad.eglur: |
+      module wrong
+
+      pub const VALUE: i64 = 1
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: MODULE_PATH_COMPONENT_INVALID
+      message_contains:
+      - module
+      - path
+      - component
+      - invalid
+      data_keys:
+      - name
+      - index
+      data_equals:
+        name: bad-name
+        index: 1
+      primary_span:
+        source: src/a_bad/bad-name/later-bad.eglur
+        bytes: {start: 0, end: 0}
+- id: MOD-forced-package-mode-without-manifest-fails-with-package-manifest-missing
+  category: modules
+  title: forced package mode without manifest fails with package manifest missing
+  mode: package
+  files:
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_MISSING
+      message_contains:
+      - package
+      - manifest
+      - missing
+      - Eglur.toml
+      data_keys:
+      - package_role
+      data_equals:
+        package_role: root
+- id: MOD-package-mode-without-src-root-fails-with-package-src-root-missing
+  category: modules
+  title: package mode without src root fails with package src root missing
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_SRC_ROOT_MISSING
+      message_contains:
+      - package
+      - src
+      - missing
+      data_keys:
+      - package_role
+      data_equals:
+        package_role: root
+- id: MOD-package-manifest-missing-package-table-is-rejected
+  category: modules
+  title: package manifest missing package table is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [dependencies]
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_PACKAGE_TABLE_MISSING
+      message_contains:
+      - package
+      - manifest
+      - missing
+      data_keys: []
+- id: MOD-package-manifest-missing-package-name-is-rejected
+  category: modules
+  title: package manifest missing package name is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      version = "0.1.0"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_NAME_MISSING
+      message_contains:
+      - package
+      - manifest
+      - name
+      - missing
+      data_keys: []
+- id: MOD-package-manifest-missing-package-version-is-rejected
+  category: modules
+  title: package manifest missing package version is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_VERSION_MISSING
+      message_contains:
+      - package
+      - manifest
+      - version
+      - missing
+      data_keys: []
+- id: MOD-package-manifest-invalid-package-version-is-rejected
+  category: modules
+  title: package manifest invalid package version is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_VERSION_INVALID
+      message_contains:
+      - package
+      - manifest
+      - version
+      - invalid
+      data_keys: []
+- id: MOD-package-manifest-leading-zero-version-is-rejected
+  category: modules
+  title: package manifest leading-zero version is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "00.1.0"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_VERSION_INVALID
+      message_contains:
+      - package
+      - manifest
+      - version
+      - invalid
+      data_keys: []
+- id: MOD-punctuation-bearing-manifest-dependency-key-precedes-selector-and-missing-lock-errors
+  category: modules
+  title: punctuation-bearing manifest dependency key precedes selector and missing lock errors
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep-math = { version = "1.0.0", path = "deps/dep_math" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_KEY_INVALID
+      message_contains:
+      - package
+      - dependency
+      - key
+      - invalid
+      data_keys:
+      - dependency
+      data_equals:
+        dependency: dep-math
+- id: MOD-quoted-unicode-manifest-dependency-key-is-rejected
+  category: modules
+  title: quoted Unicode manifest dependency key is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      "δ" = { version = "1.0.0" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_KEY_INVALID
+      message_contains:
+      - package
+      - dependency
+      - key
+      - invalid
+      data_keys:
+      - dependency
+      data_equals:
+        dependency: δ
+- id: MOD-source-keyword-manifest-dependency-key-is-rejected
+  category: modules
+  title: source keyword manifest dependency key is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      "fn" = { version = "1.0.0" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_KEY_INVALID
+      message_contains:
+      - package
+      - dependency
+      - key
+      - invalid
+      data_keys:
+      - dependency
+      data_equals:
+        dependency: fn
+- id: MOD-relative-import-root-manifest-dependency-key-is-rejected
+  category: modules
+  title: relative import root manifest dependency key is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      "self" = { version = "1.0.0" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_KEY_INVALID
+      message_contains:
+      - package
+      - dependency
+      - key
+      - invalid
+      data_keys:
+      - dependency
+      data_equals:
+        dependency: self
+- id: MOD-standard-library-root-manifest-dependency-key-is-rejected
+  category: modules
+  title: standard-library root manifest dependency key is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      "std" = { version = "1.0.0" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_KEY_INVALID
+      message_contains:
+      - package
+      - dependency
+      - key
+      - invalid
+      data_keys:
+      - dependency
+      data_equals:
+        dependency: std
+- id: MOD-invalid-manifest-dependency-key-tie-break-uses-canonical-lexical-decoded-order
+  category: modules
+  title: invalid manifest dependency key tie-break uses canonical lexical decoded order
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      z-bad = { version = "1.0.0" }
+      a-bad = { version = "1.0.0" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_KEY_INVALID
+      message_contains:
+      - package
+      - dependency
+      - key
+      - invalid
+      data_keys:
+      - dependency
+      data_equals:
+        dependency: a-bad
+- id: MOD-package-dependency-cycle-fails-with-package-dep-cycle
+  category: modules
+  title: package dependency cycle fails with package dep cycle
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_a = { path = "deps/dep_a" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_a = { target = "$root/dep_a", path = "deps/dep_a" }
+
+      [[packages]]
+      node = "$root/dep_a"
+      name = "dep_a"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      dep_b = { target = "$root/dep_a/dep_b", path = "../dep_b_alias" }
+
+      [[packages]]
+      node = "$root/dep_a/dep_b"
+      name = "dep_b"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      dep_a = { target = "$root/dep_a", path = "../dep_a_alias" }
+    src/main.eglur: |
+      module main
+      import dep_a::lib::id
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(id(1)))
+      }
+    deps/dep_a/Eglur.toml: |
+      [package]
+      name = "dep_a"
+      version = "1.0.0"
+
+      [dependencies]
+      dep_b = { path = "../dep_b_alias" }
+    deps/dep_a/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+    deps/dep_b/Eglur.toml: |
+      [package]
+      name = "dep_b"
+      version = "1.0.0"
+
+      [dependencies]
+      dep_a = { path = "../dep_a_alias" }
+    deps/dep_b/src/util.eglur: |
+      module util
+
+      pub fn k() -> i64 = 7
+  symlinks:
+    deps/dep_a_alias: dep_a
+    deps/dep_b_alias: dep_b
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_CYCLE
+      message_contains:
+      - package
+      - dependency
+      - cycle
+      data_keys: []
+- id: MOD-package-dependency-version-range-syntax-is-rejected-in-v0-1
+  category: modules
+  title: package dependency version range syntax is rejected in v0.1
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { package = "packages.example.com/acme/dep-math", version = "^1.2.3" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_VERSION_RANGE_UNSUPPORTED
+      message_contains:
+      - version
+      - range
+      - unsupported
+      data_keys:
+      - dependency
+      - version_spec
+      data_equals:
+        dependency: dep_math
+        version_spec: ^1.2.3
+
+- id: MOD-package-dependency-entry-with-both-version-and-path-is-rejected
+  category: modules
+  title: package dependency entry with both version and path is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { version = "1.2.3", path = "deps/dep_math" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_SOURCE_CONFLICT
+      message_contains:
+      - package
+      - dependency
+      - source
+      - conflict
+      data_keys:
+      - dependency
+      - reason
+      data_equals:
+        dependency: dep_math
+        reason: mixed_source
+
+- id: MOD-package-dependency-entry-with-neither-version-nor-path-is-rejected
+  category: modules
+  title: package dependency entry with neither version nor path is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = {}
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_SOURCE_CONFLICT
+      message_contains:
+      - package
+      - dependency
+      - source
+      - conflict
+      data_keys:
+      - dependency
+      - reason
+      data_equals:
+        dependency: dep_math
+        reason: missing_source
+
+- id: MOD-distinct-package-instances-with-same-name-and-different-versions-are-rejected
+  category: modules
+  title: distinct package instances with same name and different versions are rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_a = { path = "deps/dep_a" }
+      dep_b = { path = "deps/dep_b" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_a = { target = "$root/dep_a", path = "deps/dep_a" }
+      dep_b = { target = "$root/dep_b", path = "deps/dep_b" }
+
+      [[packages]]
+      node = "$root/dep_a"
+      name = "dep_a"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      util_v1 = { target = "$root/dep_a/util_v1", path = "../util_v1" }
+
+      [[packages]]
+      node = "$root/dep_a/util_v1"
+      name = "util"
+      version = "1.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/dep_b"
+      name = "dep_b"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      util_v2 = { target = "$root/dep_b/util_v2", path = "../util_v2" }
+
+      [[packages]]
+      node = "$root/dep_b/util_v2"
+      name = "util"
+      version = "2.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_a::lib::id
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(id(1)))
+      }
+    deps/dep_a/Eglur.toml: |
+      [package]
+      name = "dep_a"
+      version = "1.0.0"
+
+      [dependencies]
+      util_v1 = { path = "../util_v1" }
+    deps/dep_a/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+    deps/dep_b/Eglur.toml: |
+      [package]
+      name = "dep_b"
+      version = "1.0.0"
+
+      [dependencies]
+      util_v2 = { path = "../util_v2" }
+    deps/dep_b/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+    deps/util_v1/Eglur.toml: |
+      [package]
+      name = "util"
+      version = "1.0.0"
+    deps/util_v1/src/core.eglur: |
+      module core
+
+      pub fn v() -> i64 = 1
+    deps/util_v2/Eglur.toml: |
+      [package]
+      name = "util"
+      version = "2.0.0"
+    deps/util_v2/src/core.eglur: |
+      module core
+
+      pub fn v() -> i64 = 2
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_NAME_CONFLICT
+      message_contains:
+      - package
+      - name
+      - conflict
+      data_keys:
+      - package
+      - existing_dependency
+      - dependency
+      - existing_version
+      - version
+      - existing_source_kind
+      - source_kind
+      - reason
+      data_equals:
+        package: util
+        existing_dependency: util_v1
+        dependency: util_v2
+        existing_version: 1.0.0
+        version: 2.0.0
+        existing_source_kind: path
+        source_kind: path
+        reason: version_and_source
+
+- id: MOD-package-mode-requires-lockfile-in-v0-1-baseline
+  category: modules
+  title: package mode requires lockfile in v0.1 baseline
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_MISSING
+      message_contains:
+      - package
+      - lock
+      - missing
+      - Eglur.lock
+      data_keys: []
+
+- id: MOD-invalid-lockfile-dependency-key-precedes-lockfile-key-set-mismatch
+  category: modules
+  title: invalid lockfile dependency key precedes lockfile key-set mismatch
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { path = "deps/dep_math" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      "dep-math" = { target = "$root/dep_math", path = "deps/dep_math" }
+
+      [[packages]]
+      node = "$root/dep_math"
+      name = "dep_math"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/dep_math/Eglur.toml: |
+      [package]
+      name = "dep_math"
+      version = "1.0.0"
+    deps/dep_math/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_KEY_INVALID
+      message_contains:
+      - package
+      - dependency
+      - key
+      - invalid
+      data_keys:
+      - dependency
+      data_equals:
+        dependency: dep-math
+
+- id: MOD-lockfile-manifest-metadata-mismatch-is-rejected-as-out-of-sync
+  category: modules
+  title: lockfile manifest metadata mismatch is rejected as out of sync
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "9.9.9"
+      source = "root"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_OUT_OF_SYNC
+      message_contains:
+      - package
+      - lock
+      - out of sync
+      data_keys:
+      - reason
+      - node
+      data_equals:
+        reason: package_metadata
+        node: $root
+
+- id: MOD-manifest-dependency-shape-failure-takes-precedence-over-missing-lockfile
+  category: modules
+  title: manifest dependency-shape failure takes precedence over missing lockfile
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { package = "packages.example.com/acme/dep-math", version = "^1.2.3" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_VERSION_RANGE_UNSUPPORTED
+      message_contains:
+      - version
+      - range
+      - unsupported
+      data_keys:
+      - dependency
+      - version_spec
+      data_equals:
+        dependency: dep_math
+        version_spec: ^1.2.3
+
+- id: MOD-graph-failure-tie-break-follows-lexicographic-dependency-key-dfs-not-manifest-order
+  category: modules
+  title: graph failure tie-break follows lexicographic dependency-key DFS, not manifest order
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      z_dep = { path = "deps/z_dep" }
+      a_dep = { path = "deps/a_dep" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a_dep = { target = "$root/a_dep", path = "deps/a_dep" }
+      z_dep = { target = "$root/z_dep", path = "deps/z_dep" }
+
+      [[packages]]
+      node = "$root/a_dep"
+      name = "a_dep"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      util_left = { target = "$root/a_dep/util_left", path = "../util_v1" }
+      util_right = { target = "$root/a_dep/util_right", path = "../util_v2" }
+
+      [[packages]]
+      node = "$root/a_dep/util_left"
+      name = "util"
+      version = "1.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/a_dep/util_right"
+      name = "util"
+      version = "2.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/z_dep"
+      name = "z_dep"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      z_mid = { target = "$root/z_dep/z_mid", path = "../z_mid" }
+
+      [[packages]]
+      node = "$root/z_dep/z_mid"
+      name = "z_mid"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      z_dep = { target = "$root/z_dep", path = "../z_dep" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/a_dep/Eglur.toml: |
+      [package]
+      name = "a_dep"
+      version = "1.0.0"
+
+      [dependencies]
+      util_left = { path = "../util_v1" }
+      util_right = { path = "../util_v2" }
+    deps/a_dep/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+    deps/util_v1/Eglur.toml: |
+      [package]
+      name = "util"
+      version = "1.0.0"
+    deps/util_v1/src/lib.eglur: |
+      module lib
+
+      pub fn v() -> i64 = 1
+    deps/util_v2/Eglur.toml: |
+      [package]
+      name = "util"
+      version = "2.0.0"
+    deps/util_v2/src/lib.eglur: |
+      module lib
+
+      pub fn v() -> i64 = 2
+    deps/z_dep/Eglur.toml: |
+      [package]
+      name = "z_dep"
+      version = "1.0.0"
+
+      [dependencies]
+      z_mid = { path = "../z_mid" }
+    deps/z_dep/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+    deps/z_mid/Eglur.toml: |
+      [package]
+      name = "z_mid"
+      version = "1.0.0"
+
+      [dependencies]
+      z_dep = { path = "../z_dep" }
+    deps/z_mid/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_NAME_CONFLICT
+      message_contains:
+      - package
+      - name
+      - conflict
+      data_keys:
+      - package
+      - existing_dependency
+      - dependency
+      - existing_version
+      - version
+      - existing_source_kind
+      - source_kind
+      - reason
+      data_equals:
+        package: util
+        existing_dependency: util_left
+        dependency: util_right
+        existing_version: 1.0.0
+        version: 2.0.0
+        existing_source_kind: path
+        source_kind: path
+        reason: version_and_source
+
+- id: MOD-lockfile-package-metadata-mismatch-takes-precedence-over-dependency-key-set-mismatch
+  category: modules
+  title: lockfile package metadata mismatch takes precedence over dependency key-set mismatch
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { path = "deps/dep_math" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "9.9.9"
+      source = "root"
+
+      [packages.dependencies]
+      wrong_dep = { target = "$root/wrong_dep", path = "deps/dep_math" }
+
+      [[packages]]
+      node = "$root/wrong_dep"
+      name = "dep_math"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/dep_math/Eglur.toml: |
+      [package]
+      name = "dep_math"
+      version = "1.0.0"
+    deps/dep_math/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_OUT_OF_SYNC
+      message_contains:
+      - package
+      - lock
+      - out of sync
+      data_keys:
+      - reason
+      - node
+      data_equals:
+        reason: package_metadata
+        node: $root
+
+- id: MOD-lockfile-dependency-key-set-mismatch-takes-precedence-over-dependency-selector-mismatch
+  category: modules
+  title: lockfile dependency key-set mismatch takes precedence over dependency selector mismatch
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { path = "deps/dep_math" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_math = { target = "$root/dep_math", path = "deps/wrong" }
+      extra_dep = { target = "$root/extra_dep", path = "deps/dep_math" }
+
+      [[packages]]
+      node = "$root/dep_math"
+      name = "dep_math"
+      version = "1.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/extra_dep"
+      name = "dep_math"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/dep_math/Eglur.toml: |
+      [package]
+      name = "dep_math"
+      version = "1.0.0"
+    deps/dep_math/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_OUT_OF_SYNC
+      message_contains:
+      - package
+      - lock
+      - out of sync
+      data_keys:
+      - reason
+      - node
+      data_equals:
+        reason: dependency_key_set
+        node: $root
+
+- id: MOD-lockfile-dependency-selector-mismatch-tie-break-follows-lexicographic-dependency-key-order
+  category: modules
+  title: lockfile dependency selector mismatch tie-break follows lexicographic dependency key order
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      z_dep = { path = "deps/z_dep" }
+      a_dep = { path = "deps/a_dep" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a_dep = { target = "$root/a_dep", path = "deps/wrong_a" }
+      z_dep = { target = "$root/z_dep", path = "deps/wrong_z" }
+
+      [[packages]]
+      node = "$root/a_dep"
+      name = "a_dep"
+      version = "1.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/z_dep"
+      name = "z_dep"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/a_dep/Eglur.toml: |
+      [package]
+      name = "a_dep"
+      version = "1.0.0"
+    deps/a_dep/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+    deps/z_dep/Eglur.toml: |
+      [package]
+      name = "z_dep"
+      version = "1.0.0"
+    deps/z_dep/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_OUT_OF_SYNC
+      message_contains:
+      - package
+      - lock
+      - out of sync
+      data_keys:
+      - reason
+      - node
+      - dependency
+      data_equals:
+        reason: dependency_selector
+        node: $root
+        dependency: a_dep
+
+- id: MOD-nested-lockfile-dependency-selector-mismatch-is-out-of-sync
+  category: modules
+  title: nested package dependency selector mismatch is rejected as out of sync
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_a = { path = "deps/dep_a" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_a = { target = "$root/dep_a", path = "deps/dep_a" }
+
+      [[packages]]
+      node = "$root/dep_a"
+      name = "dep_a"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      dep_b = { target = "$root/dep_a/dep_b", path = "../wrong" }
+
+      [[packages]]
+      node = "$root/dep_a/dep_b"
+      name = "dep_b"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/dep_a/Eglur.toml: |
+      [package]
+      name = "dep_a"
+      version = "1.0.0"
+
+      [dependencies]
+      dep_b = { path = "../dep_b" }
+    deps/dep_a/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+    deps/dep_b/Eglur.toml: |
+      [package]
+      name = "dep_b"
+      version = "1.0.0"
+    deps/dep_b/src/lib.eglur: |
+      module lib
+
+      pub fn value() -> i64 = 7
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_OUT_OF_SYNC
+      message_contains:
+      - package
+      - lock
+      - out of sync
+      data_keys:
+      - reason
+      - node
+      - dependency
+      data_equals:
+        reason: dependency_selector
+        node: $root/dep_a
+        dependency: dep_b
+
+- id: MOD-empty-package-name-is-rejected-before-missing-version
+  category: modules
+  title: empty package name is rejected before missing version
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = ""
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_NAME_INVALID
+      message_contains:
+      - package
+      - manifest
+      - name
+      - invalid
+      data_keys:
+      - reason
+      - name
+      data_equals:
+        reason: empty
+        name: ''
+
+- id: MOD-non-string-package-name-is-rejected
+  category: modules
+  title: non-string package name is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = 7
+      version = "0.1.0"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_NAME_INVALID
+      message_contains:
+      - package
+      - manifest
+      - name
+      - invalid
+      data_keys:
+      - reason
+      data_equals:
+        reason: non_string
+
+- id: MOD-package-name-outside-portable-token-domain-is-rejected
+  category: modules
+  title: package name outside portable token domain is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "bad.name"
+      version = "0.1.0"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_NAME_INVALID
+      message_contains:
+      - package
+      - manifest
+      - name
+      - invalid
+      data_keys:
+      - reason
+      - name
+      data_equals:
+        reason: invalid_character
+        name: bad.name
+
+- id: MOD-empty-manifest-dependency-path-is-invalid
+  category: modules
+  title: empty manifest dependency path is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_PATH_INVALID
+      message_contains:
+      - package
+      - dependency
+      - path
+      - invalid
+      data_keys:
+      - dependency
+      - path
+      - reason
+      data_equals:
+        dependency: dep
+        path: ''
+        reason: empty
+
+- id: MOD-absolute-posix-manifest-dependency-path-is-invalid
+  category: modules
+  title: absolute POSIX manifest dependency path is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "/tmp/dep" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_PATH_INVALID
+      message_contains:
+      - package
+      - dependency
+      - path
+      - invalid
+      data_keys:
+      - dependency
+      - path
+      - reason
+      data_equals:
+        dependency: dep
+        path: /tmp/dep
+        reason: absolute
+
+- id: MOD-drive-qualified-manifest-dependency-path-is-invalid
+  category: modules
+  title: drive-qualified manifest dependency path is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "C:/dep" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_PATH_INVALID
+      message_contains:
+      - package
+      - dependency
+      - path
+      - invalid
+      data_keys:
+      - dependency
+      - path
+      - reason
+      data_equals:
+        dependency: dep
+        path: 'C:/dep'
+        reason: absolute
+
+- id: MOD-unc-manifest-dependency-path-is-invalid
+  category: modules
+  title: UNC manifest dependency path is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = '\\server\share' }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_PATH_INVALID
+      message_contains:
+      - package
+      - dependency
+      - path
+      - invalid
+      data_keys:
+      - dependency
+      - path
+      - reason
+      data_equals:
+        dependency: dep
+        path: '\\server\share'
+        reason: absolute
+
+- id: MOD-backslash-manifest-dependency-path-is-invalid
+  category: modules
+  title: backslash manifest dependency path is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = 'deps\dep' }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_PATH_INVALID
+      message_contains:
+      - package
+      - dependency
+      - path
+      - invalid
+      data_keys:
+      - dependency
+      - path
+      - reason
+      data_equals:
+        dependency: dep
+        path: 'deps\dep'
+        reason: backslash
+
+- id: MOD-missing-manifest-dependency-path-is-unresolved
+  category: modules
+  title: missing manifest dependency path is unresolved
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "deps/missing" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep = { target = "$root/dep", path = "deps/missing" }
+
+      [[packages]]
+      node = "$root/dep"
+      name = "dep"
+      version = "0.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_PATH_UNRESOLVED
+      message_contains:
+      - package
+      - dependency
+      - path
+      - unresolved
+      data_keys:
+      - dependency
+      - path
+      - reason
+      data_equals:
+        dependency: dep
+        path: deps/missing
+        reason: not_found
+
+- id: MOD-regular-file-manifest-dependency-target-is-not-a-directory
+  category: modules
+  title: regular file manifest dependency target is not a directory
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "deps/not_dir" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep = { target = "$root/dep", path = "deps/not_dir" }
+
+      [[packages]]
+      node = "$root/dep"
+      name = "dep"
+      version = "0.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/not_dir: |
+      not a directory
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_PATH_UNRESOLVED
+      message_contains:
+      - package
+      - dependency
+      - path
+      - unresolved
+      data_keys:
+      - dependency
+      - path
+      - reason
+      data_equals:
+        dependency: dep
+        path: deps/not_dir
+        reason: not_directory
+
+- id: MOD-broken-symlink-manifest-dependency-path-is-unresolved
+  category: modules
+  title: broken symlink manifest dependency path is unresolved
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "deps/broken" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep = { target = "$root/dep", path = "deps/broken" }
+
+      [[packages]]
+      node = "$root/dep"
+      name = "dep"
+      version = "0.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  symlinks:
+    deps/broken: missing
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_PATH_UNRESOLVED
+      message_contains:
+      - package
+      - dependency
+      - path
+      - unresolved
+      data_keys:
+      - dependency
+      - path
+      - reason
+      data_equals:
+        dependency: dep
+        path: deps/broken
+        reason: broken_symlink
+
+- id: MOD-symlink-cycle-manifest-dependency-path-is-unresolved
+  category: modules
+  title: symlink cycle manifest dependency path is unresolved
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "deps/loop_a" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep = { target = "$root/dep", path = "deps/loop_a" }
+
+      [[packages]]
+      node = "$root/dep"
+      name = "dep"
+      version = "0.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  symlinks:
+    deps/loop_a: loop_b
+    deps/loop_b: loop_a
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_PATH_UNRESOLVED
+      message_contains:
+      - package
+      - dependency
+      - path
+      - unresolved
+      data_keys:
+      - dependency
+      - path
+      - reason
+      data_equals:
+        dependency: dep
+        path: deps/loop_a
+        reason: symlink_cycle
+
+- id: MOD-noncanonical-manifest-path-normalizes-against-canonical-lock-path
+  category: modules
+  title: noncanonical manifest path normalizes against canonical lock path
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { path = "./deps//discard/../dep_math/." }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_math = { target = "$root/dep_math", path = "deps/dep_math" }
+
+      [[packages]]
+      node = "$root/dep_math"
+      name = "dep_math"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_math::lib::id
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(id(7)))
+      }
+    deps/dep_math/Eglur.toml: |
+      [package]
+      name = "dep_math"
+      version = "1.0.0"
+    deps/dep_math/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+
+- id: MOD-noncanonical-lock-path-is-not-normalized-into-acceptance
+  category: modules
+  title: noncanonical lock path is not normalized into acceptance
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { path = "deps/dep_math" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_math = { target = "$root/dep_math", path = "./deps/dep_math" }
+
+      [[packages]]
+      node = "$root/dep_math"
+      name = "dep_math"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/dep_math/Eglur.toml: |
+      [package]
+      name = "dep_math"
+      version = "1.0.0"
+    deps/dep_math/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-symlink-path-dependency-resolves-to-final-package-root
+  category: modules
+  title: symlink path dependency resolves to final package root
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_math = { path = "deps/alias" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_math = { target = "$root/dep_math", path = "deps/alias" }
+
+      [[packages]]
+      node = "$root/dep_math"
+      name = "linear-algebra"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import dep_math::lib::id
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(id(8)))
+      }
+    deps/real/Eglur.toml: |
+      [package]
+      name = "linear-algebra"
+      version = "1.0.0"
+    deps/real/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  symlinks:
+    deps/alias: real
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"8"'
+
+- id: MOD-transitive-path-convergence-from-distinct-manifest-bases-is-valid
+  category: modules
+  title: transitive path convergence from distinct manifest bases is valid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_a = { path = "deps/dep_a" }
+      dep_b = { path = "deps/dep_b" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_a = { target = "$root/dep_a", path = "deps/dep_a" }
+      dep_b = { target = "$root/dep_b", path = "deps/dep_b" }
+
+      [[packages]]
+      node = "$root/dep_a"
+      name = "dep_a"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      shared = { target = "$root/dep_a/shared", path = "../shared" }
+
+      [[packages]]
+      node = "$root/dep_a/shared"
+      name = "shared"
+      version = "1.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/dep_b"
+      name = "dep_b"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      shared_alias = { target = "$root/dep_a/shared", path = "../shared" }
+    src/main.eglur: |
+      module main
+      import dep_a::lib::value
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(value()))
+      }
+    deps/dep_a/Eglur.toml: |
+      [package]
+      name = "dep_a"
+      version = "1.0.0"
+
+      [dependencies]
+      shared = { path = "../shared" }
+    deps/dep_a/src/lib.eglur: |
+      module lib
+      import shared::lib::shared_value
+
+      pub fn value() -> i64 = shared_value()
+    deps/dep_b/Eglur.toml: |
+      [package]
+      name = "dep_b"
+      version = "1.0.0"
+
+      [dependencies]
+      shared_alias = { path = "../shared" }
+    deps/dep_b/src/lib.eglur: |
+      module lib
+      import shared_alias::lib::shared_value
+
+      pub fn other_value() -> i64 = shared_value()
+    deps/shared/Eglur.toml: |
+      [package]
+      name = "shared"
+      version = "1.0.0"
+    deps/shared/src/lib.eglur: |
+      module lib
+
+      pub fn shared_value() -> i64 = 9
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"9"'
+
+- id: MOD-lexically-equivalent-direct-paths-are-duplicate-dependencies
+  category: modules
+  title: lexically equivalent direct paths are duplicate dependencies
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      z_dep = { path = "./deps//dep/." }
+      a_dep = { path = "deps/dep" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a_dep = { target = "$root/a_dep", path = "deps/dep" }
+      z_dep = { target = "$root/a_dep", path = "deps/dep" }
+
+      [[packages]]
+      node = "$root/a_dep"
+      name = "dep"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/dep/Eglur.toml: |
+      [package]
+      name = "dep"
+      version = "1.0.0"
+    deps/dep/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_DUPLICATE
+      message_contains:
+      - package
+      - dependency
+      - duplicate
+      data_keys:
+      - package
+      - dependency
+      - existing_dependency
+      data_equals:
+        package: app
+        dependency: z_dep
+        existing_dependency: a_dep
+
+- id: MOD-symlink-equivalent-direct-paths-are-duplicate-dependencies
+  category: modules
+  title: symlink-equivalent direct paths are duplicate dependencies
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      z_alias = { path = "deps/alias" }
+      a_real = { path = "deps/real" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a_real = { target = "$root/a_real", path = "deps/real" }
+      z_alias = { target = "$root/a_real", path = "deps/alias" }
+
+      [[packages]]
+      node = "$root/a_real"
+      name = "dep"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/real/Eglur.toml: |
+      [package]
+      name = "dep"
+      version = "1.0.0"
+    deps/real/src/lib.eglur: |
+      module lib
+
+      pub fn id(x: i64) -> i64 = x
+  symlinks:
+    deps/alias: real
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_DUPLICATE
+      message_contains:
+      - package
+      - dependency
+      - duplicate
+      data_keys:
+      - package
+      - dependency
+      - existing_dependency
+      data_equals:
+        package: app
+        dependency: z_alias
+        existing_dependency: a_real
+
+- id: MOD-distinct-same-version-path-packages-with-one-name-conflict-by-source
+  category: modules
+  title: distinct same-version path packages with one name conflict by source
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      z_util = { path = "deps/right" }
+      a_util = { path = "deps/left" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a_util = { target = "$root/a_util", path = "deps/left" }
+      z_util = { target = "$root/z_util", path = "deps/right" }
+
+      [[packages]]
+      node = "$root/a_util"
+      name = "util"
+      version = "1.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/z_util"
+      name = "util"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/left/Eglur.toml: |
+      [package]
+      name = "util"
+      version = "1.0.0"
+    deps/left/src/lib.eglur: |
+      module lib
+
+      pub fn left() -> i64 = 1
+    deps/right/Eglur.toml: |
+      [package]
+      name = "util"
+      version = "1.0.0"
+    deps/right/src/lib.eglur: |
+      module lib
+
+      pub fn right() -> i64 = 2
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_NAME_CONFLICT
+      message_contains:
+      - package
+      - name
+      - conflict
+      data_keys:
+      - package
+      - existing_dependency
+      - dependency
+      - existing_version
+      - version
+      - existing_source_kind
+      - source_kind
+      - reason
+      data_equals:
+        package: util
+        existing_dependency: a_util
+        dependency: z_util
+        existing_version: 1.0.0
+        version: 1.0.0
+        existing_source_kind: path
+        source_kind: path
+        reason: source
+
+- id: MOD-dependency-package-name-conflicting-with-root-package-is-rejected
+  category: modules
+  title: dependency package name conflicting with root package is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep_app = { path = "deps/other_app" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep_app = { target = "$root/dep_app", path = "deps/other_app" }
+
+      [[packages]]
+      node = "$root/dep_app"
+      name = "app"
+      version = "0.1.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/other_app/Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    deps/other_app/src/lib.eglur: |
+      module lib
+
+      pub fn value() -> i64 = 1
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_NAME_CONFLICT
+      message_contains:
+      - package
+      - name
+      - conflict
+      data_keys:
+      - package
+      - existing_dependency
+      - dependency
+      - existing_version
+      - version
+      - existing_source_kind
+      - source_kind
+      - reason
+      data_equals:
+        package: app
+        existing_dependency: <root>
+        dependency: dep_app
+        existing_version: 0.1.0
+        version: 0.1.0
+        existing_source_kind: root
+        source_kind: path
+        reason: source
+
+- id: MOD-resolved-dependency-directory-without-manifest-retains-package-diagnostic
+  category: modules
+  title: resolved dependency directory without manifest retains package diagnostic
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "deps/not_package" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep = { target = "$root/dep", path = "deps/not_package" }
+
+      [[packages]]
+      node = "$root/dep"
+      name = "dep"
+      version = "0.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/not_package/README.md: |
+      This directory is not an Eglur package.
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_MISSING
+      message_contains:
+      - package
+      - manifest
+      - missing
+      - Eglur.toml
+      data_keys:
+      - package_role
+      - dependency
+      - source_kind
+      - path
+      data_equals:
+        package_role: dependency
+        dependency: dep
+        source_kind: path
+        path: deps/not_package
+
+- id: MOD-resolved-dependency-package-without-src-retains-package-diagnostic
+  category: modules
+  title: resolved dependency package without src retains package diagnostic
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "deps/no_src" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep = { target = "$root/dep", path = "deps/no_src" }
+
+      [[packages]]
+      node = "$root/dep"
+      name = "dep"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/no_src/Eglur.toml: |
+      [package]
+      name = "dep"
+      version = "1.0.0"
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_SRC_ROOT_MISSING
+      message_contains:
+      - package
+      - src
+      - missing
+      data_keys:
+      - package_role
+      - dependency
+      - source_kind
+      - path
+      data_equals:
+        package_role: dependency
+        dependency: dep
+        source_kind: path
+        path: deps/no_src
+
+- id: MOD-path-normalizing-to-root-is-detected-as-a-package-cycle
+  category: modules
+  title: path normalizing to root is detected as a package cycle
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      self_dep = { path = "deps/.." }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      self_dep = { target = "$root", path = "." }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_CYCLE
+      message_contains:
+      - package
+      - dependency
+      - cycle
+      data_keys: []
+
+- id: MOD-qualified-registry-dependency-resolves-from-canonical-tree
+  category: modules
+  title: qualified registry dependency resolves from canonical tree
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:e7ac4da2b9b4c279930a77236c0d15f8d379b9415d8e30ce911a6e95eb659589"
+    src/main.eglur: |
+      module main
+      import math::lib::double
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(double(3)))
+      }
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: directory
+        path: src
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "math"
+          version = "1.2.3"
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn double(x: i64) -> i64 = x * 2
+    - emit:
+        kind: file
+        path: assets/blob.bin
+        content_hex: 00ff
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"6"'
+
+- id: MOD-distinct-registry-package-id-can-resolve-the-same-canonical-tree
+  category: modules
+  title: distinct registry package ID can resolve the same canonical tree
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/other/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/other/math"
+      integrity = "tree-sha256:e7ac4da2b9b4c279930a77236c0d15f8d379b9415d8e30ce911a6e95eb659589"
+    src/main.eglur: |
+      module main
+      import math::lib::double
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(double(3)))
+      }
+  registry_acquisitions:
+  - package: packages.example.com/other/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: directory
+        path: src
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "math"
+          version = "1.2.3"
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn double(x: i64) -> i64 = x * 2
+    - emit:
+        kind: file
+        path: assets/blob.bin
+        content_hex: 00ff
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"6"'
+
+- id: MOD-registry-release-version-must-match-target-package-metadata
+  category: modules
+  title: registry release version must match target package metadata
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.4" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.4"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:e7ac4da2b9b4c279930a77236c0d15f8d379b9415d8e30ce911a6e95eb659589"
+    src/main.eglur: |
+      module main
+      import math::lib::double
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(double(3)))
+      }
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.4
+    provider_steps:
+    - emit:
+        kind: directory
+        path: src
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "math"
+          version = "1.2.3"
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn double(x: i64) -> i64 = x * 2
+    - emit:
+        kind: file
+        path: assets/blob.bin
+        content_hex: 00ff
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_OUT_OF_SYNC
+      message_contains:
+      - package
+      - lock
+      - out of sync
+      data_keys:
+      - reason
+      - node
+      data_equals:
+        reason: package_metadata
+        node: $root/math
+
+- id: MOD-registry-alias-expands-once-to-canonical-package-id
+  category: modules
+  title: registry alias expands once to canonical package ID
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [registries]
+      corp = "packages.example.com"
+
+      [dependencies]
+      math = { registry = "corp", package = "acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:e7ac4da2b9b4c279930a77236c0d15f8d379b9415d8e30ce911a6e95eb659589"
+    src/main.eglur: |
+      module main
+      import math::lib::double
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(double(4)))
+      }
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "math"
+          version = "1.2.3"
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn double(x: i64) -> i64 = x * 2
+    - emit:
+        kind: file
+        path: assets/blob.bin
+        content_hex: 00ff
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"8"'
+
+- id: MOD-invalid-registry-alias-is-rejected-before-lock-validation
+  category: modules
+  title: invalid registry alias is rejected before lock validation
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [registries]
+      Corp = "packages.example.com"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_ALIAS_INVALID
+      message_contains:
+      - package
+      - registry
+      - alias
+      - invalid
+      data_keys:
+      - reason
+      - alias
+      data_equals:
+        reason: alias
+        alias: Corp
+
+- id: MOD-unqualified-registry-package-without-alias-is-rejected
+  category: modules
+  title: unqualified registry package without alias is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "acme/math", version = "1.2.3" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_SELECTOR_INVALID
+      message_contains:
+      - package
+      - registry
+      - selector
+      - invalid
+      data_keys:
+      - dependency
+      - reason
+      - package
+      data_equals:
+        dependency: math
+        reason: unqualified_without_alias
+        package: acme/math
+
+- id: MOD-malformed-registry-exact-version-is-rejected
+  category: modules
+  title: malformed registry exact version is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_VERSION_INVALID
+      message_contains:
+      - package
+      - dependency
+      - version
+      - invalid
+      data_keys:
+      - dependency
+      - reason
+      - version
+      data_equals:
+        dependency: math
+        reason: malformed
+        version: '1.2'
+
+- id: MOD-registry-exact-version-with-leading-zero-is-rejected
+  category: modules
+  title: registry exact version with leading zero is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.02.3" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_VERSION_INVALID
+      message_contains:
+      - package
+      - dependency
+      - version
+      - invalid
+      data_keys:
+      - dependency
+      - reason
+      - version
+      data_equals:
+        dependency: math
+        reason: malformed
+        version: '1.02.3'
+
+- id: MOD-raw-archive-sha256-is-not-valid-registry-tree-integrity
+  category: modules
+  title: raw archive SHA-256 is not valid registry tree integrity
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "sha256:e7ac4da2b9b4c279930a77236c0d15f8d379b9415d8e30ce911a6e95eb659589"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-lockfile-leading-zero-version-is-invalid
+  category: modules
+  title: lockfile leading-zero version is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "1.2.03"
+      source = "root"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-registry-canonical-tree-integrity-mismatch-is-rejected
+  category: modules
+  title: registry canonical tree integrity mismatch is rejected
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+      import math::lib::double
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(double(3)))
+      }
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: directory
+        path: src
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "math"
+          version = "1.2.3"
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn double(x: i64) -> i64 = x * 2
+    - emit:
+        kind: file
+        path: assets/blob.bin
+        content_hex: 00ff
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_INTEGRITY_MISMATCH
+      message_contains:
+      - package
+      - registry
+      - integrity
+      - mismatch
+      data_keys:
+      - package
+      - version
+      - expected
+      - actual
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        expected: tree-sha256:0000000000000000000000000000000000000000000000000000000000000000
+        actual: tree-sha256:e7ac4da2b9b4c279930a77236c0d15f8d379b9415d8e30ce911a6e95eb659589
+
+- id: MOD-registry-tree-rejects-unicode-simple-fold-path-collision
+  category: modules
+  title: registry tree rejects Unicode simple-fold path collision
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "math"
+          version = "1.2.3"
+    - emit:
+        kind: file
+        path: src/Σ.eglur
+        text: |
+          module upper_sigma
+    - emit:
+        kind: file
+        path: src/ς.eglur
+        text: |
+          module final_sigma
+    - emit:
+        kind: file
+        path: src/node
+        text: parent
+    - emit:
+        kind: file
+        path: src/node/child
+        text: child
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TREE_INVALID
+      message_contains:
+      - package
+      - registry
+      - tree
+      - invalid
+      data_keys:
+      - package
+      - version
+      - reason
+      - path
+      - existing_path
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        reason: case_collision
+        existing_path: src/Σ.eglur
+        path: src/ς.eglur
+
+- id: MOD-registry-tree-keeps-full-fold-and-normalization-only-paths-distinct
+  category: modules
+  title: registry tree keeps full-fold-only and normalization-only paths distinct
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      unicode_paths = { package = "packages.example.com/acme/unicode-paths", version = "1.0.0" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      unicode_paths = { target = "$root/unicode_paths" }
+
+      [[packages]]
+      node = "$root/unicode_paths"
+      name = "unicode_paths"
+      version = "1.0.0"
+      source = "registry"
+      package = "packages.example.com/acme/unicode-paths"
+      integrity = "tree-sha256:d125206e6849f90f77d5d9062217b36620741349dfe0102a188c122af1a2341d"
+    src/main.eglur: |
+      module main
+      import unicode_paths::lib::marker
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok(to_str(marker()))
+      }
+  registry_acquisitions:
+  - package: packages.example.com/acme/unicode-paths
+    version: 1.0.0
+    provider_steps:
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "unicode_paths"
+          version = "1.0.0"
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn marker() -> i64 = 1
+    - emit:
+        kind: file
+        path: assets/ß.txt
+        text: sharp-s
+    - emit:
+        kind: file
+        path: assets/ss.txt
+        text: double-s
+    - emit:
+        kind: file
+        path: assets/é.txt
+        text: composed
+    - emit:
+        kind: file
+        path: assets/é.txt
+        text: decomposed
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"1"'
+
+- id: MOD-one-registry-package-id-cannot-select-two-exact-versions
+  category: modules
+  title: one registry package ID cannot select two exact versions
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      shared_v1 = { package = "packages.example.com/acme/shared", version = "1.0.0" }
+      shared_v2 = { package = "packages.example.com/acme/shared", version = "2.0.0" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      shared_v1 = { target = "$root/shared_v1" }
+      shared_v2 = { target = "$root/shared_v2" }
+
+      [[packages]]
+      node = "$root/shared_v1"
+      name = "shared"
+      version = "1.0.0"
+      source = "registry"
+      package = "packages.example.com/acme/shared"
+      integrity = "tree-sha256:9d8483062fc713787ab15ba63aefb074ee9e7331494560e35adc5458feefe73f"
+
+      [[packages]]
+      node = "$root/shared_v2"
+      name = "shared"
+      version = "2.0.0"
+      source = "registry"
+      package = "packages.example.com/acme/shared"
+      integrity = "tree-sha256:251ef05b3a4e0cc35733e07e41af2808d91875657588f260f27060a9bfabd707"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  registry_acquisitions:
+  - package: packages.example.com/acme/shared
+    version: 2.0.0
+    provider_steps:
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "shared"
+          version = "2.0.0"
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn value() -> i64 = 2
+    - emit:
+        kind: file
+        path: assets/blob.bin
+        content_hex: 00ff
+    - finish: complete
+  - package: packages.example.com/acme/shared
+    version: 1.0.0
+    provider_steps:
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn value() -> i64 = 1
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "shared"
+          version = "1.0.0"
+    - emit:
+        kind: file
+        path: assets/blob.bin
+        content_hex: 00ff
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_VERSION_CONFLICT
+      message_contains:
+      - package
+      - version
+      - conflict
+      data_keys:
+      - package
+      - existing_dependency
+      - dependency
+      - existing_version
+      - version
+      data_equals:
+        package: packages.example.com/acme/shared
+        existing_dependency: shared_v1
+        dependency: shared_v2
+        existing_version: 1.0.0
+        version: 2.0.0
+
+- id: MOD-registry-aliases-to-one-release-are-duplicate-direct-dependencies
+  category: modules
+  title: registry aliases to one release are duplicate direct dependencies
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [registries]
+      corp = "packages.example.com"
+
+      [dependencies]
+      math_a = { package = "packages.example.com/acme/math", version = "1.2.3" }
+      math_b = { registry = "corp", package = "acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math_a = { target = "$root/math_a" }
+      math_b = { target = "$root/math_a" }
+
+      [[packages]]
+      node = "$root/math_a"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:e7ac4da2b9b4c279930a77236c0d15f8d379b9415d8e30ce911a6e95eb659589"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "math"
+          version = "1.2.3"
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn double(x: i64) -> i64 = x * 2
+    - emit:
+        kind: file
+        path: assets/blob.bin
+        content_hex: 00ff
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_DEP_DUPLICATE
+      message_contains:
+      - package
+      - dependency
+      - duplicate
+      data_keys:
+      - package
+      - dependency
+      - existing_dependency
+      data_equals:
+        package: app
+        dependency: math_b
+        existing_dependency: math_a
+
+- id: MOD-path-and-registry-packages-never-implicitly-converge
+  category: modules
+  title: path and registry packages never implicitly converge
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      a_path = { path = "deps/math" }
+      z_registry = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a_path = { target = "$root/a_path", path = "deps/math" }
+      z_registry = { target = "$root/z_registry" }
+
+      [[packages]]
+      node = "$root/a_path"
+      name = "math"
+      version = "1.2.3"
+      source = "path"
+
+      [[packages]]
+      node = "$root/z_registry"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:e7ac4da2b9b4c279930a77236c0d15f8d379b9415d8e30ce911a6e95eb659589"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/math/Eglur.toml: |
+      [package]
+      name = "math"
+      version = "1.2.3"
+    deps/math/src/lib.eglur: |
+      module lib
+
+      pub fn double(x: i64) -> i64 = x * 2
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path: Eglur.toml
+        text: |
+          [package]
+          name = "math"
+          version = "1.2.3"
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+
+          pub fn double(x: i64) -> i64 = x * 2
+    - emit:
+        kind: file
+        path: assets/blob.bin
+        content_hex: 00ff
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_NAME_CONFLICT
+      message_contains:
+      - package
+      - name
+      - conflict
+      data_keys:
+      - package
+      - existing_dependency
+      - dependency
+      - existing_version
+      - version
+      - existing_source_kind
+      - source_kind
+      - reason
+      data_equals:
+        package: math
+        existing_dependency: a_path
+        dependency: z_registry
+        existing_version: 1.2.3
+        version: 1.2.3
+        existing_source_kind: path
+        source_kind: registry
+        reason: source
+
+- id: MOD-lockfile-dangling-target-is-invalid
+  category: modules
+  title: lockfile dangling target is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "deps/dep" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep = { target = "$root/dep", path = "deps/dep" }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-lockfile-unreachable-node-is-invalid
+  category: modules
+  title: lockfile unreachable node is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [[packages]]
+      node = "$root/orphan"
+      name = "orphan"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-lockfile-noncanonical-first-discovery-node-label-is-invalid
+  category: modules
+  title: lockfile noncanonical first-discovery node label is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "deps/dep" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep = { target = "$root/not_dep", path = "deps/dep" }
+
+      [[packages]]
+      node = "$root/not_dep"
+      name = "dep"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-lockfile-noncanonical-package-record-order-is-invalid
+  category: modules
+  title: lockfile noncanonical package record order is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      a = { path = "deps/a" }
+      b = { path = "deps/b" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a = { target = "$root/a", path = "deps/a" }
+      b = { target = "$root/b", path = "deps/b" }
+
+      [[packages]]
+      node = "$root/b"
+      name = "b"
+      version = "1.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/a"
+      name = "a"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-lockfile-path-edge-cannot-target-registry-node
+  category: modules
+  title: lockfile path edge cannot target registry node
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      dep = { path = "deps/dep" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      dep = { target = "$root/dep", path = "deps/dep" }
+
+      [[packages]]
+      node = "$root/dep"
+      name = "dep"
+      version = "1.0.0"
+      source = "registry"
+      package = "packages.example.com/acme/dep"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-lockfile-duplicate-registry-coordinate-is-invalid
+  category: modules
+  title: lockfile duplicate registry coordinate is invalid
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      a = { package = "packages.example.com/acme/math", version = "1.2.3" }
+      b = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a = { target = "$root/a" }
+      b = { target = "$root/b" }
+
+      [[packages]]
+      node = "$root/a"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+      [[packages]]
+      node = "$root/b"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-lockfile-registry-coordinate-cannot-contradict-integrity
+  category: modules
+  title: lockfile registry coordinate cannot contradict integrity
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      a = { package = "packages.example.com/acme/math", version = "1.2.3" }
+      b = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a = { target = "$root/a" }
+      b = { target = "$root/b" }
+
+      [[packages]]
+      node = "$root/a"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+      [[packages]]
+      node = "$root/b"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_INVALID
+      message_contains:
+      - package
+      - lock
+      - invalid
+      data_keys: []
+
+- id: MOD-lockfile-path-false-split-is-out-of-sync
+  category: modules
+  title: lockfile path false split is out of sync
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      a = { path = "deps/shared" }
+      b = { path = "deps/shared" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a = { target = "$root/a", path = "deps/shared" }
+      b = { target = "$root/b", path = "deps/shared" }
+
+      [[packages]]
+      node = "$root/a"
+      name = "shared"
+      version = "1.0.0"
+      source = "path"
+
+      [[packages]]
+      node = "$root/b"
+      name = "shared"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/shared/Eglur.toml: |
+      [package]
+      name = "shared"
+      version = "1.0.0"
+    deps/shared/src/lib.eglur: |
+      module lib
+
+      pub fn value() -> i64 = 1
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_OUT_OF_SYNC
+      message_contains:
+      - package
+      - lock
+      - out of sync
+      data_keys:
+      - reason
+      - node
+      - dependency
+      data_equals:
+        reason: dependency_selector
+        node: $root/b
+        dependency: b
+
+- id: MOD-lockfile-path-false-merge-is-out-of-sync
+  category: modules
+  title: lockfile path false merge is out of sync
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      a = { path = "deps/left" }
+      b = { path = "deps/right" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      a = { target = "$root/a", path = "deps/left" }
+      b = { target = "$root/a", path = "deps/right" }
+
+      [[packages]]
+      node = "$root/a"
+      name = "shared"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("x")
+      }
+    deps/left/Eglur.toml: |
+      [package]
+      name = "shared"
+      version = "1.0.0"
+    deps/left/src/lib.eglur: |
+      module lib
+
+      pub fn value() -> i64 = 1
+    deps/right/Eglur.toml: |
+      [package]
+      name = "shared"
+      version = "1.0.0"
+    deps/right/src/lib.eglur: |
+      module lib
+
+      pub fn value() -> i64 = 2
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_LOCK_OUT_OF_SYNC
+      message_contains:
+      - package
+      - lock
+      - out of sync
+      data_keys:
+      - reason
+      - node
+      - dependency
+      data_equals:
+        reason: dependency_selector
+        node: $root/a
+        dependency: b
+
+- id: MOD-registry-missing-release-is-distinct-from-transport-failure
+  category: modules
+  title: missing registry release is distinct from transport failure
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - finish: missing_release
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_RELEASE_MISSING
+      message_contains:
+      - package
+      - registry
+      - release
+      - missing
+      data_keys:
+      - package
+      - version
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+
+- id: MOD-registry-transport-failure-is-a-closed-outcome
+  category: modules
+  title: registry transport failure precedes invalid partial entry validation
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path_hex: ff
+        text: partial
+    - finish: transport_failure
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TRANSPORT_FAILED
+      message_contains:
+      - package
+      - registry
+      - transport
+      - failed
+      data_keys:
+      - package
+      - version
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+
+- id: MOD-registry-entry-count-precedes-path-bytes-at-limit
+  category: modules
+  title: registry sink derives entry-count limit evidence before path limits
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - repeat:
+        count: 65536
+        emit:
+          kind: directory
+          path: x
+    - emit:
+        kind: directory
+        path_repeat:
+          byte_hex: "61"
+          count: 4097
+    - finish: transport_failure
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_LIMIT_EXCEEDED
+      message_contains:
+      - package
+      - registry
+      - limit
+      - exceeded
+      data_keys:
+      - package
+      - version
+      - resource
+      - limit
+      - observed_at_least
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        resource: entry_count
+        limit: 65536
+        observed_at_least: 65537
+
+- id: MOD-registry-entry-count-accepts-portable-maximum
+  category: modules
+  title: registry sink accepts the portable entry-count maximum
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - repeat:
+        count: 65536
+        emit:
+          kind: directory
+          path: x
+    - finish: transport_failure
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TRANSPORT_FAILED
+      message_contains:
+      - package
+      - registry
+      - transport
+      - failed
+      data_keys:
+      - package
+      - version
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+
+
+- id: MOD-registry-path-bytes-accepts-portable-maximum
+  category: modules
+  title: registry sink accepts the portable per-entry path-byte maximum
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: directory
+        path_repeat:
+          byte_hex: "61"
+          count: 4096
+    - finish: transport_failure
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TRANSPORT_FAILED
+      message_contains:
+      - package
+      - registry
+      - transport
+      - failed
+      data_keys:
+      - package
+      - version
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+
+
+- id: MOD-registry-path-bytes-precede-path-depth-at-limit
+  category: modules
+  title: registry sink checks path bytes before path depth
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: directory
+        path_repeat:
+          byte_hex: "2f"
+          count: 4097
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_LIMIT_EXCEEDED
+      message_contains:
+      - package
+      - registry
+      - limit
+      - exceeded
+      data_keys:
+      - package
+      - version
+      - resource
+      - limit
+      - observed_at_least
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        resource: path_bytes
+        limit: 4096
+        observed_at_least: 4097
+
+
+- id: MOD-registry-path-depth-accepts-portable-maximum
+  category: modules
+  title: registry sink accepts the portable path-depth maximum
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: directory
+        path_repeat:
+          byte_hex: "2f"
+          count: 127
+    - finish: transport_failure
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TRANSPORT_FAILED
+      message_contains:
+      - package
+      - registry
+      - transport
+      - failed
+      data_keys:
+      - package
+      - version
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+
+
+- id: MOD-registry-path-depth-precedes-link-target-at-limit
+  category: modules
+  title: registry sink checks path depth before link-target bytes
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: symlink
+        path_repeat:
+          byte_hex: "2f"
+          count: 128
+        target_repeat:
+          byte_hex: "61"
+          count: 4097
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_LIMIT_EXCEEDED
+      message_contains:
+      - package
+      - registry
+      - limit
+      - exceeded
+      data_keys:
+      - package
+      - version
+      - resource
+      - limit
+      - observed_at_least
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        resource: path_depth
+        limit: 128
+        observed_at_least: 129
+
+
+- id: MOD-registry-link-target-accepts-portable-maximum
+  category: modules
+  title: registry sink accepts the portable link-target maximum
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: symlink
+        path: x
+        target_repeat:
+          byte_hex: "61"
+          count: 4096
+    - finish: transport_failure
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TRANSPORT_FAILED
+      message_contains:
+      - package
+      - registry
+      - transport
+      - failed
+      data_keys:
+      - package
+      - version
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+
+
+- id: MOD-registry-link-target-precedes-total-metadata-at-limit
+  category: modules
+  title: registry sink checks link-target bytes before total metadata
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - repeat:
+        count: 4096
+        emit:
+          kind: directory
+          path_repeat:
+            byte_hex: "61"
+            count: 4096
+    - emit:
+        kind: symlink
+        path: x
+        target_repeat:
+          byte_hex: "61"
+          count: 4097
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_LIMIT_EXCEEDED
+      message_contains:
+      - package
+      - registry
+      - limit
+      - exceeded
+      data_keys:
+      - package
+      - version
+      - resource
+      - limit
+      - observed_at_least
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        resource: link_target_bytes
+        limit: 4096
+        observed_at_least: 4097
+
+
+- id: MOD-registry-total-metadata-accepts-portable-maximum
+  category: modules
+  title: registry sink accepts the portable total metadata maximum
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - repeat:
+        count: 4096
+        emit:
+          kind: directory
+          path_repeat:
+            byte_hex: "61"
+            count: 4096
+    - finish: transport_failure
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TRANSPORT_FAILED
+      message_contains:
+      - package
+      - registry
+      - transport
+      - failed
+      data_keys:
+      - package
+      - version
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+
+
+- id: MOD-registry-total-metadata-precedes-file-size-at-limit
+  category: modules
+  title: registry sink checks total metadata before regular-file bytes
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - repeat:
+        count: 4096
+        emit:
+          kind: directory
+          path_repeat:
+            byte_hex: "61"
+            count: 4096
+    - emit:
+        kind: file
+        path: x
+        content_repeat:
+          byte_hex: "00"
+          count: 134217729
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_LIMIT_EXCEEDED
+      message_contains:
+      - package
+      - registry
+      - limit
+      - exceeded
+      data_keys:
+      - package
+      - version
+      - resource
+      - limit
+      - observed_at_least
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        resource: total_path_and_target_bytes
+        limit: 16777216
+        observed_at_least: 16777217
+
+
+- id: MOD-registry-file-size-accepts-portable-maximum
+  category: modules
+  title: registry sink accepts the portable per-file byte maximum
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path: x
+        content_repeat:
+          byte_hex: "00"
+          count: 134217728
+    - finish: transport_failure
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TRANSPORT_FAILED
+      message_contains:
+      - package
+      - registry
+      - transport
+      - failed
+      data_keys:
+      - package
+      - version
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+
+
+- id: MOD-registry-file-size-precedes-total-file-bytes-at-limit
+  category: modules
+  title: registry sink checks regular-file bytes before total file bytes
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - repeat:
+        count: 4
+        emit:
+          kind: file
+          path: x
+          content_repeat:
+            byte_hex: "00"
+            count: 134217728
+    - emit:
+        kind: file
+        path: y
+        content_repeat:
+          byte_hex: "00"
+          count: 134217729
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_LIMIT_EXCEEDED
+      message_contains:
+      - package
+      - registry
+      - limit
+      - exceeded
+      data_keys:
+      - package
+      - version
+      - resource
+      - limit
+      - observed_at_least
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        resource: regular_file_bytes
+        limit: 134217728
+        observed_at_least: 134217729
+
+
+- id: MOD-registry-total-file-bytes-accepts-portable-maximum
+  category: modules
+  title: registry sink accepts the portable total regular-file byte maximum
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - repeat:
+        count: 4
+        emit:
+          kind: file
+          path: x
+          content_repeat:
+            byte_hex: "00"
+            count: 134217728
+    - finish: transport_failure
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TRANSPORT_FAILED
+      message_contains:
+      - package
+      - registry
+      - transport
+      - failed
+      data_keys:
+      - package
+      - version
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+
+
+- id: MOD-registry-total-file-bytes-rejects-first-excess-byte
+  category: modules
+  title: registry sink rejects the first byte beyond the total file-byte maximum
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - repeat:
+        count: 4
+        emit:
+          kind: file
+          path: x
+          content_repeat:
+            byte_hex: "00"
+            count: 134217728
+    - emit:
+        kind: file
+        path: y
+        content_repeat:
+          byte_hex: "00"
+          count: 1
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_LIMIT_EXCEEDED
+      message_contains:
+      - package
+      - registry
+      - limit
+      - exceeded
+      data_keys:
+      - package
+      - version
+      - resource
+      - limit
+      - observed_at_least
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        resource: total_regular_file_bytes
+        limit: 536870912
+        observed_at_least: 536870913
+
+
+- id: MOD-registry-tree-rejects-non-utf8-path-bytes
+  category: modules
+  title: registry tree rejects non-UTF-8 path bytes
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path_hex: ff
+        text: invalid-path
+    - emit:
+        kind: file
+        path_hex: ""
+        text: empty-path
+    - emit:
+        kind: symlink
+        path: src/link
+        target: target
+    - emit:
+        kind: file
+        path: src/dup
+        text: first
+    - emit:
+        kind: file
+        path: src/dup
+        text: second
+    - emit:
+        kind: file
+        path: src/Σ
+        text: upper
+    - emit:
+        kind: file
+        path: src/ς
+        text: final
+    - emit:
+        kind: file
+        path: src/node
+        text: parent
+    - emit:
+        kind: file
+        path: src/node/child
+        text: child
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TREE_INVALID
+      message_contains:
+      - package
+      - registry
+      - tree
+      - invalid
+      data_keys:
+      - package
+      - version
+      - reason
+      - path_hex
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        reason: invalid_path_encoding
+        path_hex: ff
+
+- id: MOD-registry-tree-selects-unsupported-entry-kind-deterministically
+  category: modules
+  title: registry tree selects an unsupported entry kind deterministically
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: socket
+        path: src/link
+    - emit:
+        kind: symlink
+        path: src/link
+        target: ../outside
+    - emit:
+        kind: file
+        path: src/dup
+        text: first
+    - emit:
+        kind: file
+        path: src/dup
+        text: second
+    - emit:
+        kind: file
+        path: src/Σ
+        text: upper
+    - emit:
+        kind: file
+        path: src/ς
+        text: final
+    - emit:
+        kind: file
+        path: src/node
+        text: parent
+    - emit:
+        kind: file
+        path: src/node/child
+        text: child
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TREE_INVALID
+      message_contains:
+      - package
+      - registry
+      - tree
+      - invalid
+      data_keys:
+      - package
+      - version
+      - reason
+      - path
+      - entry_kind
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        reason: unsupported_entry_kind
+        path: src/link
+        entry_kind: symlink
+
+- id: MOD-registry-tree-rejects-duplicate-regular-file
+  category: modules
+  title: registry tree rejects duplicate regular file
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path: src/dup.eglur
+        text: first
+    - emit:
+        kind: file
+        path: src/dup.eglur
+        text: second
+    - emit:
+        kind: file
+        path: src/Σ
+        text: upper
+    - emit:
+        kind: file
+        path: src/ς
+        text: final
+    - emit:
+        kind: file
+        path: src/node
+        text: parent
+    - emit:
+        kind: file
+        path: src/node/child
+        text: child
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TREE_INVALID
+      message_contains:
+      - package
+      - registry
+      - tree
+      - invalid
+      data_keys:
+      - package
+      - version
+      - reason
+      - path
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        reason: duplicate_path
+        path: src/dup.eglur
+
+- id: MOD-registry-tree-rejects-empty-path
+  category: modules
+  title: registry tree rejects an empty raw path
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path_hex: ""
+        text: empty-path
+    - emit:
+        kind: symlink
+        path: src/link
+        target: target
+    - emit:
+        kind: file
+        path: src/dup
+        text: first
+    - emit:
+        kind: file
+        path: src/dup
+        text: second
+    - emit:
+        kind: file
+        path: src/Σ
+        text: upper
+    - emit:
+        kind: file
+        path: src/ς
+        text: final
+    - emit:
+        kind: file
+        path: src/node
+        text: parent
+    - emit:
+        kind: file
+        path: src/node/child
+        text: child
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TREE_INVALID
+      message_contains:
+      - package
+      - registry
+      - tree
+      - invalid
+      data_keys:
+      - package
+      - version
+      - reason
+      - path
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        reason: invalid_path
+        path: ""
+
+- id: MOD-registry-tree-rejects-file-ancestor-conflict
+  category: modules
+  title: registry tree rejects a file and ancestor conflict
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path: src/node
+        text: parent
+    - emit:
+        kind: file
+        path: src/node/child
+        text: child
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_REGISTRY_TREE_INVALID
+      message_contains:
+      - package
+      - registry
+      - tree
+      - invalid
+      data_keys:
+      - package
+      - version
+      - reason
+      - path
+      - existing_path
+      data_equals:
+        package: packages.example.com/acme/math
+        version: 1.2.3
+        reason: file_ancestor
+        existing_path: src/node
+        path: src/node/child
+
+- id: MOD-registry-valid-tree-without-manifest-retains-package-diagnostic
+  category: modules
+  title: valid registry tree without manifest retains package diagnostic
+  mode: package
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      math = { package = "packages.example.com/acme/math", version = "1.2.3" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      math = { target = "$root/math" }
+
+      [[packages]]
+      node = "$root/math"
+      name = "math"
+      version = "1.2.3"
+      source = "registry"
+      package = "packages.example.com/acme/math"
+      integrity = "tree-sha256:114c93dd3e1a63c54a48089dab44bbcd5578dc871cf341ad4845b5c2f504df03"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Unit = ()
+  registry_acquisitions:
+  - package: packages.example.com/acme/math
+    version: 1.2.3
+    provider_steps:
+    - emit:
+        kind: file
+        path: src/lib.eglur
+        text: |
+          module lib
+    - finish: complete
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: PACKAGE_MANIFEST_MISSING
+      message_contains:
+      - package
+      - manifest
+      - missing
+      - Eglur.toml
+      data_keys:
+      - package_role
+      - dependency
+      - source_kind
+      - registry_package
+      data_equals:
+        package_role: dependency
+        dependency: math
+        source_kind: registry
+        registry_package: packages.example.com/acme/math
+- id: MOD-public-stored-fields-support-cross-module-construction-read-and-write
+  category: modules
+  title: public stored fields support cross-module construction read and write
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Point {
+        pub field mut x: i64
+        pub field y: i64
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Point
+
+      fn main!() -> Res[Str, Str] {
+        let mut point = Point{ x: 1, y: 2 }
+        point.x = 3
+        yield Ok(to_str(wrapping_add(point.x, point.y)))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"5"'
+- id: MOD-public-property-and-method-expose-private-storage-without-leaking-it
+  category: modules
+  title: public property and method expose private storage without leaking it
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Counter {
+        field mut n: i64
+
+        pub prop mut count: i64 {
+          fn get_count(self: &Self) -> i64 = self.n
+
+          fn set_count!(self: &mut Self, value: i64) -> Unit {
+            self.n = value
+          }
+        }
+
+        pub fn doubled(self: &Self) -> i64 = wrapping_add(self.n, self.n)
+      }
+
+      pub fn make_counter(value: i64) -> Counter = Counter{ n: value }
+    app/main.eglur: |
+      module app::main
+      import app::model::{Counter, make_counter}
+
+      fn main!() -> Res[Str, Str] {
+        let mut counter: Counter = make_counter(2)
+        let before = counter.count
+        counter.set_count!(4)
+        let after = counter.get_count()
+        yield Ok(to_str(wrapping_add(before, wrapping_add(after, Counter.doubled(&counter)))))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"14"'
+- id: MOD-private-stored-field-read-is-rejected-across-modules
+  category: modules
+  title: private stored field read is rejected across modules
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Secret {
+        field value: i64
+      }
+
+      pub fn make_secret() -> Secret = Secret{ value: 7 }
+    app/main.eglur: |
+      module app::main
+      import app::model::make_secret
+
+      fn main!() -> Res[Str, Str] {
+        let secret = make_secret()
+        yield Ok(to_str(secret.value)) // @primary private-field-read
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: private-field-read
+- id: MOD-public-member-does-not-escape-private-owner
+  category: modules
+  title: public member does not escape private owner
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      struct Hidden {
+        pub field value: i64
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Hidden
+
+      fn main!() -> Res[Str, Str] {
+        let hidden = Hidden{ value: 1 }
+        yield Ok(to_str(hidden.value))
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: MOD-private-stored-field-write-is-rejected-across-modules
+  category: modules
+  title: private stored field write is rejected across modules
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Counter {
+        field mut n: i64
+      }
+
+      pub fn make_counter() -> Counter = Counter{ n: 0 }
+    app/main.eglur: |
+      module app::main
+      import app::model::make_counter
+
+      fn main!() -> Res[Str, Str] {
+        let mut counter = make_counter()
+        counter.n = 1
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: MOD-private-property-read-is-rejected-across-modules
+  category: modules
+  title: private property read is rejected across modules
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Counter {
+        field n: i64
+
+        prop count: i64 {
+          fn get_count(self: &Self) -> i64 = self.n
+        }
+      }
+
+      pub fn make_counter() -> Counter = Counter{ n: 1 }
+    app/main.eglur: |
+      module app::main
+      import app::model::make_counter
+
+      fn main!() -> Res[Str, Str] {
+        let counter = make_counter()
+        yield Ok(to_str(counter.count))
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: MOD-private-property-accessor-is-rejected-across-modules
+  category: modules
+  title: private property accessor is rejected across modules
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Counter {
+        field n: i64
+
+        prop count: i64 {
+          fn get_count(self: &Self) -> i64 = self.n
+        }
+      }
+
+      pub fn make_counter() -> Counter = Counter{ n: 1 }
+    app/main.eglur: |
+      module app::main
+      import app::model::make_counter
+
+      fn main!() -> Res[Str, Str] {
+        let counter = make_counter()
+        yield Ok(to_str(counter.get_count()))
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: MOD-private-property-setter-is-rejected-across-modules
+  category: modules
+  title: private property setter is rejected across modules
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Counter {
+        field mut n: i64
+
+        prop mut count: i64 {
+          fn get_count(self: &Self) -> i64 = self.n
+
+          fn set_count!(self: &mut Self, value: i64) -> Unit {
+            self.n = value
+          }
+        }
+      }
+
+      pub fn make_counter() -> Counter = Counter{ n: 1 }
+    app/main.eglur: |
+      module app::main
+      import app::model::make_counter
+
+      fn main!() -> Res[Str, Str] {
+        let mut counter = make_counter()
+        counter.set_count!(2) // @primary private-property-setter
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: private-property-setter
+- id: MOD-private-inherent-method-is-rejected-across-modules
+  category: modules
+  title: private inherent method is rejected across modules
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Token {
+        fn hidden(self: &Self) -> i64 = 1
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Token
+
+      fn main!() -> Res[Str, Str] {
+        let token = Token{}
+        yield Ok(to_str(Token.hidden(&token))) // @primary private-owner-qualified-method
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: private-owner-qualified-method
+- id: MOD-external-struct-literal-cannot-omit-private-required-field
+  category: modules
+  title: external struct literal cannot omit private required field
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Token {
+        pub field kind: i64
+        field secret: i64
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Token
+
+      fn main!() -> Res[Str, Str] {
+        let _token = Token{ kind: 1 } // @primary inaccessible-constructor
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: inaccessible-constructor
+- id: MOD-external-struct-literal-cannot-name-private-required-field
+  category: modules
+  title: external struct literal cannot name private required field
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Token {
+        pub field kind: i64
+        field secret: i64
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Token
+
+      fn main!() -> Res[Str, Str] {
+        let _token = Token{ kind: 1, secret: 2 }
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+- id: MOD-private-inherent-family-blocks-visible-trait-fallback
+  category: modules
+  title: private inherent family blocks visible trait fallback
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub trait Render {
+        fn render(self: &Self) -> Str
+      }
+
+      pub struct Doc {
+        fn render(self: &Self) -> Str = "inherent"
+      }
+
+      impl Render for Doc {
+        fn render(self: &Self) -> Str = "trait"
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::{Doc, Render}
+
+      fn main!() -> Res[Str, Str] {
+        let doc = Doc{}
+        yield Ok(doc.render()) // @primary inaccessible-inherent-family
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: inaccessible-inherent-family
+- id: MOD-public-inherent-overload-family-is-callable-across-modules
+  category: modules
+  title: public inherent overload family is callable across modules
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Parser {
+        pub overload fn parse(self: &Self, value: i64) -> i64 = value
+        pub overload fn parse(self: &Self, value: f32) -> i64 = 2
+      }
+    app/main.eglur: |
+      module app::main
+      import app::model::Parser
+
+      fn main!() -> Res[Str, Str] {
+        let parser = Parser{}
+        let value: f32 = 1.0
+        yield Ok(to_str(wrapping_add(parser.parse(1), parser.parse(value))))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: MOD-public-api-type-closure-allows-private-aliases-with-public-expansions
+  category: modules
+  title: public API type closure allows private aliases with public expansions
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      trait InternalScalar {}
+      impl InternalScalar for i64 {}
+      type Checked[T: InternalScalar] = T
+      type InternalCount = Checked[i64]
+      pub type Count = InternalCount
+
+      pub trait PublicScalar {}
+      impl PublicScalar for i64 {}
+      type PublicChecked[T: PublicScalar] = T
+
+      pub struct Counter {
+        pub field value: InternalCount
+
+        pub prop doubled: InternalCount {
+          fn get_doubled(self: &Self) -> InternalCount = wrapping_add(self.value, self.value)
+        }
+
+        pub fn add(self: &Self, delta: InternalCount) -> InternalCount = wrapping_add(self.value, delta)
+      }
+
+      pub enum Event {
+        Counted(InternalCount)
+      }
+
+      pub trait Scale {
+        fn scale(self: &Self, factor: InternalCount) -> InternalCount
+      }
+
+      impl Scale for Counter {
+        fn scale(self: &Self, factor: InternalCount) -> InternalCount = wrapping_add(self.value, factor)
+      }
+
+      pub const ONE: InternalCount = 1
+      pub fn keep[T: PublicScalar](value: PublicChecked[T]) -> T = value
+      pub fn make(value: InternalCount) -> Counter = Counter{ value: value }
+    app/main.eglur: |
+      module app::main
+      import app::api::{Count, Counter, ONE, Scale, keep, make}
+
+      fn main!() -> Res[Str, Str] {
+        let count: Count = keep(ONE)
+        let counter: Counter = make(count)
+        let total = wrapping_add(counter.doubled, wrapping_add(counter.add(ONE), counter.scale(ONE)))
+        yield Ok(to_str(total))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"6"'
+- id: MOD-private-generic-alias-cannot-hide-symbolic-bound
+  category: modules
+  title: private generic alias cannot hide a symbolic caller bound
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      trait Internal {}
+      type Checked[T: Internal] = T
+
+      pub fn pass[T](value: Checked[T]) -> T = value // @primary hidden-alias-bound
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+      primary_span:
+        marker: hidden-alias-bound
+- id: MOD-public-nominal-may-hide-private-representation
+  category: modules
+  title: public nominal may hide private representation
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      struct Secret {
+        field value: i64
+      }
+
+      struct InternalFactory {
+        pub fn secret(self: &Self) -> Secret = Secret{ value: 7 }
+      }
+
+      pub struct Handle {
+        field secret: Secret
+      }
+
+      pub fn make_handle() -> Handle = Handle{ secret: Secret{ value: 7 } }
+      pub fn reveal(handle: &Handle) -> i64 = handle.secret.value
+    app/main.eglur: |
+      module app::main
+      import app::api::{make_handle, reveal}
+
+      fn main!() -> Res[Str, Str] {
+        let handle = make_handle()
+        yield Ok(to_str(reveal(&handle)))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: MOD-public-function-cannot-return-private-nominal
+  category: modules
+  title: public function cannot return private nominal
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      struct Hidden {}
+      pub fn make_hidden() -> Hidden = Hidden{} // @primary public-return-private
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-return-private
+- id: MOD-public-generic-bound-cannot-name-private-trait
+  category: modules
+  title: public generic bound cannot name private trait
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      trait Internal {}
+      pub fn identity[T: Internal](value: T) -> T = value // @primary public-bound-private
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-bound-private
+- id: MOD-public-struct-bound-cannot-name-private-trait
+  category: modules
+  title: public struct bound cannot name private trait
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      trait Internal {}
+      pub struct Carrier[T: Internal] {} // @primary public-struct-bound-private
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-struct-bound-private
+- id: MOD-public-enum-bound-cannot-name-private-trait
+  category: modules
+  title: public enum bound cannot name private trait
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      trait Internal {}
+      pub enum Event[T: Internal] { // @primary public-enum-bound-private
+        Value(T)
+      }
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-enum-bound-private
+- id: MOD-public-trait-bound-cannot-name-private-trait
+  category: modules
+  title: public trait bound cannot name private trait
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      trait Internal {}
+      pub trait Protocol[T: Internal] {} // @primary public-trait-bound-private
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-trait-bound-private
+- id: MOD-public-type-alias-bound-cannot-name-private-trait
+  category: modules
+  title: public type alias bound cannot name private trait
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      trait Internal {}
+      pub type Checked[T: Internal] = T // @primary public-alias-bound-private
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-alias-bound-private
+- id: MOD-public-field-cannot-contain-private-nominal
+  category: modules
+  title: public field cannot contain private nominal
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      struct Hidden {}
+
+      pub struct Envelope {
+        pub field values: Vec[Hidden] // @primary public-field-private
+      }
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-field-private
+- id: MOD-public-property-cannot-expose-private-nominal
+  category: modules
+  title: public property cannot expose private nominal
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      struct Hidden {}
+
+      pub struct Exposer {
+        pub prop hidden: Hidden { // @primary public-property-private
+          fn get_hidden(self: &Self) -> Hidden = Hidden{}
+        }
+      }
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-property-private
+- id: MOD-public-inherent-method-cannot-expose-private-nominal
+  category: modules
+  title: public inherent method cannot expose private nominal
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      struct Hidden {}
+
+      pub struct Exposer {
+        pub fn hidden(self: &Self) -> Hidden = Hidden{} // @primary public-method-private
+      }
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-method-private
+- id: MOD-public-trait-method-cannot-expose-private-nominal
+  category: modules
+  title: public trait method cannot expose private nominal
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      struct Hidden {}
+
+      pub trait Reveal {
+        fn reveal(self: &Self) -> Hidden // @primary public-trait-method-private
+      }
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-trait-method-private
+- id: MOD-public-enum-payload-cannot-expose-private-nominal
+  category: modules
+  title: public enum payload cannot expose private nominal
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      struct Hidden {}
+
+      pub enum Event {
+        Secret(Hidden) // @primary public-enum-payload-private
+      }
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-enum-payload-private
+- id: MOD-public-const-cannot-expose-private-nominal
+  category: modules
+  title: public const cannot expose private nominal
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      struct Hidden {}
+      pub const HIDDEN: Hidden = Hidden{} // @primary public-const-private
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-const-private
+- id: MOD-public-type-alias-cannot-bridge-private-nominal
+  category: modules
+  title: public type alias cannot bridge private nominal
+  file_set_root: .
+  files:
+    app/api.eglur: |
+      module app::api
+
+      struct Hidden {}
+      type Internal = Hidden
+      pub type Exposed = Internal // @primary public-alias-private
+    app/main.eglur: |
+      module app::main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: public-alias-private
+- id: MOD-package-public-api-allows-contract-local-foreign-reexport
+  category: modules
+  title: package public API allows a contract-local foreign re-export
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      facade = { path = "deps/facade" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      facade = { target = "$root/facade", path = "deps/facade" }
+
+      [[packages]]
+      node = "$root/facade"
+      name = "facade"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      model = { target = "$root/model", path = "../model" }
+
+      [[packages]]
+      node = "$root/model"
+      name = "model"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+      import facade::api::{FacadeLabel, TokenAlias, make, pass}
+
+      fn main!() -> Res[Str, Str] {
+        let token: TokenAlias = pass(make(7))
+        yield Ok(to_str(token.facade_label()))
+      }
+    deps/facade/Eglur.toml: |
+      [package]
+      name = "facade"
+      version = "1.0.0"
+
+      [dependencies]
+      model = { path = "../model" }
+    deps/facade/src/api.eglur: |
+      module api
+      pub import bridge::{Label, Token as PublicToken}
+
+      pub type TokenAlias = PublicToken
+
+      pub trait FacadeLabel {
+        fn facade_label(self: &Self) -> i64
+      }
+
+      impl FacadeLabel for PublicToken {
+        fn facade_label(self: &Self) -> i64 = self.value
+      }
+
+      pub fn keep[T: Label](value: T) -> T = value
+      pub fn make(value: i64) -> PublicToken = PublicToken{ value: value }
+      pub fn pass(token: PublicToken) -> PublicToken = token
+    deps/facade/src/bridge.eglur: |
+      module bridge
+      pub import model::types::{Label, Token}
+    deps/model/Eglur.toml: |
+      [package]
+      name = "model"
+      version = "1.0.0"
+    deps/model/src/types.eglur: |
+      module types
+
+      pub trait Label {
+        fn label(self: &Self) -> i64
+      }
+
+      pub struct Token {
+        pub field value: i64
+      }
+
+      impl Label for Token {
+        fn label(self: &Self) -> i64 = self.value
+      }
+  entry: src/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: MOD-package-public-api-rejects-private-import-of-foreign-type
+  category: modules
+  title: package public API rejects a private import of a foreign type
+  files:
+    Eglur.toml: |
+      [package]
+      name = "app"
+      version = "0.1.0"
+
+      [dependencies]
+      facade = { path = "deps/facade" }
+      model = { path = "deps/model" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "app"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      facade = { target = "$root/facade", path = "deps/facade" }
+      model = { target = "$root/model", path = "deps/model" }
+
+      [[packages]]
+      node = "$root/facade"
+      name = "facade"
+      version = "1.0.0"
+      source = "path"
+
+      [packages.dependencies]
+      model = { target = "$root/model", path = "../model" }
+
+      [[packages]]
+      node = "$root/model"
+      name = "model"
+      version = "1.0.0"
+      source = "path"
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+    deps/facade/Eglur.toml: |
+      [package]
+      name = "facade"
+      version = "1.0.0"
+
+      [dependencies]
+      model = { path = "../model" }
+    deps/facade/src/api.eglur: |
+      module api
+      import model::types::Token
+
+      type InternalToken = Token
+      pub fn pass(token: InternalToken) -> InternalToken = token // @primary foreign-private-import
+    deps/model/Eglur.toml: |
+      [package]
+      name = "model"
+      version = "1.0.0"
+    deps/model/src/types.eglur: |
+      module types
+
+      pub struct Token {
+        pub field value: i64
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: foreign-private-import
+- id: MOD-package-public-api-rejects-sibling-foreign-reexport
+  category: modules
+  title: package public API rejects a sibling module foreign re-export
+  files:
+    Eglur.toml: |
+      [package]
+      name = "facade"
+      version = "0.1.0"
+
+      [dependencies]
+      model = { path = "deps/model" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "facade"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      model = { target = "$root/model", path = "deps/model" }
+
+      [[packages]]
+      node = "$root/model"
+      name = "model"
+      version = "1.0.0"
+      source = "path"
+    src/api.eglur: |
+      module api
+      import model::types::Token
+
+      pub fn pass(token: Token) -> Token = token // @primary foreign-sibling-reexport
+    src/bridge.eglur: |
+      module bridge
+      pub import model::types::Token
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+    deps/model/Eglur.toml: |
+      [package]
+      name = "model"
+      version = "1.0.0"
+    deps/model/src/types.eglur: |
+      module types
+
+      pub struct Token {
+        pub field value: i64
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: foreign-sibling-reexport
+- id: MOD-package-public-import-of-alias-cannot-replace-foreign-reexport
+  category: modules
+  title: package public import of an alias cannot replace a foreign re-export
+  files:
+    Eglur.toml: |
+      [package]
+      name = "facade"
+      version = "0.1.0"
+
+      [dependencies]
+      model = { path = "deps/model" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "facade"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      model = { target = "$root/model", path = "deps/model" }
+
+      [[packages]]
+      node = "$root/model"
+      name = "model"
+      version = "1.0.0"
+      source = "path"
+    src/api.eglur: |
+      module api
+      pub import model::types::TokenAlias
+
+      pub fn pass(token: TokenAlias) -> TokenAlias = token // @primary foreign-public-alias
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+    deps/model/Eglur.toml: |
+      [package]
+      name = "model"
+      version = "1.0.0"
+    deps/model/src/types.eglur: |
+      module types
+
+      pub struct Token {
+        pub field value: i64
+      }
+
+      pub type TokenAlias = Token
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: foreign-public-alias
+- id: MOD-package-public-conformance-rejects-unbridged-foreign-target
+  category: modules
+  title: package public conformance rejects an unbridged foreign target
+  files:
+    Eglur.toml: |
+      [package]
+      name = "facade"
+      version = "0.1.0"
+
+      [dependencies]
+      model = { path = "deps/model" }
+    Eglur.lock: |
+      version = 1
+      root = "$root"
+
+      [[packages]]
+      node = "$root"
+      name = "facade"
+      version = "0.1.0"
+      source = "root"
+
+      [packages.dependencies]
+      model = { target = "$root/model", path = "deps/model" }
+
+      [[packages]]
+      node = "$root/model"
+      name = "model"
+      version = "1.0.0"
+      source = "path"
+    src/api.eglur: |
+      module api
+      import model::types::Token
+
+      pub trait Label {
+        fn label(self: &Self) -> i64
+      }
+
+      impl Label for Token { // @primary foreign-impl-target
+        fn label(self: &Self) -> i64 = self.value
+      }
+    src/main.eglur: |
+      module main
+
+      fn main!() -> Res[Str, Str] {
+        yield Ok("unreachable")
+      }
+    deps/model/Eglur.toml: |
+      [package]
+      name = "model"
+      version = "1.0.0"
+    deps/model/src/types.eglur: |
+      module types
+
+      pub struct Token {
+        pub field value: i64
+      }
+  entry: src/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains:
+      - visibility
+      - private
+      data_keys: []
+      primary_span:
+        marker: foreign-impl-target

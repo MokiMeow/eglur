@@ -1,0 +1,66 @@
+version: '0.1'
+release_history_root: repository-root
+release: v0.1.0
+status: released
+
+artifacts:
+  - selector: docs/spec/*.md
+    role: normative_spec
+    provenance: authored
+    status_source: inventory
+  - selector: docs/spec/open-items/*.md
+    role: release_control
+    provenance: authored
+    status_source: inventory
+  - selector: docs/spec/language/*.md
+    role: normative_spec
+    provenance: authored
+    status_source: inventory
+  - selector: docs/spec/stdlib/*.md
+    role: normative_spec
+    provenance: authored
+    status_source: inventory
+  - selector: docs/spec/stdlib/effect-summaries.yaml
+    role: normative_spec
+    provenance: authored
+    status_source: inventory
+  - selector: docs/spec/errors/*.md
+    role: normative_spec
+    provenance: authored
+    status_source: inventory
+  - selector: docs/spec/errors/diagnostic-contracts.yaml
+    role: normative_spec
+    provenance: authored
+    status_source: inventory
+  - selector: docs/spec/artifact-inventory-v0.1.yaml
+    role: release_control
+    provenance: authored
+    status_source: self
+  - selector: docs/spec/open-items-ledger-v0.1.yaml
+    role: release_control
+    provenance: authored
+    status_source: self
+  - selector: tests/conformance/manifest.yaml
+    role: conformance_definition
+    provenance: authored
+    status_source: self
+  - selector: tests/conformance/probes/registry_cache.yaml
+    role: conformance_definition
+    provenance: authored
+    status_source: inventory
+  - selector: tests/conformance/core/*.yaml
+    role: conformance_definition
+    provenance: authored
+    status_source: manifest
+  - selector: tests/conformance/optional/*.yaml
+    role: conformance_definition
+    provenance: authored
+    status_source: manifest
+  - selector: tests/conformance/tensor/*.yaml
+    role: conformance_definition
+    provenance: authored
+    status_source: manifest
+  - selector: tests/conformance/traceability.yaml
+    role: generated_evidence
+    provenance: generated
+    status_source: self

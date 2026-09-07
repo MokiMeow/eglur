@@ -1,0 +1,13 @@
+[package]
+name = "eglur-eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+eglur-hir = { path = "../eglur-hir" }
+eglur-sema = { path = "../eglur-sema" }
+
+[lints]
+workspace = true

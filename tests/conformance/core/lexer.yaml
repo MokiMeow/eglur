@@ -1,0 +1,693 @@
+tests:
+- id: LEX-leading-utf8-bom-is-ignored
+  category: lexer
+  title: leading UTF-8 BOM is ignored
+  code: "\ufefffn main!() -> Res[Str, Str] {\n  yield Ok(\"ok\")\n}\n"
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: LEX-non-leading-utf8-bom-is-rejected
+  category: lexer
+  title: UTF-8 BOM is rejected outside the leading source position
+  code: "x\ufeff"
+  expect:
+    compile_error:
+      code: LEX_INVALID_CHAR
+      primary_span:
+        source: code
+        bytes:
+          start: 1
+          end: 4
+      message_contains:
+      - lex
+      - invalid
+      - char
+      data_keys: []
+- id: LEX-invalid-utf8-source-is-rejected-before-tokenization
+  category: lexer
+  title: invalid UTF-8 source is rejected before tokenization
+  code_bytes_hex: "ff"
+  expect:
+    compile_error:
+      code: LEX_INVALID_UTF8
+      primary_span:
+        source: code
+        bytes:
+          start: 0
+          end: 1
+      message_contains:
+      - source
+      - UTF-8
+      - invalid
+      data_keys: []
+- id: LEX-physical-line-endings-normalize-for-lexing
+  category: lexer
+  title: LF CRLF and lone CR line endings normalize for lexing
+  code: "fn main!() -> Res[Str, Str] {\r\n  let x = 1\r  let y = 2\n  yield Ok(to_str(wrapping_add(x, y)))\r\n}\r\n"
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: LEX-space-tab-and-form-feed-are-horizontal-whitespace
+  category: lexer
+  title: space tab and form feed are horizontal whitespace
+  code: "fn\fmain!()\t-> Res[Str, Str] {\n  yield Ok(\"ok\")\n}\n"
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: LEX-line-comment-may-end-at-physical-eof
+  category: lexer
+  title: line comment may terminate at physical end of file
+  code: |-
+    fn main!() -> Res[Str, Str] {
+      yield Ok("ok")
+    } // comment reaches EOF
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: LEX-unicode-is-allowed-in-comments-and-strings
+  category: lexer
+  title: Unicode separators and emoji remain data in comments and strings
+  code: "fn main!() -> Res[Str, Str] {\n  /* \U0001F600 \u0085 \u2028 \u2029 */\n  yield Ok(\"\U0001F600\u0085\u2028\u2029\")\n}\n"
+  expect:
+    value:
+      kind: Ok
+      repr: '"\U0001F600\u0085\u2028\u2029"'
+- id: LEX-non-ascii-identifier-is-rejected-in-v0-1
+  category: lexer
+  title: non-ASCII identifier is rejected in v0.1
+  code: "fn main!() -> Res[Str, Str] {\n  \uBCC0\uC218 = 1\n  yield Ok(\"x\")\n}\n"
+  expect:
+    compile_error:
+      code: LEX_INVALID_IDENTIFIER_CHAR
+      message_contains:
+      - identifier
+      - ASCII
+      - invalid
+      data_keys: []
+- id: LEX-non-ascii-axis-name-is-an-identifier-character-error
+  category: lexer
+  title: non-ASCII XID scalar after axis quote is an identifier character error
+  code: "'변수"
+  expect:
+    compile_error:
+      code: LEX_INVALID_IDENTIFIER_CHAR
+      primary_span:
+        source: code
+        bytes:
+          start: 1
+          end: 4
+      message_contains:
+      - identifier
+      - ASCII
+      - invalid
+      data_keys: []
+- id: LEX-combining-xid-continue-is-an-identifier-character-error
+  category: lexer
+  title: non-ASCII XID continue scalar is an identifier character error
+  code: "\u0301"
+  expect:
+    compile_error:
+      code: LEX_INVALID_IDENTIFIER_CHAR
+      primary_span:
+        source: code
+        bytes:
+          start: 0
+          end: 2
+      message_contains:
+      - identifier
+      - ASCII
+      - invalid
+      data_keys: []
+- id: LEX-emoji-is-an-invalid-character
+  category: lexer
+  title: emoji outside comments and strings is an invalid character
+  code: "\U0001F600"
+  expect:
+    compile_error:
+      code: LEX_INVALID_CHAR
+      primary_span:
+        source: code
+        bytes:
+          start: 0
+          end: 4
+      message_contains:
+      - lex
+      - invalid
+      - char
+      data_keys: []
+- id: LEX-vertical-tab-is-not-source-whitespace
+  category: lexer
+  title: vertical tab is not source whitespace
+  code: "\u000b"
+  expect:
+    compile_error:
+      code: LEX_INVALID_CHAR
+      primary_span:
+        source: code
+        bytes:
+          start: 0
+          end: 1
+      message_contains:
+      - lex
+      - invalid
+      - char
+      data_keys: []
+- id: LEX-next-line-scalar-is-not-a-source-newline
+  category: lexer
+  title: Unicode next line scalar is not a source newline
+  code: "\u0085"
+  expect:
+    compile_error:
+      code: LEX_INVALID_CHAR
+      primary_span:
+        source: code
+        bytes:
+          start: 0
+          end: 2
+      message_contains:
+      - lex
+      - invalid
+      - char
+      data_keys: []
+- id: LEX-line-separator-scalar-is-not-a-source-newline
+  category: lexer
+  title: Unicode line separator scalar is not a source newline
+  code: "\u2028"
+  expect:
+    compile_error:
+      code: LEX_INVALID_CHAR
+      primary_span:
+        source: code
+        bytes:
+          start: 0
+          end: 3
+      message_contains:
+      - lex
+      - invalid
+      - char
+      data_keys: []
+- id: LEX-paragraph-separator-scalar-is-not-a-source-newline
+  category: lexer
+  title: Unicode paragraph separator scalar is not a source newline
+  code: "\u2029"
+  expect:
+    compile_error:
+      code: LEX_INVALID_CHAR
+      primary_span:
+        source: code
+        bytes:
+          start: 0
+          end: 3
+      message_contains:
+      - lex
+      - invalid
+      - char
+      data_keys: []
+- id: LEX-unsupported-sigil-prefixed-identifier-is-rejected
+  category: lexer
+  title: unsupported sigil-prefixed identifier is rejected
+  code: |
+    fn main!() -> Res[Str, Str] {
+      @x = 1
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_CHAR
+      message_contains:
+      - lex
+      - invalid
+      - char
+      data_keys: []
+- id: LEX-compact-alias-pattern-keeps-at-as-a-delimiter
+  category: lexer
+  title: alias delimiter may be adjacent to its binder and nested pattern
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = match Some(7) {
+        whole@Some(inner) => inner,
+        None => 0,
+      }
+      yield Ok(to_str(value))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: LEX-super-is-an-ordinary-identifier-outside-import-roots
+  category: lexer
+  title: super is an ordinary identifier outside relative import roots
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let super = "ok"
+      yield Ok(super)
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: LEX-unterminated-string-reports-lexical-error
+  category: lexer
+  title: unterminated string reports lexical error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let s = "abc
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_UNTERMINATED_STRING
+      message_contains:
+      - string
+      - unterminated
+      data_keys: []
+- id: LEX-invalid-escape-sequence-reports-lexical-error
+  category: lexer
+  title: invalid escape sequence reports lexical error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let s = "\q"
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_ESCAPE
+      message_contains:
+      - escape
+      - invalid
+      data_keys: []
+
+- id: LEX-unicode-escape-accepts-scalar-range-endpoints
+  category: lexer
+  title: Unicode escape accepts both scalar value range endpoints
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let lower = "\u{0}"
+      let upper = "\u{10ffff}"
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: LEX-unicode-escape-rejects-surrogate-value
+  category: lexer
+  title: Unicode escape rejects surrogate value
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let s = "\u{d800}"
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_ESCAPE
+      message_contains:
+      - escape
+      - invalid
+      data_keys: []
+
+- id: LEX-unicode-escape-rejects-value-above-unicode-range
+  category: lexer
+  title: Unicode escape rejects value above Unicode range
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let s = "\u{110000}"
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_ESCAPE
+      message_contains:
+      - escape
+      - invalid
+      data_keys: []
+
+- id: LEX-horizontal-whitespace-separates-format-string-prefix
+  category: lexer
+  title: horizontal whitespace separates format string prefix
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 1
+      let text = f "x={x}"
+      yield Ok(text)
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: LEX-block-comment-separates-format-string-prefix
+  category: lexer
+  title: block comment separates format string prefix
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 1
+      let text = f/* not a prefix */"x={x}"
+      yield Ok(text)
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: LEX-unterminated-block-comment-reports-lexical-error
+  category: lexer
+  title: unterminated block comment reports lexical error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      /* comment
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_UNTERMINATED_BLOCK_COMMENT
+      message_contains:
+      - comment
+      - unterminated
+      data_keys: []
+- id: LEX-nested-block-comment-reports-lexical-error
+  category: lexer
+  title: nested block comment reports lexical error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      /* outer
+         /* inner */
+      */
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_NESTED_BLOCK_COMMENT
+      message_contains:
+      - comment
+      - nested
+      data_keys: []
+- id: LEX-block-comment-newline-separates-line-oriented-statements
+  category: lexer
+  title: block comment newline separates line oriented statements
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let first = 1 /* comment
+      continues */ let second = 2
+      yield Ok(to_str(wrapping_add(first, second)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: LEX-inline-block-comment-does-not-separate-line-oriented-statements
+  category: lexer
+  title: inline block comment does not separate line oriented statements
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let first = 1 /* inline */ let second = 2
+      yield Ok(to_str(wrapping_add(first, second)))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: LEX-axis-literals
+  category: lexer
+  title: axis literals
+  code: |
+    import std::tensor::{AxisError, ones}
+
+    fn main!() -> Res[Str, AxisError] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'batch, #1:'feature])?
+        let i = x.axis_of('batch)?
+        yield Ok(to_str(i.to_nat()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"0"'
+- id: LEX-axis-index-literal-reuses-decimal-separators
+  category: lexer
+  title: axis index literal reuses decimal separators
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let i = #1_0
+      yield Ok(to_str(i.to_nat()))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"10"'
+- id: LEX-decimal-components-accept-strict-interior-separators
+  category: lexer
+  title: decimal components accept strict interior separators
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let integer = 1_000
+      let decimal = 1_000.25_00
+      let exponent = 1e1_0
+      let signed_exponent = 1.25E-1_0
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: LEX-malformed-numeric-literal-reports-lexical-error
+  category: lexer
+  title: malformed numeric literal reports lexical error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 1.2.3
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_NUMBER
+      message_contains:
+      - number
+      - invalid
+      data_keys: []
+- id: LEX-consecutive-decimal-separators-report-lexical-error
+  category: lexer
+  title: consecutive decimal separators report lexical error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 1__0
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_NUMBER
+      message_contains:
+      - number
+      - invalid
+      data_keys: []
+- id: LEX-exponent-separator-adjacency-reports-lexical-error
+  category: lexer
+  title: exponent separator adjacency reports lexical error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = 1e_2
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_NUMBER
+      message_contains:
+      - number
+      - invalid
+      data_keys: []
+- id: LEX-started-axis-index-with-trailing-separator-reports-number-error
+  category: lexer
+  title: started axis index with trailing separator reports number error
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = #1_
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_NUMBER
+      message_contains:
+      - number
+      - invalid
+      data_keys: []
+- id: LEX-axis-index-without-initial-digit-reports-invalid-char
+  category: lexer
+  title: axis index without initial digit reports invalid char
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let x = #_1
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_CHAR
+      message_contains:
+      - lex
+      - invalid
+      - char
+      data_keys: []
+- id: LEX-trailing-dot-numeric-form-is-rejected-as-incomplete-postfix-syntax
+  category: lexer
+  title: trailing-dot numeric form is rejected as incomplete postfix syntax
+  code: |
+    fn main!() -> Res[Str, Str] {
+      yield Ok(to_str(1.))
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: LEX-leading-dot-numeric-form-is-not-a-float-literal
+  category: lexer
+  title: leading dot numeric form is not a float literal
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let value = .5
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: PARSE_EXPECTED_EXPRESSION
+      message_contains:
+      - parse
+      - expected
+      - expression
+      data_keys: []
+- id: LEX-compact-numeric-ranges-are-accepted
+  category: lexer
+  title: compact numeric ranges are accepted
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let mut sum = 0
+      for i in 0..3 {
+        sum = wrapping_add(sum, i)
+      }
+      for i in 0..=2 {
+        sum = wrapping_add(sum, i)
+      }
+      yield Ok(to_str(sum))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"6"'
+- id: LEX-compact-integer-and-float-member-access-are-accepted
+  category: lexer
+  title: compact integer and float member access are accepted
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let integer = 1.to_str()
+      let floating = 1.0.to_str()
+      yield Ok(to_str((integer == "1") && (floating == "1.0")))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: LEX-ellipsis-token-and-closed-range-token-coexist-without-lexical-conflict
+  category: lexer
+  title: ellipsis token and closed-range token coexist without lexical conflict
+  code: |
+    import std::tensor::{TransformError, ones}
+
+    fn main!() -> Res[Str, Union[Str, TransformError]] =
+      result {
+        let x = ones[f32](2,3,4)
+        let y = x.then(rearrange{ b ...tail -> ...tail b })?
+        let mut s = 0
+        for i in 0 ..= 2 {
+          s = wrapping_add(s, i)
+        }
+        let ok = (to_str(y.shape()) == "[3,4,2]") && (s == 3)
+        yield if ok { yield Ok("ok") } else { yield Err("bad") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: LEX-duration-suffix-numeric-literal-is-rejected-in-v0-1-baseline
+  category: lexer
+  title: duration-suffix numeric literal is rejected in v0.1 baseline
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let d = 2s
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_NUMBER
+      message_contains:
+      - number
+      - invalid
+      data_keys: []
+
+- id: LEX-logical-or-and-zero-argument-closure-pipes-remain-distinct
+  category: lexer
+  title: logical or and zero argument closure pipes remain distinct
+  code: |
+    fn invoke(f: Fn() -> Bool) -> Bool = f()
+
+    fn main!() -> Res[Str, Str] {
+      let logical = false || true
+      let compact = invoke({ || true })
+      let spaced = invoke({ | | true })
+      yield Ok(to_str(logical && compact && spaced))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: LEX-tuple-index-context-preserves-chains-and-trivia
+  category: lexer
+  title: tuple index context preserves chains and horizontal trivia
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let pair = ((2, 3), (5, 7))
+      let compact = pair.0.1
+      let spaced = pair . 1 . 0
+      let commented = pair./* keep */0.1
+      let ok = (compact == 3) && (spaced == 5) && (commented == 3)
+      yield Ok(to_str(ok))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: LEX-tuple-index-context-rejects-exponent-suffix
+  category: lexer
+  title: tuple index context rejects exponent suffix
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let pair = (1, 2)
+      let value = pair.0e1
+      yield Ok(to_str(value))
+    }
+  expect:
+    compile_error:
+      code: LEX_INVALID_NUMBER
+      message_contains:
+      - number
+      - invalid
+      data_keys: []

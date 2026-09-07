@@ -1,0 +1,211 @@
+# Suite: tensor/promotion.yaml
+# Harness assumptions:
+# - For runtime tests, harness compiles and runs `main!()`.
+# - Side effects are captured in order via `std::test::emit!`.
+# - Diagnostics use structured code/message/data assertions.
+
+tests:
+- id: TPM-bool-plus-bool-promotes-to-u8
+  category: tensor_promotion
+  title: bool plus bool promotes to u8
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        let a = ones[bool](1)
+        let b = ones[bool](1)
+        let c = add(a, b)?
+        yield Ok(to_str(c.dtype()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"u8"'
+
+- id: TPM-i8-plus-u8-promotes-to-i8
+  category: tensor_promotion
+  title: i8 plus u8 promotes to i8
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        let a = ones[i8](1)
+        let b = ones[u8](1)
+        let c = add(a, b)?
+        yield Ok(to_str(c.dtype()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"i8"'
+
+- id: TPM-u8-plus-i8-also-promotes-to-i8
+  category: tensor_promotion
+  title: u8 plus i8 also promotes to i8
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        let a = ones[u8](1)
+        let b = ones[i8](1)
+        let c = add(a, b)?
+        yield Ok(to_str(c.dtype()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"i8"'
+
+- id: TPM-f16-plus-bf16-promotes-to-bf16
+  category: tensor_promotion
+  title: f16 plus bf16 promotes to bf16
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        let a = ones[f16](1)
+        let b = ones[bf16](1)
+        let c = add(a, b)?
+        yield Ok(to_str(c.dtype()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"bf16"'
+
+- id: TPM-int-plus-float-promotes-to-float-operand-dtype
+  category: tensor_promotion
+  title: int plus float promotes to float operand dtype
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        let a = ones[i32](1)
+        let b = ones[f16](1)
+        let c = add(a, b)?
+        yield Ok(to_str(c.dtype()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"f16"'
+
+- id: TPM-complex-plus-float-promotes-to-complex-operand-dtype
+  category: tensor_promotion
+  title: complex plus float promotes to complex operand dtype
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        let a = ones[complex64](1)
+        let b = ones[f64](1)
+        let c = add(a, b)?
+        yield Ok(to_str(c.dtype()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"complex64"'
+
+- id: TPM-bool-plus-float-promotes-to-float-dtype
+  category: tensor_promotion
+  title: bool plus float promotes to float dtype
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones}
+    import std::tensor::prim::add
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        let a = ones[bool](1)
+        let b = ones[f32](1)
+        let c = add(a, b)?
+        yield Ok(to_str(c.dtype()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"f32"'
+
+- id: TPM-implicit-promotion-conversion-overflow-fails-with-int-overflow
+  category: tensor_promotion
+  title: implicit promotion conversion overflow fails with INT_OVERFLOW
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, ones, zeros}
+    import std::tensor::prim::{add, wrapping_sub}
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        let i = ones[i8](1)
+        let u = wrapping_sub(zeros[u8](1), ones[u8](1))?   // 255
+        _ = add(i, u)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+      data_equals:
+        operation: add
+        dtype: i8
+
+- id: TPM-promoted-integer-arithmetic-overflow-fails-after-successful-conversion
+  category: tensor_promotion
+  title: promoted integer arithmetic overflow fails after both operands convert successfully
+  code: |
+    import std::tensor::{DTypeError, NumericError, ShapeError, Tensor, ones}
+    import std::tensor::prim::{add, wrapping_add, wrapping_sub}
+
+    fn max_i8() -> Res[Tensor[i8], Union[ShapeError, DTypeError]] =
+      result {
+        let mut x = ones[i8](1)
+        x = wrapping_add(x, x)?
+        x = wrapping_add(x, x)?
+        x = wrapping_add(x, x)?
+        x = wrapping_add(x, x)?
+        x = wrapping_add(x, x)?
+        x = wrapping_add(x, x)?
+        x = wrapping_add(x, x)?
+        let maximum = wrapping_sub(x, ones[i8](1))?
+        yield Ok(maximum)
+      }
+
+    fn main!() -> Res[Str, Union[ShapeError, DTypeError, NumericError]] =
+      result {
+        _ = add(max_i8()?, ones[u8](1))?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+      data_equals:
+        operation: add
+        dtype: i8

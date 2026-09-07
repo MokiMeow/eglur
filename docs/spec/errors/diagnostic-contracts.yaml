@@ -1,0 +1,4671 @@
+# Normative machine-readable diagnostic field contract.
+# Trigger conditions and contextual requirement explanations remain in the
+# per-code Markdown catalogs. Conformance-stable per-code assertions and the
+# global source-span interchange contracts live here.
+version: '0.1'
+defaults:
+  help: optional
+  related: optional
+source_span:
+  fields:
+    required:
+      kind: source
+      source: Str
+      bytes: ByteRange
+    optional:
+      text: TextRange
+  byte_range:
+    fields:
+      required:
+        start: i64
+        end: i64
+    start_base: 0
+    unit: physical_byte
+    end_semantics: half_open
+  text_range:
+    fields:
+      required:
+        start: SourceCoordinate
+        end: SourceCoordinate
+    coordinate:
+      fields:
+        required:
+          line: i64
+          column: i64
+      line_base: 1
+      column_base: 1
+      column_unit: unicode_scalar
+    normalization:
+      leading_utf8_bom: ignored
+      line_endings: logical_lf
+    end_semantics: half_open
+  ordering:
+    source_keys:
+    - source
+    - bytes.start
+    - bytes.end
+  examples:
+  - id: text-source-span
+    span:
+      kind: source
+      source: main.eglur
+      bytes:
+        start: 12
+        end: 13
+      text:
+        start:
+          line: 2
+          column: 4
+        end:
+          line: 2
+          column: 5
+  - id: byte-only-source-span
+    span:
+      kind: source
+      source: invalid.eglur
+      bytes:
+        start: 12
+        end: 13
+primary_span:
+  variants:
+    source: SourceSpan
+    unavailable:
+      kind: unavailable
+related_span:
+  fields:
+    required:
+      span: SourceSpan
+      label: Str
+  ordering:
+    default: source
+    code_specific_override: true
+    source_keys:
+    - span.source
+    - span.bytes.start
+    - span.bytes.end
+    - label
+  examples:
+  - id: trait-method-declaration
+    spans:
+    - span:
+        kind: source
+        source: traits.eglur
+        bytes:
+          start: 16
+          end: 55
+        text:
+          start:
+            line: 2
+            column: 3
+          end:
+            line: 2
+            column: 42
+      label: trait method declared here
+  - id: ownership-path-causes
+    spans:
+    - span:
+        kind: source
+        source: app.eglur
+        bytes:
+          start: 40
+          end: 65
+        text:
+          start:
+            line: 5
+            column: 3
+          end:
+            line: 5
+            column: 28
+      label: ownership root created here
+    - span:
+        kind: source
+        source: app.eglur
+        bytes:
+          start: 80
+          end: 81
+        text:
+          start:
+            line: 7
+            column: 12
+          end:
+            line: 7
+            column: 13
+      label: first consume occurs here
+codes:
+  ABSTRACT_NUMERIC_KIND_VALUE_POSITION:
+    severity: error
+    message:
+      all_of:
+      - abstract
+      - numeric
+      - kind
+      - value
+      - position
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - kind
+      - position
+      conditional_required: []
+      exact_value_keys: []
+  AMBIGUOUS_DIMS:
+    severity: error
+    message:
+      all_of:
+      - ambiguous
+      - dims
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - operation
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  ASSIGNMENT_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - assignment
+      - type
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - expected_type
+      - actual_type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - expected_type
+      - actual_type
+  ASSIGN_TARGET_NOT_ASSIGNABLE:
+    severity: error
+    message:
+      all_of:
+      - assignment
+      - target
+      - assignable
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - target_kind
+      conditional_required: []
+      exact_value_keys: []
+  ASSOCIATED_TYPE_CYCLE:
+    severity: error
+    message:
+      all_of:
+      - associated type
+      - cycle
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - trait
+      - type
+      - cycle
+      conditional_required: []
+      exact_value_keys: []
+  ASSOCIATED_TYPE_PROJECTION_INVALID:
+    severity: error
+    message:
+      all_of:
+      - associated type
+      - projection
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - base
+      - name
+      - reason
+      conditional_required: []
+      exact_value_keys: []
+  ATTRIBUTE_TARGET_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - attribute
+      - target
+      - unsupported
+      any_of: []
+      templates: []
+      contextual:
+      - Attribute name token.
+    data:
+      required: []
+      required_if_emitted:
+      - attribute
+      - target
+      conditional_required: []
+      exact_value_keys: []
+  ATTRIBUTE_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - attribute
+      - unsupported
+      any_of: []
+      templates: []
+      contextual:
+      - Attribute name token.
+    data:
+      required: []
+      required_if_emitted:
+      - attribute
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_ALIASED_HEADER:
+    severity: error
+    message:
+      all_of:
+      - aliased
+      - header
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_DUPLICATE_NAME:
+    severity: error
+    message:
+      all_of:
+      - duplicate
+      any_of: []
+      templates: []
+      contextual:
+      - Duplicated name when printable.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_MAPPING_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - axis
+      - mapping
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_MISMATCH:
+    severity: error
+    message:
+      all_of: []
+      any_of: []
+      templates: []
+      contextual:
+      - Operation name.
+      - Expected and actual axis-name sets or binding summary.
+    data:
+      required:
+      - operation
+      - expected_axes
+      - actual_axes
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_NAMES_DROPPED:
+    severity: warning
+    message:
+      all_of:
+      - dropped
+      - name
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_NAME_NOT_FOUND:
+    severity: error
+    message:
+      all_of: []
+      any_of: []
+      templates: []
+      contextual:
+      - Missing axis name.
+      - Phrase indicating name lookup failed (for example `not found`).
+    data:
+      required:
+      - name
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_OUT_OF_RANGE:
+    severity: error
+    message:
+      all_of:
+      - axis
+      - rank
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - axis
+      - rank
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_OVERLAY_PERMUTED:
+    severity: note
+    message:
+      all_of:
+      - permute
+      any_of: []
+      templates: []
+      contextual:
+      - Result overlay summary.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_PACK_ANON_DUPLICATE:
+    severity: error
+    message:
+      all_of:
+      - axis pack
+      - anonymous
+      - duplicate
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  AXIS_PACK_UNBOUND:
+    severity: error
+    message:
+      all_of:
+      - axis pack
+      - unbound
+      any_of: []
+      templates: []
+      contextual:
+      - Pack identifier when available.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  BINDING_TYPE_UNDETERMINED:
+    severity: error
+    message:
+      all_of:
+      - binding
+      - type
+      - initializer
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  BREAK_OUTSIDE_LOOP:
+    severity: error
+    message:
+      all_of:
+      - break
+      - loop
+      - outside
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  BROADCAST_SHAPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - broadcast
+      - shape
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - operation
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CALL_ARG_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - call
+      - argument
+      - type
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - reason
+      - actual_type
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: reason
+          equals: parameter_type
+        required:
+        - parameter
+        - expected_type
+      - when:
+          key: reason
+          equals: type_family
+        required:
+        - expected_family
+      - when:
+          key: reason
+          equals: overload_no_match
+        required:
+        - candidates
+      exact_value_keys:
+      - reason
+      - parameter
+      - expected_type
+      - actual_type
+      - expected_family
+      - candidates
+  CALL_DUPLICATE_NAMED_ARG:
+    severity: error
+    message:
+      all_of:
+      - call
+      - named
+      - duplicate
+      any_of: []
+      templates: []
+      contextual:
+      - Parameter name when available.
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      conditional_required: []
+      exact_value_keys: []
+  CALL_MISSING_ARG:
+    severity: error
+    message:
+      all_of:
+      - call
+      - argument
+      - missing
+      - parameter
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - parameter
+      conditional_required: []
+      exact_value_keys: []
+  CALL_POSITIONAL_AFTER_NAMED:
+    severity: error
+    message:
+      all_of:
+      - call
+      - positional
+      - named
+      - order
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CALL_TOO_MANY_ARGS:
+    severity: error
+    message:
+      all_of:
+      - call
+      - argument
+      - too many
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CALL_UNKNOWN_NAMED_ARG:
+    severity: error
+    message:
+      all_of:
+      - call
+      - named
+      - unknown
+      any_of: []
+      templates: []
+      contextual:
+      - Argument name when available.
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      conditional_required: []
+      exact_value_keys: []
+  CAST_INVALID_DTYPE_PAIR:
+    severity: error
+    message:
+      all_of:
+      - cast
+      - dtype
+      - pair
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - src_dtype
+      - dst_dtype
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CAST_INVALID_VALUE:
+    severity: error
+    message:
+      all_of:
+      - cast
+      - invalid
+      - value
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - src_dtype
+      - dst_dtype
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CLOSED_TRAIT_IMPL_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - closed
+      - trait
+      - impl
+      - package
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - trait
+      - declaring_package
+      - implementing_package
+      conditional_required: []
+      exact_value_keys: []
+  COMPARISON_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - comparison
+      - type
+      any_of: []
+      templates: []
+      contextual:
+      - Operator token (`==`, `!=`, `<`, `<=`, `>`, or `>=`).
+      - At least one operand type name.
+    data:
+      required:
+      - operation
+      - left_type
+      - right_type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - operation
+      - left_type
+      - right_type
+  CONSTRUCTOR_PAYLOAD_FORM_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - constructor
+      - payload
+      - form
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - constructor
+      - expected_form
+      - actual_form
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - constructor
+      - expected_form
+      - actual_form
+  CONSTRUCTOR_TARGET_KIND_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - constructor
+      - target
+      - kind
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - target
+      - expected_kind
+      - actual_kind
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - target
+      - expected_kind
+      - actual_kind
+  CONST_CYCLE:
+    severity: error
+    message:
+      all_of:
+      - const
+      - cycle
+      - dependency
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CONST_FORWARD_REFERENCE:
+    severity: error
+    message:
+      all_of:
+      - const
+      - forward
+      - reference
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CONST_INIT_NOT_CONST:
+    severity: error
+    message:
+      all_of:
+      - const
+      - initializer
+      - const-evaluable
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CONTINUE_OUTSIDE_LOOP:
+    severity: error
+    message:
+      all_of:
+      - continue
+      - loop
+      - outside
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CONTRACT_NON_ATOMIC_AXIS:
+    severity: error
+    message:
+      all_of:
+      - contract
+      - atomic
+      any_of: []
+      templates: []
+      contextual:
+      - Offending token class (for example `+` or `*`) when available.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  CONTRACT_OUTPUT_LABEL_DUPLICATE:
+    severity: error
+    message:
+      all_of:
+      - contract
+      - output
+      - label
+      - duplicate
+      any_of: []
+      templates: []
+      contextual:
+      - Offending output label when available.
+    data:
+      required: []
+      required_if_emitted:
+      - operation
+      - label
+      - output_labels
+      conditional_required: []
+      exact_value_keys: []
+  CONTRACT_OUTPUT_LABEL_UNBOUND:
+    severity: error
+    message:
+      all_of:
+      - contract
+      - output
+      - label
+      any_of: []
+      templates: []
+      contextual:
+      - Offending output label when available.
+    data:
+      required: []
+      required_if_emitted:
+      - operation
+      - label
+      - input_labels
+      - output_labels
+      conditional_required: []
+      exact_value_keys: []
+  CONTRACT_REPEATED_LABEL_DIM_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - contract
+      - repeated
+      - label
+      - mismatch
+      any_of: []
+      templates: []
+      contextual:
+      - Offending axis label when available.
+    data:
+      required:
+      - operation
+      - label
+      - expected_dim
+      - actual_dim
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - operation
+      - label
+      - expected_dim
+      - actual_dim
+  DERIVE_DUPLICATE_ENTRY:
+    severity: error
+    message:
+      all_of:
+      - derive
+      - duplicate
+      - trait
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - trait
+      conditional_required: []
+      exact_value_keys: []
+  DERIVE_ELIGIBILITY_FAILED:
+    severity: error
+    message:
+      all_of:
+      - derive
+      - eligibility
+      - failed
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - trait
+      - reason
+      conditional_required:
+      - when:
+          key: reason
+          equals: recursive_type_argument_growth
+        required:
+        - trait
+        - reason
+      exact_value_keys:
+      - reason
+  DERIVE_EXPANSION_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - derive
+      - expansion
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - trait
+      - item_kind
+      conditional_required: []
+      exact_value_keys: []
+  DERIVE_TARGET_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - derive
+      - target
+      - struct
+      - enum
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - target
+      conditional_required: []
+      exact_value_keys: []
+  DERIVE_TRAIT_RESOLUTION_FAILED:
+    severity: error
+    message:
+      all_of:
+      - derive
+      - trait
+      - resolve
+      - failed
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - trait
+      conditional_required: []
+      exact_value_keys: []
+  DERIVE_TRAIT_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - derive
+      - trait
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - trait
+      conditional_required: []
+      exact_value_keys: []
+  DETERMINISM_UNAVAILABLE:
+    severity: error
+    message:
+      all_of:
+      - determinism
+      - strict
+      - unavailable
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - profile
+      - backend
+      - device
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  DIM_BINDING_REQUIRED:
+    severity: error
+    message:
+      all_of:
+      - dim
+      - binding
+      - required
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - operation
+      - variables
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  DOMAIN_INVALID_VALUE:
+    severity: error
+    message:
+      all_of:
+      - domain
+      - invalid
+      - value
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - domain
+      - value
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  DROP_OWN_REQUIRES_MOVE:
+    severity: error
+    message:
+      all_of:
+      - drop_own
+      - move
+      - required
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  DUPLICATE_KEY:
+    severity: error
+    message:
+      all_of:
+      - duplicate
+      any_of: []
+      templates: []
+      contextual:
+      - Key value when printable.
+    data:
+      required:
+      - key
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  DYN_MUST_BE_EXPLICIT:
+    severity: error
+    message:
+      all_of:
+      - dyn
+      any_of: []
+      templates: []
+      contextual:
+      - Trait name when available.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  DYN_TRAIT_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - dyn
+      - trait
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - trait
+      conditional_required: []
+      exact_value_keys: []
+  EFFECT_SIGNATURE:
+    severity: error
+    message:
+      all_of:
+      - '&mut Self'
+      any_of: []
+      templates: []
+      contextual:
+      - Method name.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  EFFECT_VIOLATION:
+    severity: error
+    message:
+      all_of: []
+      any_of:
+      - - non-bang
+        - Fn
+        - pure
+      templates: []
+      contextual:
+      - Effect source token (for example `print!`, `now!`, `spawn!`, assignment target path).
+    data:
+      required: []
+      required_if_emitted:
+      - caller
+      - callee
+      conditional_required: []
+      exact_value_keys: []
+  EINOP_OUTPUT_LABEL_DUPLICATE:
+    severity: error
+    message:
+      all_of:
+      - einop
+      - output
+      - label
+      - duplicate
+      any_of: []
+      templates: []
+      contextual:
+      - Offending identifier or pack name when available.
+    data:
+      required: []
+      required_if_emitted:
+      - operation
+      - label
+      - output_index
+      conditional_required: []
+      exact_value_keys: []
+  ENUM_VARIANT_VISIBILITY_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - enum
+      - variant
+      - visibility
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  EXTERN_ABI_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - extern
+      - abi
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - abi
+      conditional_required: []
+      exact_value_keys: []
+  EXTERN_LINKAGE_FAILED:
+    severity: error
+    message:
+      all_of:
+      - extern
+      - linkage
+      - failed
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - symbol
+      - abi
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  EXTERN_SIGNATURE_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - extern
+      - signature
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - position
+      - type
+      conditional_required: []
+      exact_value_keys: []
+  EXTERN_VISIBILITY_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - extern
+      - visibility
+      - forbidden
+      - pub
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  FN_RETURN_TYPE_REQUIRED:
+    severity: error
+    message:
+      all_of:
+      - return
+      - type
+      - required
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  FOLD_RES_FAIL:
+    severity: error
+    message:
+      all_of: []
+      any_of: []
+      templates:
+      - pattern: index {index}
+        fields:
+        - index
+      contextual: []
+    data:
+      required:
+      - index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  FOR_ITERABLE_NOT_SEQUENCE:
+    severity: error
+    message:
+      all_of:
+      - for
+      - in
+      - sequence
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  FSTRING_INVALID_PLACEHOLDER:
+    severity: error
+    message:
+      all_of:
+      - f-string
+      - placeholder
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  FSTRING_UNRESOLVED_NAME:
+    severity: error
+    message:
+      all_of:
+      - f-string
+      - placeholder
+      - unresolved
+      any_of: []
+      templates: []
+      contextual:
+      - Placeholder name when available.
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      conditional_required: []
+      exact_value_keys: []
+  GENERIC_PARAMETER_REDECLARATION:
+    severity: error
+    message:
+      all_of:
+      - generic parameter
+      - redeclare
+      any_of: []
+      templates: []
+      contextual:
+      - Offending parameter name.
+    data:
+      required:
+      - name
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - name
+  GRAD_ARGNUM_OUT_OF_RANGE:
+    severity: error
+    message:
+      all_of:
+      - argnum
+      - range
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - argnum
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  GRAD_CUSTOM_KERNEL_NO_VJP:
+    severity: error
+    message:
+      all_of:
+      - custom
+      - kernel
+      - vjp
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  GRAD_LOWERING_FAILED:
+    severity: error
+    message:
+      all_of:
+      - grad
+      - lowering
+      - failed
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  GRAD_NON_FLOAT_DTYPE:
+    severity: error
+    message:
+      all_of:
+      - grad
+      - non-float
+      - dtype
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  GRAD_NON_TENSOR_ARG:
+    severity: error
+    message:
+      all_of:
+      - grad
+      - non-tensor
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  GRAD_PRIMAL_NOT_SCALAR:
+    severity: error
+    message:
+      all_of:
+      - scalar
+      - primal
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  GRAD_RESULT_SHAPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - grad
+      - shape
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  GRAD_UNSUPPORTED_PRIMITIVE:
+    severity: error
+    message:
+      all_of:
+      - grad
+      - unsupported
+      - primitive
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IF_BOOL_UNKNOWN_BRANCH_FOR_BOOL:
+    severity: error
+    message:
+      all_of:
+      - if
+      - Bool
+      - unknown
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IF_BRANCH_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - if
+      - branch
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - left_type
+      - right_type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - left_type
+      - right_type
+  IF_CONDITION_NOT_BOOL:
+    severity: error
+    message:
+      all_of:
+      - if
+      - Bool
+      - Tri
+      - condition
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IF_MISSING_ELSE_VALUE:
+    severity: error
+    message:
+      all_of:
+      - if
+      - else
+      - value
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IF_TRI_UNKNOWN_BRANCH_REQUIRED:
+    severity: error
+    message:
+      all_of:
+      - if
+      - Tri
+      - unknown
+      - required
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IMMUTABLE_BINDING_ASSIGN:
+    severity: error
+    message:
+      all_of:
+      - immutable
+      - assignment
+      any_of: []
+      templates: []
+      contextual:
+      - Target name or kind when available.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IMPL_GENERIC_ERROR_UNION_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - impl
+      - generic parameter
+      - error union
+      - unsupported
+      any_of: []
+      templates: []
+      contextual:
+      - Offending parameter name.
+    data:
+      required:
+      - parameter
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - parameter
+  IMPL_UNCONSTRAINED_TYPE_PARAM:
+    severity: error
+    message:
+      all_of:
+      - impl
+      - type parameter
+      - unconstrained
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IMPORT_BANG_ALIAS_MUST_BANG:
+    severity: error
+    message:
+      all_of:
+      - bang
+      - alias
+      - '!'
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IMPORT_NOT_FOUND:
+    severity: error
+    message:
+      all_of:
+      - import
+      - not found
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IMPORT_ROOT_CONFLICT:
+    severity: error
+    message:
+      all_of:
+      - import
+      - root
+      - conflict
+      any_of: []
+      templates: []
+      contextual:
+      - First-segment name.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  IMPORT_SUPER_AT_ROOT:
+    severity: error
+    message:
+      all_of:
+      - super
+      - root
+      - import
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  INCONSISTENT_DIMS:
+    severity: error
+    message:
+      all_of:
+      - inconsistent
+      - dims
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - operation
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  INDEX_OUT_OF_BOUNDS:
+    severity: error
+    message:
+      all_of:
+      - index
+      - out
+      - bounds
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  INDEX_SPEC_ARITY_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - index
+      - spec
+      - arity
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - source_rank
+      - consuming_items
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - source_rank
+      - consuming_items
+  INDEX_SPEC_REST_DUPLICATE:
+    severity: error
+    message:
+      all_of:
+      - index
+      - spec
+      - Rest
+      - duplicate
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - count
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - count
+  INHERITANCE_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - inheritance
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  INT_DIV_BY_ZERO:
+    severity: error
+    message:
+      all_of:
+      - int
+      - div
+      - zero
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - operation
+      - dtype
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  INT_REM_BY_ZERO:
+    severity: error
+    message:
+      all_of:
+      - int
+      - rem
+      - zero
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - operation
+      - dtype
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  INT_OVERFLOW:
+    severity: error
+    message:
+      all_of:
+      - int
+      - overflow
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - operation
+      - dtype
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - operation
+      - dtype
+  ITEM_REQUIRES_RANK0:
+    severity: error
+    message:
+      all_of:
+      - item
+      - rank
+      - '0'
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - rank
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  LET_PATTERN_DUPLICATE_BINDING:
+    severity: error
+    message:
+      all_of:
+      - let
+      - pattern
+      - duplicate
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      conditional_required: []
+      exact_value_keys: []
+  LET_PATTERN_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - let
+      - pattern
+      - type
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - reason
+      - pattern_kind
+      - actual_type
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: reason
+          equals: unit_required
+        required:
+        - expected_type
+      - when:
+          key: reason
+          equals: tuple_arity
+        required:
+        - expected_count
+        - actual_count
+      exact_value_keys:
+      - reason
+      - pattern_kind
+      - expected_type
+      - actual_type
+      - expected_count
+      - actual_count
+  LET_PATTERN_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - let
+      - pattern
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - pattern_kind
+      conditional_required: []
+      exact_value_keys: []
+  LEX_INVALID_CHAR:
+    severity: error
+    message:
+      all_of:
+      - lex
+      - invalid
+      - char
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  LEX_INVALID_ESCAPE:
+    severity: error
+    message:
+      all_of:
+      - escape
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  LEX_INVALID_IDENTIFIER_CHAR:
+    severity: error
+    message:
+      all_of:
+      - identifier
+      - ASCII
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  LEX_INVALID_NUMBER:
+    severity: error
+    message:
+      all_of:
+      - number
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  LEX_INVALID_UTF8:
+    severity: error
+    message:
+      all_of:
+      - source
+      - UTF-8
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  LEX_NESTED_BLOCK_COMMENT:
+    severity: error
+    message:
+      all_of:
+      - comment
+      - nested
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  LEX_UNTERMINATED_BLOCK_COMMENT:
+    severity: error
+    message:
+      all_of:
+      - comment
+      - unterminated
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  LEX_UNTERMINATED_STRING:
+    severity: error
+    message:
+      all_of:
+      - string
+      - unterminated
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  LOCAL_BINDING_REDECLARATION:
+    severity: error
+    message:
+      all_of:
+      - local
+      - binding
+      - redeclared
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      conditional_required: []
+      exact_value_keys: []
+  LOGICAL_OPERAND_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - logical
+      - operand
+      - Bool
+      - Tri
+      any_of: []
+      templates: []
+      contextual:
+      - Operator token (`&&` or `||`).
+      - At least one offending operand type name.
+    data:
+      required:
+      - operation
+      - left_type
+      - right_type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - operation
+      - left_type
+      - right_type
+  LOOP_CONDITION_NOT_BOOL:
+    severity: error
+    message:
+      all_of:
+      - while
+      - Bool
+      - condition
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MAP_AXIS_BATCH_SIZE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - axis
+      - size
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - index
+      - axis
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MAP_AXIS_EMPTY_BATCH_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - empty
+      - batch
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MAP_AXIS_IN_AXES_ARITY_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - in_axes
+      - arity
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - expected_count
+      - actual_count
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - expected_count
+      - actual_count
+  MAP_AXIS_NON_TENSOR_MAPPED:
+    severity: error
+    message:
+      all_of:
+      - non-tensor
+      - mapped
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MAP_AXIS_NO_MAPPED_ARGS:
+    severity: error
+    message:
+      all_of:
+      - map_axis
+      - mapped
+      - none
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MAP_AXIS_OPT_NONE:
+    severity: note
+    message:
+      all_of: []
+      any_of: []
+      templates:
+      - pattern: index {index}
+        fields:
+        - index
+      contextual: []
+    data:
+      required:
+      - index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MAP_AXIS_OUT_AXIS_OUT_OF_RANGE:
+    severity: error
+    message:
+      all_of:
+      - out_axis
+      - range
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - axis
+      - rank
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MAP_AXIS_OUT_NAME_DUPLICATE:
+    severity: error
+    message:
+      all_of:
+      - out_name
+      - duplicate
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MAP_AXIS_RESULT_OVERLAY_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - overlay
+      - mismatch
+      - index
+      any_of: []
+      templates: []
+      contextual:
+      - Expected and actual overlay summaries.
+    data:
+      required:
+      - index
+      - expected_overlay
+      - actual_overlay
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - index
+  MAP_AXIS_RESULT_SHAPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - shape
+      - mismatch
+      - index
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - index
+  MAP_AXIS_RES_FAIL:
+    severity: error
+    message:
+      all_of: []
+      any_of: []
+      templates:
+      - pattern: index {index}
+        fields:
+        - index
+      contextual: []
+    data:
+      required:
+      - index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MATCH_ARM_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - match
+      - arm
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - left_type
+      - right_type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - left_type
+      - right_type
+  MATCH_BINDING_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - match
+      - binding
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - reason
+      - binding
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: reason
+          equals: binding_type
+        required:
+        - left_type
+        - right_type
+      exact_value_keys:
+      - reason
+      - binding
+      - left_type
+      - right_type
+  MATCH_GUARD_EFFECT:
+    severity: error
+    message:
+      all_of:
+      - match
+      - guard
+      - effect
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MATCH_GUARD_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - match
+      - guard
+      - Bool
+      - type
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - expected_type
+      - actual_type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - expected_type
+      - actual_type
+  MATCH_NON_EXHAUSTIVE:
+    severity: error
+    message:
+      all_of:
+      - match
+      - non-exhaustive
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MATCH_UNREACHABLE_ARM:
+    severity: error
+    message:
+      all_of:
+      - match
+      - unreachable
+      - arm
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  METHOD_NOT_FOUND:
+    severity: error
+    message:
+      all_of: []
+      any_of: []
+      templates: []
+      contextual:
+      - Missing method name.
+      - Preferred or nearby candidate when available (for example suggest `sort!` for missing `sort`).
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  METHOD_RECEIVER_INVALID:
+    severity: error
+    message:
+      all_of:
+      - method
+      - receiver
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - position
+      - type
+      conditional_required: []
+      exact_value_keys: []
+  MODULE_PATH_COMPONENT_INVALID:
+    severity: error
+    message:
+      all_of:
+      - module
+      - path
+      - component
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - name
+      - index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - name
+      - index
+  MODULE_PATH_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - module
+      - path
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MODULE_ROOT_RESERVED:
+    severity: error
+    message:
+      all_of:
+      - module
+      - root
+      - std
+      - reserved
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - name
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - name
+  MOVE_REQUIRES_OWN:
+    severity: error
+    message:
+      all_of:
+      - move
+      - Own
+      - operand
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - value
+      conditional_required: []
+      exact_value_keys: []
+  MUTABLE_CAPTURE_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - mutable
+      - capture
+      - forbidden
+      any_of: []
+      templates: []
+      contextual:
+      - Captured binding name or assignment target path.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  MULTI_INPUT_NOT_ALLOWED:
+    severity: error
+    message:
+      all_of:
+      - multi-input
+      any_of: []
+      templates: []
+      contextual:
+      - Operation name.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  NAME_AMBIGUOUS:
+    severity: error
+    message:
+      all_of:
+      - ambiguous
+      - name
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      - candidates
+      conditional_required: []
+      exact_value_keys: []
+  NAME_NOT_FOUND:
+    severity: error
+    message:
+      all_of:
+      - name
+      - not found
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      conditional_required: []
+      exact_value_keys: []
+  NEGATIVE_IMPL_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - negative
+      - impl
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  NON_BANG_MUT_PARAM_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - non-bang
+      - '&mut'
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  NOT_A_VIEW:
+    severity: error
+    message:
+      all_of:
+      - view
+      - affine
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  NUMEL_MISMATCH_GROW:
+    severity: error
+    message:
+      all_of:
+      - numel
+      - grow
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  NUMEL_MISMATCH_SHRINK:
+    severity: error
+    message:
+      all_of:
+      - numel
+      - shrink
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  NUMERIC_CHECKED_CONTEXT_REQUIRED:
+    severity: error
+    message:
+      all_of:
+      - numeric
+      - checked
+      any_of: []
+      templates: []
+      contextual:
+      - Operator token (for example `+` or `/`).
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  NUMERIC_OPERAND_NOT_NUMERIC:
+    severity: error
+    message:
+      all_of:
+      - numeric
+      - operand
+      any_of: []
+      templates: []
+      contextual:
+      - Operator token (for example `+` or `*`).
+      - Offending operand type name (for example `Tri`).
+    data:
+      required:
+      - reason
+      - operation
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: reason
+          equals: unary_operand
+        required:
+        - actual_type
+      - when:
+          key: reason
+          equals: binary_operand
+        required:
+        - left_type
+        - right_type
+      exact_value_keys:
+      - reason
+      - operation
+      - actual_type
+      - left_type
+      - right_type
+  ORPHAN_RULE_VIOLATION:
+    severity: error
+    message:
+      all_of:
+      - orphan
+      - local
+      - trait
+      - type
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  OVERLOAD_AMBIGUOUS:
+    severity: error
+    message:
+      all_of:
+      - overload
+      - ambiguous
+      any_of: []
+      templates: []
+      contextual:
+      - Callable name.
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      - candidates
+      conditional_required: []
+      exact_value_keys: []
+  OVERLOAD_MARKER_REQUIRED:
+    severity: error
+    message:
+      all_of:
+      - overload
+      - required
+      any_of: []
+      templates: []
+      contextual:
+      - Callable name.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  OVERLOAD_OVERLAP:
+    severity: error
+    message:
+      all_of:
+      - overload
+      - overlap
+      any_of: []
+      templates: []
+      contextual:
+      - Callable name.
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      - candidates
+      conditional_required: []
+      exact_value_keys: []
+  OVERLOAD_RETURN_ONLY_DIFFERENCE:
+    severity: error
+    message:
+      all_of:
+      - overload
+      - return type
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  OVERLOAD_VISIBILITY_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - overload
+      - visibility
+      - mismatch
+      any_of: []
+      templates: []
+      contextual:
+      - Callable name.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  OWNERSHIP_DISCARD_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - ownership
+      - discard
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - position
+      conditional_required: []
+      exact_value_keys: []
+  OWNERSHIP_DOUBLE_MOVE:
+    severity: error
+    message:
+      all_of:
+      - ownership
+      - move
+      - already consumed
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - value
+      conditional_required: []
+      exact_value_keys: []
+  OWNERSHIP_GUARD_CONSUME_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - ownership
+      - guard
+      - consume
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - value
+      conditional_required: []
+      exact_value_keys: []
+  OWNERSHIP_PATH_UNBALANCED:
+    severity: error
+    message:
+      all_of:
+      - ownership
+      - path
+      - exactly once
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  OWNERSHIP_PROFILE_DISABLED:
+    severity: error
+    message:
+      all_of:
+      - ownership
+      - profile
+      - disabled
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - profile
+      conditional_required: []
+      exact_value_keys: []
+  OWNERSHIP_TRANSFER_REQUIRES_MOVE:
+    severity: error
+    message:
+      all_of:
+      - ownership
+      - transfer
+      - move
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - value
+      - position
+      conditional_required: []
+      exact_value_keys: []
+  OWNERSHIP_TYPE_POSITION_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - Own
+      - type position
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - position
+      - type
+      conditional_required: []
+      exact_value_keys: []
+  OWNERSHIP_USE_AFTER_DISCHARGE:
+    severity: error
+    message:
+      all_of:
+      - ownership
+      - use
+      - discharged
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - value
+      conditional_required: []
+      exact_value_keys: []
+  OWN_REQUIRES_LOCAL_BINDING:
+    severity: error
+    message:
+      all_of:
+      - own
+      - local binding
+      - required
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - value
+      conditional_required: []
+      exact_value_keys: []
+  OWN_REQUIRES_NON_OWN:
+    severity: error
+    message:
+      all_of:
+      - own
+      - Own
+      - non-Own
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - value
+      conditional_required: []
+      exact_value_keys: []
+  PACKAGE_DEP_CYCLE:
+    severity: error
+    message:
+      all_of: [package, dependency, cycle]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PACKAGE_DEP_DUPLICATE:
+    severity: error
+    message:
+      all_of: [package, dependency, duplicate]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package, dependency, existing_dependency]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [package, dependency, existing_dependency]
+  PACKAGE_DEP_KEY_INVALID:
+    severity: error
+    message:
+      all_of: [package, dependency, key, invalid]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [dependency]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [dependency]
+  PACKAGE_DEP_PATH_INVALID:
+    severity: error
+    message:
+      all_of: [package, dependency, path, invalid]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [dependency, path, reason]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [dependency, path, reason]
+  PACKAGE_DEP_PATH_UNRESOLVED:
+    severity: error
+    message:
+      all_of: [package, dependency, path, unresolved]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [dependency, path, reason]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [dependency, path, reason]
+  PACKAGE_DEP_SOURCE_CONFLICT:
+    severity: error
+    message:
+      all_of: [package, dependency, source, conflict]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [dependency, reason]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [dependency, reason]
+  PACKAGE_DEP_VERSION_INVALID:
+    severity: error
+    message:
+      all_of: [package, dependency, version, invalid]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [dependency, reason]
+      required_if_emitted: [version]
+      conditional_required:
+      - when:
+          key: reason
+          equals: malformed
+        required: [version]
+      exact_value_keys: [dependency, reason, version]
+  PACKAGE_LOCK_INVALID:
+    severity: error
+    message:
+      all_of: [package, lock, invalid]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PACKAGE_LOCK_MISSING:
+    severity: error
+    message:
+      all_of: [package, lock, missing, Eglur.lock]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PACKAGE_LOCK_OUT_OF_SYNC:
+    severity: error
+    message:
+      all_of: [package, lock, out of sync]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [reason, node]
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: reason
+          equals: dependency_selector
+        required: [dependency]
+      exact_value_keys: [reason, node, dependency]
+  PACKAGE_MANIFEST_MISSING:
+    severity: error
+    message:
+      all_of: [package, manifest, missing, Eglur.toml]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package_role]
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: package_role
+          equals: dependency
+        required: [dependency, source_kind]
+      - when:
+          key: source_kind
+          equals: path
+        required: [path]
+      - when:
+          key: source_kind
+          equals: registry
+        required: [registry_package]
+      exact_value_keys: [package_role, dependency, source_kind, path, registry_package]
+  PACKAGE_MANIFEST_NAME_INVALID:
+    severity: error
+    message:
+      all_of: [package, manifest, name, invalid]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [reason]
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: reason
+          equals: empty
+        required: [name]
+      - when:
+          key: reason
+          equals: invalid_character
+        required: [name]
+      exact_value_keys: [name, reason]
+  PACKAGE_MANIFEST_NAME_MISSING:
+    severity: error
+    message:
+      all_of: [package, manifest, name, missing]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PACKAGE_MANIFEST_PACKAGE_TABLE_MISSING:
+    severity: error
+    message:
+      all_of: [package, manifest, missing]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PACKAGE_MANIFEST_VERSION_INVALID:
+    severity: error
+    message:
+      all_of: [package, manifest, version, invalid]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: [version]
+      conditional_required: []
+      exact_value_keys: []
+  PACKAGE_MANIFEST_VERSION_MISSING:
+    severity: error
+    message:
+      all_of: [package, manifest, version, missing]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PACKAGE_NAME_CONFLICT:
+    severity: error
+    message:
+      all_of: [package, name, conflict]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package, existing_dependency, dependency, existing_version, version, existing_source_kind, source_kind, reason]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [package, existing_dependency, dependency, existing_version, version, existing_source_kind, source_kind, reason]
+  PACKAGE_REGISTRY_ALIAS_INVALID:
+    severity: error
+    message:
+      all_of: [package, registry, alias, invalid]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [reason]
+      required_if_emitted: [alias, authority]
+      conditional_required:
+      - when:
+          key: reason
+          equals: alias
+        required: [alias]
+      - when:
+          key: reason
+          equals: authority_type
+        required: [alias]
+      - when:
+          key: reason
+          equals: authority
+        required: [alias, authority]
+      exact_value_keys: [reason, alias, authority]
+  PACKAGE_REGISTRY_INTEGRITY_MISMATCH:
+    severity: error
+    message:
+      all_of: [package, registry, integrity, mismatch]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package, version, expected, actual]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [package, version, expected, actual]
+  PACKAGE_REGISTRY_LIMIT_EXCEEDED:
+    severity: error
+    message:
+      all_of: [package, registry, limit, exceeded]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package, version, resource, limit, observed_at_least]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [package, version, resource, limit, observed_at_least]
+  PACKAGE_REGISTRY_RELEASE_MISSING:
+    severity: error
+    message:
+      all_of: [package, registry, release, missing]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package, version]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [package, version]
+  PACKAGE_REGISTRY_SELECTOR_INVALID:
+    severity: error
+    message:
+      all_of: [package, registry, selector, invalid]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [dependency, reason]
+      required_if_emitted: [registry, package]
+      conditional_required:
+      - when:
+          key: reason
+          equals: unknown_alias
+        required: [registry, package]
+      - when:
+          key: reason
+          equals: qualified_with_alias
+        required: [registry, package]
+      - when:
+          key: reason
+          equals: unqualified_without_alias
+        required: [package]
+      - when:
+          key: reason
+          equals: invalid_package
+        required: [package]
+      exact_value_keys: [dependency, reason, registry, package]
+  PACKAGE_REGISTRY_TRANSPORT_FAILED:
+    severity: error
+    message:
+      all_of: [package, registry, transport, failed]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package, version]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [package, version]
+  PACKAGE_REGISTRY_TREE_INVALID:
+    severity: error
+    message:
+      all_of: [package, registry, tree, invalid]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package, version, reason]
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: reason
+          equals: invalid_path_encoding
+        required: [path_hex]
+      - when:
+          key: reason
+          equals: invalid_path
+        required: [path]
+      - when:
+          key: reason
+          equals: unsupported_entry_kind
+        required: [path, entry_kind]
+      - when:
+          key: reason
+          equals: duplicate_path
+        required: [path]
+      - when:
+          key: reason
+          equals: case_collision
+        required: [path, existing_path]
+      - when:
+          key: reason
+          equals: file_ancestor
+        required: [path, existing_path]
+      exact_value_keys: [package, version, reason, path, path_hex, entry_kind, existing_path]
+  PACKAGE_SRC_ROOT_MISSING:
+    severity: error
+    message:
+      all_of: [package, src, missing]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package_role]
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: package_role
+          equals: dependency
+        required: [dependency, source_kind]
+      - when:
+          key: source_kind
+          equals: path
+        required: [path]
+      - when:
+          key: source_kind
+          equals: registry
+        required: [registry_package]
+      exact_value_keys: [package_role, dependency, source_kind, path, registry_package]
+  PACKAGE_VERSION_CONFLICT:
+    severity: error
+    message:
+      all_of: [package, version, conflict]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [package, existing_dependency, dependency, existing_version, version]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [package, existing_dependency, dependency, existing_version, version]
+  PACKAGE_VERSION_RANGE_UNSUPPORTED:
+    severity: error
+    message:
+      all_of: [version, range, unsupported]
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [dependency, version_spec]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [dependency, version_spec]
+  PARAM_PATTERN_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - parameter
+      - pattern
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - position
+      - pattern_kind
+      conditional_required: []
+      exact_value_keys: []
+  PARSE_CONTROL_HEAD_BRACE_REQUIRES_GROUPING:
+    severity: error
+    message:
+      all_of:
+      - parse
+      - control head
+      - brace
+      - grouping
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PARSE_EXPECTED_EXPRESSION:
+    severity: error
+    message:
+      all_of:
+      - parse
+      - expected
+      - expression
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PARSE_EXPECTED_PATTERN:
+    severity: error
+    message:
+      all_of:
+      - parse
+      - expected
+      - pattern
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PARSE_INVALID_RANGE_SYNTAX:
+    severity: error
+    message:
+      all_of:
+      - parse
+      - range
+      - syntax
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PARSE_INVALID_REST_POSITION:
+    severity: error
+    message:
+      all_of:
+      - parse
+      - rest
+      - position
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PARSE_RESOURCE_LIMIT_EXCEEDED:
+    severity: error
+    message:
+      all_of:
+      - parse
+      - resource
+      - limit
+      - exceeded
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: [resource, limit, observed_at_least]
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: [resource, limit, observed_at_least]
+  PARSE_UNCLOSED_DELIMITER:
+    severity: error
+    message:
+      all_of:
+      - parse
+      - unclosed
+      - delimiter
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PARSE_UNEXPECTED_TOKEN:
+    severity: error
+    message:
+      all_of:
+      - parse
+      - unexpected
+      - token
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PATTERN_ARITY_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - pattern
+      - arity
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - expected_count
+      - actual_count
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - expected_count
+      - actual_count
+  PATTERN_DUPLICATE_BINDING:
+    severity: error
+    message:
+      all_of:
+      - pattern
+      - binding
+      - duplicate
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - name
+      conditional_required: []
+      exact_value_keys: []
+  PATTERN_DUPLICATE_FIELD:
+    severity: error
+    message:
+      all_of:
+      - pattern
+      - field
+      - duplicate
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - target
+      - field
+      conditional_required: []
+      exact_value_keys: []
+  PATTERN_MISSING_FIELD:
+    severity: error
+    message:
+      all_of:
+      - pattern
+      - field
+      - missing
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - target
+      - field
+      conditional_required: []
+      exact_value_keys: []
+  PATTERN_PAYLOAD_FORM_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - pattern
+      - payload
+      - form
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - owner
+      - variant
+      - expected_form
+      - actual_form
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - owner
+      - variant
+      - expected_form
+      - actual_form
+  PATTERN_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - pattern
+      - type
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - reason
+      - pattern_kind
+      - expected_type
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: reason
+          equals: typed_pattern
+        required:
+        - actual_type
+      exact_value_keys:
+      - reason
+      - pattern_kind
+      - expected_type
+      - actual_type
+  PATTERN_UNKNOWN_FIELD:
+    severity: error
+    message:
+      all_of:
+      - pattern
+      - field
+      - unknown
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - target
+      - field
+      conditional_required: []
+      exact_value_keys: []
+  PLACEHOLDER_INVALID_CONTEXT:
+    severity: error
+    message:
+      all_of:
+      - placeholder
+      - hole
+      - invalid
+      - context
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PROPERTY_ASSIGN_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - property
+      - assignment
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - property
+      conditional_required: []
+      exact_value_keys: []
+  PROP_ACCESSOR_MISSING:
+    severity: error
+    message:
+      all_of:
+      - property
+      - accessor
+      - missing
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - property
+      - accessor
+      conditional_required: []
+      exact_value_keys: []
+  PROP_ACCESSOR_SIGNATURE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - property
+      - accessor
+      - signature
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - property
+      - accessor
+      - reason
+      - actual_signature
+      required_if_emitted: []
+      conditional_required:
+      - when:
+          key: reason
+          equals: signature_mismatch
+        required:
+        - expected_signature
+      - when:
+          key: reason
+          equals: unexpected_accessor
+        required:
+        - candidates
+      exact_value_keys:
+      - property
+      - accessor
+      - reason
+      - expected_signature
+      - actual_signature
+      - candidates
+  PROGRAM_ENTRY_DUPLICATE:
+    severity: error
+    message:
+      all_of:
+      - program
+      - entry
+      - duplicate
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PROGRAM_ENTRY_MISSING:
+    severity: error
+    message:
+      all_of:
+      - program
+      - entry
+      - missing
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PROGRAM_ENTRY_SIGNATURE_INVALID:
+    severity: error
+    message:
+      all_of:
+      - program
+      - entry
+      - signature
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  PURE_COMBINATOR_EFFECTFUL_CALLBACK:
+    severity: error
+    message:
+      all_of:
+      - effectful callback
+      any_of: []
+      templates: []
+      contextual:
+      - Combinator name (for example `traverse_res`).
+      - Suggested bang variant name when available (for example `traverse_res!`).
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  Q_OUTSIDE_RESULT:
+    severity: error
+    message:
+      all_of:
+      - '?'
+      - result
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  RANGE_EXPR_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - range
+      - for
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  RAW_POINTER_TYPE_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - raw pointer
+      - extern
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - position
+      - type
+      conditional_required: []
+      exact_value_keys: []
+  RAW_POINTER_USE_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - raw pointer
+      - use
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - use
+      - type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - use
+  REARRANGE_OUTPUT_DTYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - rearrange
+      - output
+      - dtype
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - output_index
+      - left_type
+      - right_type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - left_type
+      - output_index
+      - right_type
+  REDUCE_BY_ARGUMENTS_INVALID:
+    severity: error
+    message:
+      all_of:
+      - reduce_by
+      - arguments
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  REDUCE_BY_PHASE_INCOMPLETE:
+    severity: error
+    message:
+      all_of:
+      - reduce_by
+      - phase
+      - incomplete
+      - missing
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - expected_axes
+      - actual_axes
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  REDUCE_BY_PHASE_NON_REDUCED_AXIS:
+    severity: error
+    message:
+      all_of:
+      - reduce_by
+      - phase
+      - non-reduced
+      any_of: []
+      templates: []
+      contextual:
+      - Offending axis label when available.
+    data:
+      required:
+      - axis
+      - phase_index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  REDUCE_BY_PHASE_OVERLAP:
+    severity: error
+    message:
+      all_of:
+      - reduce_by
+      - phase
+      - overlap
+      any_of: []
+      templates: []
+      contextual:
+      - Duplicated axis label when available.
+    data:
+      required:
+      - axis
+      - phase_index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  REDUCTION_EMPTY_DOMAIN:
+    severity: error
+    message:
+      all_of:
+      - reduction
+      - empty
+      - domain
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - operation
+      - axis
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - operation
+      - axis
+  REFERENCE_TYPE_POSITION_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - reference
+      - type position
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - position
+      - type
+      conditional_required: []
+      exact_value_keys: []
+  REFERENCE_TARGET_INVALID:
+    severity: error
+    message:
+      all_of:
+      - reference
+      - target
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - access
+      - target_kind
+      conditional_required: []
+      exact_value_keys: []
+  REF_ESCAPE_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - reference
+      - escape
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  RESERVED_BUILTIN_NAME:
+    severity: error
+    message:
+      all_of:
+      - reserved
+      - built-in
+      any_of: []
+      templates: []
+      contextual:
+      - Offending symbol name.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  RESOURCE_DROP_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - resource
+      - drop_own
+      - close!
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - value
+      - resource_type
+      conditional_required: []
+      exact_value_keys: []
+  RESULT_BLOCK_MIXED_KINDS:
+    severity: error
+    message:
+      all_of:
+      - Res
+      - Opt
+      - mixed
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  RESULT_MISSING_YIELD:
+    severity: error
+    message:
+      all_of:
+      - yield
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  RETURN_OUTSIDE_FUNCTION:
+    severity: error
+    message:
+      all_of:
+      - return
+      - function
+      - outside
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  RETURN_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - return
+      - type
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - expected_type
+      - actual_type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - expected_type
+      - actual_type
+  RETURN_VALUE_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - return
+      - Unit
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  RETURN_VALUE_REQUIRED:
+    severity: error
+    message:
+      all_of:
+      - return
+      - value
+      - required
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  RUNTIME_ABORT:
+    severity: error
+    message:
+      all_of:
+      - abort
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - source
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - source
+  SCATTER_SET_DUPLICATE_INDEX:
+    severity: error
+    message:
+      all_of:
+      - scatter
+      - duplicate
+      - index
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  SEGMENT_STRADDLE:
+    severity: error
+    message:
+      all_of:
+      - segment
+      - straddle
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  SELF_TYPE_INVALID:
+    severity: error
+    message:
+      all_of:
+      - Self
+      - scope
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - position
+      conditional_required: []
+      exact_value_keys: []
+  SLICE_STEP_ZERO:
+    severity: error
+    message:
+      all_of:
+      - slice
+      - step
+      - zero
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - value
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  SPECIALIZATION_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - specialization
+      - forbidden
+      any_of: []
+      templates: []
+      contextual:
+      - Trait name.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  STRUCT_FIELD_DEFAULT_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - struct
+      - field
+      - default
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - struct
+      - field
+      conditional_required: []
+      exact_value_keys: []
+  STRUCT_INIT_DUPLICATE_FIELD:
+    severity: error
+    message:
+      all_of:
+      - struct
+      - field
+      - duplicate
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - struct
+      - field
+      conditional_required: []
+      exact_value_keys: []
+  STRUCT_INIT_MISSING_FIELD:
+    severity: error
+    message:
+      all_of:
+      - struct
+      - field
+      - missing
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - struct
+      - field
+      conditional_required: []
+      exact_value_keys: []
+  STRUCT_INIT_PROPERTY_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - struct
+      - property
+      - initializer
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - struct
+      - property
+      conditional_required: []
+      exact_value_keys: []
+  STRUCT_INIT_UNKNOWN_FIELD:
+    severity: error
+    message:
+      all_of:
+      - struct
+      - field
+      - unknown
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - struct
+      - field
+      conditional_required: []
+      exact_value_keys: []
+  TEST_ATTRIBUTE_TARGET_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - test
+      - attribute
+      - target
+      - top-level
+      - function
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - target
+      conditional_required: []
+      exact_value_keys: []
+  TEST_FUNCTION_INVALID_SIGNATURE:
+    severity: error
+    message:
+      all_of:
+      - test
+      - signature
+      - Unit
+      - Res
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - function
+      conditional_required: []
+      exact_value_keys: []
+  TEST_IGNORE_REQUIRES_TEST:
+    severity: error
+    message:
+      all_of:
+      - ignore
+      - requires
+      - test
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - function
+      conditional_required: []
+      exact_value_keys: []
+  TRAIT_BOUND_INVALID:
+    severity: error
+    message:
+      all_of:
+      - trait
+      - bound
+      - invalid
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - parameter
+      - bound
+      - reason
+      conditional_required: []
+      exact_value_keys: []
+  TRAIT_BOUND_NOT_SATISFIED:
+    severity: error
+    message:
+      all_of:
+      - trait
+      - bound
+      - not satisfied
+      any_of: []
+      templates: []
+      contextual:
+      - Bound trait name.
+      - Concrete type when known.
+    data:
+      required:
+      - trait
+      - type
+      required_if_emitted:
+      - parameter
+      conditional_required: []
+      exact_value_keys:
+      - trait
+      - type
+      - parameter
+  TRAIT_EFFECT_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - must match
+      any_of: []
+      templates: []
+      contextual:
+      - Trait method name.
+      - Impl method name.
+    data:
+      required:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+  TRAIT_IMPL_ASSOC_TYPE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - trait
+      - impl
+      - associated type
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - trait
+      - associated_type
+      - reason
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - trait
+      - associated_type
+      - reason
+  TRAIT_IMPL_DUPLICATE:
+    severity: error
+    message:
+      all_of:
+      - impl
+      - duplicate
+      any_of: []
+      templates: []
+      contextual:
+      - Trait name.
+      - Target type name.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  TRAIT_IMPL_MISSING_METHOD:
+    severity: error
+    message:
+      all_of:
+      - trait
+      - method
+      - missing
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - trait
+      - method
+      conditional_required: []
+      exact_value_keys: []
+  TRAIT_IMPL_OVERLAP:
+    severity: error
+    message:
+      all_of:
+      - impl
+      - overlap
+      any_of: []
+      templates: []
+      contextual:
+      - Trait name.
+      - Target type name.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  TRAIT_IMPL_SIGNATURE_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - trait
+      - impl
+      - method
+      - signature
+      - mismatch
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - trait
+      - method
+      - expected_signature
+      - actual_signature
+  TRAIT_METHOD_AMBIGUOUS:
+    severity: error
+    message:
+      all_of:
+      - fully qualified
+      any_of: []
+      templates: []
+      contextual:
+      - At least two candidate trait-qualified names (for example `A.f`, `B.f`).
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  TRAIT_STATE_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - trait
+      - state
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  TRAVERSE_OPT_NONE:
+    severity: note
+    message:
+      all_of: []
+      any_of: []
+      templates:
+      - pattern: index {index}
+        fields:
+        - index
+      contextual: []
+    data:
+      required:
+      - index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  TRAVERSE_RES_FAIL:
+    severity: error
+    message:
+      all_of: []
+      any_of: []
+      templates:
+      - pattern: index {index}
+        fields:
+        - index
+      contextual: []
+    data:
+      required:
+      - index
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  TUPLE_PROJECTION_NON_TUPLE:
+    severity: error
+    message:
+      all_of:
+      - tuple
+      - projection
+      - non-tuple
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - receiver_type
+      conditional_required: []
+      exact_value_keys: []
+  TUPLE_PROJECTION_OUT_OF_BOUNDS:
+    severity: error
+    message:
+      all_of:
+      - tuple
+      - projection
+      - out of bounds
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - index
+      - arity
+      conditional_required: []
+      exact_value_keys: []
+  TYPE_ALIAS_CYCLE:
+    severity: error
+    message:
+      all_of:
+      - type
+      - alias
+      - cycle
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  TYPE_ARG_ARITY_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - type argument
+      - arity
+      any_of: []
+      templates: []
+      contextual:
+      - Expected and actual argument counts when printable.
+    data:
+      required:
+      - expected_count
+      - actual_count
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - expected_count
+      - actual_count
+  TYPE_ARG_BRACKET_SYNTAX_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - type argument
+      - bracket
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  TYPE_ARG_INFERENCE_FAILED:
+    severity: error
+    message:
+      all_of:
+      - type argument
+      - inference
+      - failed
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  TYPE_RECURSIVE_LAYOUT_REQUIRES_INDIRECTION:
+    severity: error
+    message:
+      all_of:
+      - type
+      - recursive
+      - layout
+      - indirection
+      any_of: []
+      templates: []
+      contextual:
+      - At least one type name from the selected cycle edge.
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  UNION_TYPE_ARITY_MISMATCH:
+    severity: error
+    message:
+      all_of:
+      - union
+      - type argument
+      - arity
+      any_of: []
+      templates: []
+      contextual:
+      - Minimum and actual argument counts.
+    data:
+      required:
+      - minimum_count
+      - actual_count
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - minimum_count
+      - actual_count
+  UNION_TYPE_UNSUPPORTED:
+    severity: error
+    message:
+      all_of:
+      - union
+      - Res
+      - unsupported
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - position
+      - type
+      conditional_required: []
+      exact_value_keys: []
+  UNSAFE_REQUIRED:
+    severity: error
+    message:
+      all_of:
+      - unsafe
+      - required
+      any_of: []
+      templates: []
+      contextual:
+      - Unsafe operation symbol when available (for example extern callee name).
+    data:
+      required: []
+      required_if_emitted:
+      - operation
+      - boundary
+      conditional_required: []
+      exact_value_keys: []
+  VAR_DECL_FORBIDDEN:
+    severity: error
+    message:
+      all_of:
+      - var
+      - forbidden
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  VISIBILITY_VIOLATION:
+    severity: error
+    message:
+      all_of:
+      - visibility
+      - private
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys: []
+  WITH_SIZES_UNKNOWN_KEY:
+    severity: error
+    message:
+      all_of:
+      - with_sizes
+      - unknown
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - key
+      - operation
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - key
+      - operation

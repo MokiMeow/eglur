@@ -1,0 +1,704 @@
+tests:
+- id: TMA-map_axis-maps-unary-tensor-function-over-axis-0
+  category: tensor_map_axis
+  title: map_axis maps unary tensor function over axis(0)
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, MapAxisError, ones, map_axis, axis}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, ShapeError, Str, MapAxisError]] =
+      result {
+        let x = ones[f32](2,3,4)
+        let g = map_axis(f, in_axes=axis(0), out_axis=axis(0))
+        let y = g(x)?
+        yield Ok(to_str(y.rank()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: TMA-map_axis-preserves-mixed-mapped-carriers-and-stacks-tensorview-results
+  category: tensor_map_axis
+  title: map_axis preserves mixed mapped carriers and stacks TensorView results
+  code: |
+    import std::tensor::{MapAxisError, Tensor, TensorView, TransformError, axis, map_axis, ones}
+
+    fn select_view(_owned: Tensor[f32], viewed: TensorView[f32]) -> TensorView[f32] = viewed
+    fn accepts_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[MapAxisError, TransformError]] =
+      result {
+        let owned = ones[f32](2,3)
+        let viewed = ones[f32](2,3).then(view{ batch feature -> batch feature })?
+        let g = map_axis(
+          select_view,
+          in_axes=[axis(0), axis(0)].to_vec(),
+          out_axis=axis(0)
+        )
+        let y = g(owned, viewed)?
+        yield Ok(to_str(y.rank() == 2 && accepts_tensor(y)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: TMA-map_axis-stacks-res-wrapped-tensorview-results-into-tensor
+  category: tensor_map_axis
+  title: map_axis stacks Res wrapped TensorView results into Tensor
+  code: |
+    import std::tensor::{MapAxisError, Tensor, TensorView, TransformError, axis, map_axis, ones}
+
+    fn keep_view(x: TensorView[f32]) -> Res[TensorView[f32], Str] = Ok(x)
+    fn accepts_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[MapAxisError, Str, TransformError]] =
+      result {
+        let viewed = ones[f32](2,3).then(view{ batch feature -> batch feature })?
+        let g = map_axis(keep_view, in_axes=axis(0))
+        let y = g(viewed)?
+        yield Ok(to_str(accepts_tensor(y)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: TMA-map_axis-stacks-opt-wrapped-tensorview-results-into-tensor
+  category: tensor_map_axis
+  title: map_axis stacks Opt wrapped TensorView results into Tensor
+  code: |
+    import std::tensor::{MapAxisError, Tensor, TensorView, TransformError, axis, map_axis, ones}
+
+    fn keep_view(x: TensorView[f32]) -> Opt[TensorView[f32]] = Some(x)
+    fn accepts_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[MapAxisError, TransformError]] =
+      result {
+        let viewed = ones[f32](2,3).then(view{ batch feature -> batch feature })?
+        let g = map_axis(keep_view, in_axes=axis(0))
+        let maybe_y = g(viewed)?
+        let ok = match maybe_y {
+          Some(y) => accepts_tensor(y),
+          None => false,
+        }
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: TMA-map_axis-preserves-unmapped-tensorview-parameters
+  category: tensor_map_axis
+  title: map_axis preserves unmapped TensorView parameters
+  code: |
+    import std::tensor::{MapAxisError, Tensor, TensorView, TransformError, axis, map_axis, ones}
+
+    fn select_constant(_mapped: Tensor[f32], constant: TensorView[f32]) -> TensorView[f32] = constant
+
+    fn main!() -> Res[Str, Union[MapAxisError, TransformError]] =
+      result {
+        let mapped = ones[f32](2,4)
+        let constant = ones[f32](3).then(view{ feature -> feature })?
+        let g = map_axis(
+          select_constant,
+          in_axes=[axis(0), None].to_vec()
+        )
+        let y: Tensor[f32] = g(mapped, constant)?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,3]"'
+- id: TMA-map_axis-removes-mapped-axis-overlay-from-tensorview-steps
+  category: tensor_map_axis
+  title: map_axis removes mapped axis overlay from TensorView steps
+  code: |
+    import std::tensor::{AxisError, MapAxisError, TensorView, TransformError, axis, map_axis, ones}
+
+    fn keep_view(x: TensorView[f32]) -> TensorView[f32] = x
+
+    fn main!() -> Res[Str, Union[AxisError, MapAxisError, Str, TransformError]] =
+      result {
+        let source = ones[f32](2,3,4).with_names([
+          #0:'outer,
+          #1:'batch,
+          #2:'feature
+        ])?
+        let viewed = source.then(
+          view{ outer batch feature -> outer batch feature }
+        )?
+        let g = map_axis(
+          keep_view,
+          in_axes=axis(1),
+          out_axis=axis(1),
+          out_name=Some('mapped)
+        )
+        let y = g(viewed)?
+        let ok = ((y.axis_of('outer)? == #0)
+          && (y.axis_of('mapped)? == #1)
+          && (y.axis_of('feature)? == #2)
+          && y.axis_of('batch).is_err())
+        yield if ok { yield Ok("ok") } else { yield Err("bad_axis") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: TMA-map_axis-contextual-expected-fn-monomorphizes-generic-callback
+  category: tensor_map_axis
+  title: map_axis contextual expected Fn monomorphizes generic callback
+  code: |
+    import std::tensor::{MapAxisError, Tensor, axis, map_axis, ones}
+
+    fn identity[T](x: T) -> T = x
+
+    fn main!() -> Res[Str, MapAxisError] =
+      result {
+        let g: Fn(Tensor[f32]) -> Res[Tensor[f32], MapAxisError] = map_axis(identity, in_axes=axis(0))
+        let y = g(ones[f32](2,3))?
+        yield Ok(to_str(y.rank()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"2"'
+- id: TMA-map_axis-does-not-infer-generic-callback-from-later-returned-callable-use
+  category: tensor_map_axis
+  title: map_axis does not infer generic callback from later returned callable use
+  code: |
+    import std::tensor::{Tensor, axis, map_axis, ones}
+
+    fn identity[T](x: T) -> T = x
+
+    fn main!() -> Res[Str, Str] {
+      let g = map_axis(identity, in_axes=axis(0))
+      _ = g(ones[f32](2,3))
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: TYPE_ARG_INFERENCE_FAILED
+      message_contains:
+      - type argument
+      - inference
+      - failed
+      data_keys: []
+- id: TMA-map_axis-does-not-convert-tensor-to-preserved-tensorview-parameter
+  category: tensor_map_axis
+  title: map_axis does not convert Tensor to preserved TensorView parameter
+  code: |
+    import std::tensor::{TensorView, axis, map_axis, ones}
+
+    fn keep_view(x: TensorView[f32]) -> TensorView[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      let g = map_axis(keep_view, in_axes=axis(0))
+      _ = g(ones[f32](2,3))
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - parameter
+      - expected_type
+      data_equals:
+        reason: parameter_type
+- id: TMA-map_axis-does-not-convert-tensorview-to-preserved-tensor-parameter
+  category: tensor_map_axis
+  title: map_axis does not convert TensorView to preserved Tensor parameter
+  code: |
+    import std::tensor::{Tensor, TransformError, axis, map_axis, ones}
+
+    fn keep_tensor(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let viewed = ones[f32](2,3).then(view{ batch feature -> batch feature })?
+        let g = map_axis(keep_tensor, in_axes=axis(0))
+        _ = g(viewed)
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - parameter
+      - expected_type
+      data_equals:
+        reason: parameter_type
+- id: TMA-map_axis-rejects-callback-results-outside-the-closed-tensor-carrier-families
+  category: tensor_map_axis
+  title: map_axis rejects callback results outside the closed tensor carrier families
+  code: |
+    import std::tensor::{Tensor, axis, map_axis}
+
+    fn scalar_result(_x: Tensor[f32]) -> i64 = 0
+
+    fn main!() -> Res[Str, Str] {
+      _ = map_axis(scalar_result, in_axes=axis(0))
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - expected_family
+      data_equals:
+        reason: type_family
+        actual_type: i64
+        expected_family: tensor_carrier
+- id: TMA-map_axis-supports-in-axes-none-for-constant-tensor-argument
+  category: tensor_map_axis
+  title: map_axis supports in_axes None for constant tensor argument
+  code: |
+    import std::tensor::{AxisError, MapAxisError, ones, map_axis, axis}
+    import std::tensor::prim::add
+    import std::tensor::{DTypeError, ShapeError, Tensor}
+
+    fn f(x: Tensor[f32], bias: Tensor[f32]) -> Res[Tensor[f32], Union[ShapeError, DTypeError]] = add(x, bias)
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, ShapeError, Str, MapAxisError]] =
+      result {
+        let x = ones[f32](4,2,3)
+        let bias = ones[f32](2,3)
+        let g = map_axis(f, in_axes=[axis(0), None].to_vec(), out_axis=axis(0))
+        let y = g(x, bias)?
+        yield Ok(to_str(y.rank()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"3"'
+- id: TMA-map_axis-inserts-stacked-axis-at-out-axis-and-applies-out-name
+  category: tensor_map_axis
+  title: map_axis inserts stacked axis at out_axis and applies out_name
+  code: |
+    import std::tensor::{AxisError, DTypeError, ShapeError, MapAxisError, ones, map_axis, axis}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, ShapeError, Str, MapAxisError]] =
+      result {
+        let x = ones[f32](2,3,4).with_names([#0:'outer, #1:'batch, #2:'feat])?
+        let g = map_axis(f, in_axes=axis(1), out_axis=axis(1), out_name=Some('vm))
+        let y = g(x)?
+        let ok = ((y.axis_of('outer)? == #0)
+          && (y.axis_of('vm)? == #1)
+          && (y.axis_of('feat)? == #2)
+          && y.axis_of('batch).is_err())
+        yield if ok { yield Ok("ok") } else { yield Err("bad_axis") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: TMA-map_axis-overlay-equality-ignores-map-insertion-order
+  category: tensor_map_axis
+  title: map_axis result overlay equality ignores map insertion order
+  code: |
+    import std::tensor::{AxisError, DTypeError, DeterminismError, ShapeError, ones, zeros, map_axis, axis, MapAxisError}
+    import std::tensor::index::{set_at!, IndexItem, ScatterMode}
+    import std::tensor::{IndexError, Tensor}
+
+    fn f(x: Tensor[i32]) -> Res[Tensor[i32], Union[AxisError, IndexError]] =
+      result {
+        let v = x.item()?
+        let y = if v == 0 {
+          yield ones[i32](2,3).with_names([#0:'row, #1:'col])?
+        } else {
+          yield ones[i32](2,3).with_names([#1:'col, #0:'row])?
+        }
+        yield Ok(y)
+      }
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, DeterminismError, IndexError, ShapeError, Str, MapAxisError]] =
+      result {
+        let mut x = zeros[i32](2)
+        let idx = [1]
+        let vals = ones[i32](1)
+        set_at!(&mut x, [IndexItem::Take(idx)].to_vec(), vals, mode=ScatterMode::Assign)?
+        let g = map_axis(f, in_axes=axis(0), out_axis=axis(0), out_name=Some('batch))
+        let y = g(x)?
+        let ok = ((y.names().len() == 3)
+          && (y.axis_of('batch)? == #0)
+          && (y.axis_of('row)? == #1)
+          && (y.axis_of('col)? == #2))
+        yield if ok { yield Ok("ok") } else { yield Err("bad_axis") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: TMA-in-axes-arity-mismatch-is-compile-time-map_axis-in-axes-arity-mismatch
+  category: tensor_map_axis
+  title: in_axes arity mismatch is compile-time MAP_AXIS_IN_AXES_ARITY_MISMATCH
+  code: |
+    import std::tensor::{ones, map_axis, axis}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32], y: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      let a = ones[f32](2,3)
+      let b = ones[f32](2,3)
+      let g = map_axis(f, in_axes=[axis(0)].to_vec(), out_axis=axis(0))
+      _ = g(a, b)
+      yield Ok("done")
+    }
+  expect:
+    compile_error:
+      code: MAP_AXIS_IN_AXES_ARITY_MISMATCH
+      message_contains:
+      - in_axes
+      - arity
+      - mismatch
+      data_keys:
+      - expected_count
+      - actual_count
+      data_equals:
+        expected_count: 2
+        actual_count: 1
+- id: TMA-all-none-in-axes-is-compile-time-map_axis-no-mapped-args
+  category: tensor_map_axis
+  title: all-None in_axes is compile-time MAP_AXIS_NO_MAPPED_ARGS
+  code: |
+    import std::tensor::{ones, map_axis}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32], y: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      let a = ones[f32](2,3)
+      let b = ones[f32](2,3)
+      let g = map_axis(f, in_axes=[None, None].to_vec())
+      _ = g(a, b)
+      yield Ok("done")
+    }
+  expect:
+    compile_error:
+      code: MAP_AXIS_NO_MAPPED_ARGS
+      message_contains:
+      - map_axis
+      - mapped
+      - none
+      data_keys: []
+- id: TMA-mapping-a-non-tensor-argument-is-compile-time-map_axis-non-tensor-mapped
+  category: tensor_map_axis
+  title: mapping a non-tensor argument is compile-time MAP_AXIS_NON_TENSOR_MAPPED
+  code: |
+    import std::tensor::{ones, map_axis, axis}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32], k: i64) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[f32](2,3)
+      let g = map_axis(f, in_axes=[axis(0), axis(0)].to_vec())
+      _ = g(x, 3)
+      yield Ok("done")
+    }
+  expect:
+    compile_error:
+      code: MAP_AXIS_NON_TENSOR_MAPPED
+      message_contains:
+      - non-tensor
+      - mapped
+      data_keys: []
+- id: TMA-const-mapped-axis-size-mismatch-is-compile-time-map_axis-batch-size-mismatch
+  category: tensor_map_axis
+  title: const mapped-axis size mismatch is compile-time MAP_AXIS_BATCH_SIZE_MISMATCH
+  code: |
+    import std::tensor::{ones, map_axis, axis}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32], y: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      let a = ones[f32](2,3)
+      let b = ones[f32](4,3)
+      let g = map_axis(f, in_axes=[axis(0), axis(0)].to_vec())
+      _ = g(a, b)
+      yield Ok("done")
+    }
+  expect:
+    compile_error:
+      code: MAP_AXIS_BATCH_SIZE_MISMATCH
+      message_contains:
+      - axis
+      - size
+      - mismatch
+      data_keys:
+      - index
+      - axis
+- id: TMA-const-out-axis-violation-is-compile-time-map_axis-out-axis-out-of-range
+  category: tensor_map_axis
+  title: const out_axis violation is compile-time MAP_AXIS_OUT_AXIS_OUT_OF_RANGE
+  code: |
+    import std::tensor::{ones, map_axis, axis}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[f32](2,3,4)
+      let g = map_axis(f, in_axes=axis(0), out_axis=axis(3))
+      _ = g(x)
+      yield Ok("done")
+    }
+  expect:
+    compile_error:
+      code: MAP_AXIS_OUT_AXIS_OUT_OF_RANGE
+      message_contains:
+      - out_axis
+      - range
+      data_keys:
+      - axis
+      - rank
+- id: TMA-const-out-name-duplicate-is-compile-time-map_axis-out-name-duplicate
+  category: tensor_map_axis
+  title: const out_name duplicate is compile-time MAP_AXIS_OUT_NAME_DUPLICATE
+  code: |
+    import std::tensor::{ones, map_axis, axis}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,3).with_names([#0:'batch, #1:'feat])?
+        let g = map_axis(f, in_axes=axis(0), out_axis=axis(0), out_name=Some('feat))
+        _ = g(x)
+        yield Ok("done")
+      }
+  expect:
+    compile_error:
+      code: MAP_AXIS_OUT_NAME_DUPLICATE
+      message_contains:
+      - out_name
+      - duplicate
+      data_keys: []
+- id: TMA-pure-map_axis-rejects-effectful-callback
+  category: tensor_map_axis
+  title: pure map_axis rejects effectful callback
+  code: |
+    import std::tensor::{ones, map_axis, axis}
+    import std::tensor::Tensor
+
+    fn f!(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      let x = ones[f32](2,3)
+      _ = map_axis(f!, in_axes=axis(0))
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+- id: TMA-effectful-callback-precedes-in-axes-arity-validation
+  category: tensor_map_axis
+  title: effectful callback rejection precedes in_axes arity validation
+  code: |
+    import std::tensor::{Tensor, axis, map_axis}
+
+    fn f!(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      _ = map_axis(
+        f!, // @primary effectful-before-map-axis-validation
+        in_axes=[axis(0), axis(0)].to_vec(),
+      )
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: PURE_COMBINATOR_EFFECTFUL_CALLBACK
+      message_contains:
+      - effectful callback
+      data_keys: []
+      primary_span:
+        marker: effectful-before-map-axis-validation
+- id: TMA-map_axis-over-res-fail-fast-reports-earliest-index
+  category: tensor_map_axis
+  title: map_axis over Res fail-fast reports earliest index
+  code: |
+    import std::tensor::{ones, map_axis, axis, MapAxisError}
+    import std::tensor::Tensor
+
+    fn f(_x: Tensor[f32]) -> Res[Tensor[f32], Str] = Err("boom")
+
+    fn main!() -> Res[Str, Union[Str, MapAxisError]] =
+      result {
+        let x = ones[f32](3,2)
+        let g = map_axis(f, in_axes=axis(0))
+        _ = g(x)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: '"boom"'
+    value_diagnostics:
+    - code: MAP_AXIS_RES_FAIL
+      message_contains:
+      - index 0
+      data_keys:
+      - index
+- id: TMA-map_axis-over-opt-short-circuit-returns-none-path
+  category: tensor_map_axis
+  title: map_axis over Opt short-circuit returns None path
+  code: |
+    import std::tensor::{ones, map_axis, axis, MapAxisError}
+    import std::tensor::Tensor
+
+    fn f(_x: Tensor[f32]) -> Opt[Tensor[f32]] = None
+
+    fn main!() -> Res[Str, MapAxisError] =
+      result {
+        let x = ones[f32](3,2)
+        let g = map_axis(f, in_axes=axis(0))
+        let r = g(x)?
+        yield Ok(to_str(r.is_none()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: TMA-const-empty-mapped-batch-is-compile-time-map_axis-empty-batch-unsupported
+  category: tensor_map_axis
+  title: const empty mapped batch is compile-time MAP_AXIS_EMPTY_BATCH_UNSUPPORTED
+  code: |
+    import std::tensor::{zeros, map_axis, axis}
+    import std::tensor::Tensor
+
+    fn f(x: Tensor[f32]) -> Tensor[f32] = x
+
+    fn main!() -> Res[Str, Str] {
+      let x = zeros[f32](0,4)
+      let g = map_axis(f, in_axes=axis(0))
+      _ = g(x)
+      yield Ok("done")
+    }
+  expect:
+    compile_error:
+      code: MAP_AXIS_EMPTY_BATCH_UNSUPPORTED
+      message_contains:
+      - empty
+      - batch
+      - unsupported
+      data_keys: []
+- id: TMA-map_axis-reports-result-shape-mismatch-at-first-mismatching-index
+  category: tensor_map_axis
+  title: map_axis reports result shape mismatch at first mismatching index
+  code: |
+    import std::tensor::{AxisError, DTypeError, DeterminismError, ShapeError, ones, zeros, map_axis, axis, MapAxisError}
+    import std::tensor::index::{set_at!, IndexItem, ScatterMode}
+    import std::tensor::{IndexError, Tensor}
+
+    fn f(x: Tensor[i32]) -> Res[Tensor[i32], Union[AxisError, IndexError]] =
+      result {
+        let v = x.item()?
+        let y = if v == 0 {
+          yield ones[i32](1).with_names([#0:'feature])?
+        } else {
+          yield ones[i32](2).with_names([#0:'channel])?
+        }
+        yield Ok(y)
+      }
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, DeterminismError, IndexError, ShapeError, MapAxisError]] =
+      result {
+        let mut x = ones[i32](2)
+        let idx = [0]
+        let vals = zeros[i32](1)
+        set_at!(&mut x, [IndexItem::Take(idx)].to_vec(), vals, mode=ScatterMode::Assign)?
+        let g = map_axis(f, in_axes=axis(0))
+        _ = g(x)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: MapAxisError
+    value_diagnostics:
+    - code: MAP_AXIS_RESULT_SHAPE_MISMATCH
+      message_contains:
+      - shape
+      - mismatch
+      - index
+      data_keys:
+      - index
+      data_equals:
+        index: 1
+- id: TMA-map_axis-reports-result-overlay-mismatch-at-first-mismatching-index
+  category: tensor_map_axis
+  title: map_axis reports result overlay mismatch at first mismatching index
+  code: |
+    import std::tensor::{AxisError, DTypeError, DeterminismError, ShapeError, ones, zeros, map_axis, axis, MapAxisError}
+    import std::tensor::index::{set_at!, IndexItem, ScatterMode}
+    import std::tensor::{IndexError, Tensor}
+
+    fn f(x: Tensor[i32]) -> Res[Tensor[i32], Union[AxisError, IndexError]] =
+      result {
+        let v = x.item()?
+        let y = if v == 0 {
+          yield ones[i32](2).with_names([#0:'feature])?
+        } else {
+          yield ones[i32](2).with_names([#0:'channel])?
+        }
+        yield Ok(y)
+      }
+
+    fn main!() -> Res[Str, Union[AxisError, DTypeError, DeterminismError, IndexError, ShapeError, MapAxisError]] =
+      result {
+        let mut x = zeros[i32](3)
+        let idx = [2]
+        let vals = ones[i32](1)
+        set_at!(&mut x, [IndexItem::Take(idx)].to_vec(), vals, mode=ScatterMode::Assign)?
+        let g = map_axis(f, in_axes=axis(0))
+        _ = g(x)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: MapAxisError
+    value_diagnostics:
+    - code: MAP_AXIS_RESULT_OVERLAY_MISMATCH
+      message_contains:
+      - overlay
+      - mismatch
+      - index
+      data_keys:
+      - index
+      - expected_overlay
+      - actual_overlay
+      data_equals:
+        index: 2

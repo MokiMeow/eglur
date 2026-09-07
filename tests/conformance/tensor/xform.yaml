@@ -1,0 +1,2511 @@
+tests:
+- id: XFM-public-overview-tensor-cost-example
+  category: tensor_xform
+  title: public tensor cost example remains dimensionally valid
+  code: |
+    import std::tensor::{TransformError, ones}
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let x = ones[f32](2,12,3)
+        let y = view{ b (h*w) c -> b h w c }.with_sizes(["h": 3, "w": 4])(x)?
+        let z = rearrange{ b h w c -> b (h*w) c }(y)?
+        let duplicated = inflate{ b hw c -> b hw (c*2) }(z)?
+        yield Ok(to_str(duplicated.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,12,6]"'
+
+- id: XFM-public-overview-tensor-surface-example
+  category: tensor_xform
+  title: public tensor surface example uses defined shape-compatible inputs
+  code: |
+    import std::tensor::{AxisError, ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, Tensor, TransformError, ones}
+    import std::tensor::index::{get_at, set_at!, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, ContractError, DTypeError, DeterminismError, IndexError, NumericError, ShapeError, TransformError]] =
+      result {
+        let x = ones[f32](2,12,3)
+        let y = x.then(view{ b (h*w) c -> b h w c }.with_sizes(["h": 3, "w": 4]))?
+        let z = y.then(rearrange{ b h w c -> b (h*w) c })?
+        let u = reduce{ b h w c -> b c }(y)?
+
+        let left = ones[f32](2,3)
+        let weights = ones[f32](3,4)
+        let mm = contract{ i k, k j -> i j }
+        let mut r = (left, weights).apply(mm)?
+
+        let picked = get_at(r, [IndexItem::At(0), IndexItem::All].to_vec())?
+        set_at!(&mut r, [IndexItem::At(1), IndexItem::All].to_vec(), picked, mode=ScatterMode::Assign)?
+        yield Ok(r)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2, 4]
+        expected: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
+        mode: exact
+
+- id: XFM-public-axes-rearrange-name-drop-example
+  category: axes
+  title: public rearrange name-drop example remains valid
+  code: |
+    import std::tensor::{AxisError, TransformError, zeros}
+
+    fn main!() -> Res[Str, Union[AxisError, TransformError]] =
+      result {
+        let t = zeros[f32](2,3).with_names([#0:'mol, #1:'task])?
+        let u = rearrange{ b c -> (b*c) }(t)?
+        yield Ok(to_str(u.names().len() == 0))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-tensorview-operand-materializes-einop-result
+  category: tensor_xform
+  title: TensorView operand is read directly and einop materializes its result
+  code: |
+    import std::tensor::{AxisError, EinopError, NumericError, ShapeError, Tensor, ones}
+    import std::tensor::prim::permute
+
+    fn is_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[AxisError, EinopError, NumericError, ShapeError]] =
+      result {
+        let view = permute(ones[f32](2,3), [#1, #0].to_vec())?
+        let out = einop{ i j -> j i }(view)?
+        let ok = is_tensor(out) && (to_str(out.shape()) == "[2,3]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-integer-einop-overflow-returns-numericerror
+  category: tensor_xform
+  title: mixed-width integer einop fails at the checked promoted-dtype sum step
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{wrapping_add, wrapping_sub}
+
+    fn left_fold_overflow_input() -> Res[Tensor[i8], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let mut thirty_two = ones[i8]()
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        let sixty_four = wrapping_add(thirty_two, thirty_two)?
+        let ninety_six = wrapping_add(sixty_four, thirty_two)?
+        let minus_thirty_two = wrapping_sub(zeros[i8](), thirty_two)?
+        let minus_ninety_six = wrapping_sub(zeros[i8](), ninety_six)?
+
+        // [64, -32, 96, -96] has exact sum 32 but overflows at the third left-fold step.
+        let mut x = zeros[i8](4)
+        x = set_at(x, [IndexItem::At(0)].to_vec(), sixty_four, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(1)].to_vec(), minus_thirty_two, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(2)].to_vec(), ninety_six, mode=ScatterMode::Assign)?
+        x = set_at(x, [IndexItem::At(3)].to_vec(), minus_ninety_six, mode=ScatterMode::Assign)?
+        yield Ok(x)
+      }
+
+    fn main!() -> Res[Str, Union[DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        _ = einop{ i, i -> }(left_fold_overflow_input()?, ones[u8](4))?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+      data_equals:
+        operation: einop
+        dtype: i8
+
+- id: XFM-empty-einop-sum-elimination-uses-promoted-additive-identity
+  category: tensor_xform
+  title: empty einop sum elimination uses promoted additive identity
+  code: |
+    import std::tensor::{EinopError, IndexError, NumericError, zeros}
+
+    fn main!() -> Res[Str, Union[EinopError, IndexError, NumericError]] =
+      result {
+        let (scalar, retained_empty) = einop{ batch k, k -> , batch }(zeros[i8](0,0), zeros[u16](0))?
+        let ok = ((to_str(scalar.dtype()) == "u16")
+          && (scalar.item()? == 0)
+          && (to_str(retained_empty.dtype()) == "u16")
+          && (to_str(retained_empty.shape()) == "[0]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-view-with-explicit-sizes-succeeds-for-affine-split
+  category: tensor_xform
+  title: view with explicit sizes succeeds for affine split
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](2,12,3).with_names([#0:'b, #1:'hw, #2:'c])?
+        let y = x.then(view{ b (h*w) c -> b h w c }.with_sizes(["h": 3, "w": 4]))?
+        let ok = y.rank() == 4
+        yield if ok { yield Ok("ok") } else { yield Err("bad_rank") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: XFM-product-split-uses-rightmost-fastest-row-major-coordinates
+  category: tensor_xform
+  title: Product split uses rightmost-fastest row-major coordinates
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](6),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let split = source.then(
+          view{ (h*w) -> h w }.with_sizes(["h": 2, "w": 3])
+        )?
+        yield Ok(split.materialize())
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2, 3]
+        expected: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-product-merge-uses-rightmost-fastest-row-major-coordinates
+  category: tensor_xform
+  title: Product merge uses rightmost-fastest row-major coordinates
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](2,3),
+          [IndexItem::At(0), IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let merged = source.then(
+          rearrange{ h w -> (h*w) }.with_sizes(["h": 2, "w": 3])
+        )?
+        yield Ok(merged)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-product-mapping-is-independent-of-physical-source-strides
+  category: tensor_xform
+  title: Product mapping is independent of physical source strides
+  code: |
+    import std::tensor::{AxisError, DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::permute
+
+    fn main!() -> Res[Tensor[f32], Union[AxisError, DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](2,3),
+          [IndexItem::At(0), IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let transposed = permute(source, [#1, #0].to_vec())?
+        let flattened = transposed.then(rearrange{ w h -> (w*h) })?
+        yield Ok(flattened)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-product-coordinate-mapping-recurses-through-sum-factors
+  category: tensor_xform
+  title: Product coordinate mapping recurses through sum factors
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](6),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let reordered = source.then(
+          rearrange{ ((a+b)*c) -> (c*(a+b)) }
+            .with_sizes(["a": 1, "b": 2, "c": 2])
+        )?
+        yield Ok(reordered)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-right-distribution-uses-the-tagged-coordinate-bijection
+  category: tensor_xform
+  title: right distribution uses the tagged coordinate bijection
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](6),
+          [IndexItem::At(3)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let distributed = source.then(
+          rearrange{ (a*(b+c)) -> ((a*b)+(a*c)) }
+            .with_sizes(["a": 2, "b": 1, "c": 2])
+        )?
+        yield Ok(distributed)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-right-factoring-inverts-the-distributive-coordinate-map
+  category: tensor_xform
+  title: right factoring inverts the distributive coordinate map
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](6),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let factored = source.then(
+          rearrange{ ((a*b)+(a*c)) -> (a*(b+c)) }
+            .with_sizes(["a": 2, "b": 1, "c": 2])
+        )?
+        yield Ok(factored)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-nested-distribution-follows-the-written-branch-tree
+  category: tensor_xform
+  title: nested distribution follows the written branch tree
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](9),
+          [IndexItem::At(3)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let distributed = source.then(
+          rearrange{
+            ((a+b)*(c+d))
+              -> (((a*c)+(a*d))+((b*c)+(b*d)))
+          }.with_sizes(["a": 2, "b": 1, "c": 1, "d": 2])
+        )?
+        yield Ok(distributed)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [9]
+        expected: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-distribution-preserves-repeated-factor-occurrence-lineage
+  category: tensor_xform
+  title: distribution preserves repeated factor occurrence lineage
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](6),
+          [IndexItem::At(3)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let distributed = source.then(
+          rearrange{ (a*(a+b)) -> ((a*a)+(a*b)) }
+            .with_sizes(["a": 2, "b": 1])
+        )?
+        yield Ok(distributed)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-left-distribution-wins-when-both-sum-factors-match
+  category: tensor_xform
+  title: left distribution wins when both sum factors match
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](4),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let distributed = source.then(
+          rearrange{
+            ((a+a)*(b+b))
+              -> (((a*b)+(a*b))+((a*b)+(a*b)))
+          }.with_sizes(["a": 1, "b": 1])
+        )?
+        yield Ok(distributed)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [4]
+        expected: [0.0, 1.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-explicit-sum-branch-permutation-composes-with-right-distribution
+  category: tensor_xform
+  title: explicit sum branch permutation composes with right distribution
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](6),
+          [IndexItem::At(3)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let distributed = source.then(
+          rearrange{ (a*(b+c)) -> ((a*c)+(a*b)) }
+            .with_sizes(["a": 2, "b": 1, "c": 2])
+        )?
+        yield Ok(distributed)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+        mode: exact
+
+- id: XFM-distribution-skips-an-empty-branch
+  category: tensor_xform
+  title: distribution skips an empty branch
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](4),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let distributed = source.then(
+          rearrange{ (a*(b+c)) -> ((a*b)+(a*c)) }
+            .with_sizes(["a": 2, "b": 0, "c": 2])
+        )?
+        yield Ok(distributed)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [4]
+        expected: [0.0, 1.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-left-distribution-remains-an-affine-view-when-order-is-preserved
+  category: tensor_xform
+  title: left distribution remains an affine view when order is preserved
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, TensorView, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[TensorView[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](6),
+          [IndexItem::At(4)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let distributed = source.then(
+          view{ ((a+b)*c) -> ((a*c)+(b*c)) }
+            .with_sizes(["a": 1, "b": 2, "c": 2])
+        )?
+        yield Ok(distributed)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        mode: exact
+
+- id: XFM-distribution-preserves-one-to-one-physical-axis-name-lineage
+  category: tensor_xform
+  title: distribution preserves one-to-one physical axis name lineage
+  code: |
+    import std::tensor::{AxisError, TransformError, zeros}
+
+    fn main!() -> Res[Str, Union[AxisError, TransformError]] =
+      result {
+        let source = zeros[f32](6).with_names([#0:'packed])?
+        let viewed = source.then(
+          view{ ((a+b)*c) -> ((a*c)+(b*c)) }
+            .with_sizes(["a": 1, "b": 2, "c": 2])
+        )?
+        let rearranged = source.then(
+          rearrange{ (a*(b+c)) -> ((a*b)+(a*c)) }
+            .with_sizes(["a": 2, "b": 1, "c": 2])
+        )?
+        let preserved = ((viewed.names().len() == 1)
+          && (viewed.axis_of('packed)? == #0)
+          && (rearranged.names().len() == 1)
+          && (rearranged.axis_of('packed)? == #0))
+        yield Ok(to_str(preserved))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-non-affine-right-distribution-is-not-a-view
+  category: tensor_xform
+  title: non-affine right distribution is not a view
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = ones[f32](6).then(
+          view{ (a*(b+c)) -> ((a*b)+(a*c)) }
+            .with_sizes(["a": 2, "b": 1, "c": 2])
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: NOT_A_VIEW
+      message_contains:
+      - view
+      - affine
+      data_keys: []
+
+- id: XFM-non-distributive-equal-numel-axisexpr-map-is-unsupported
+  category: tensor_xform
+  title: non-distributive equal-numel AxisExpr map is unsupported
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = ones[f32](6).then(
+          rearrange{ (a*(b+c)) -> ((a*b)+(b*c)) } // @primary unsupported-axis-mapping
+            .with_sizes(["a": 2, "b": 2, "c": 1])
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: AXIS_MAPPING_UNSUPPORTED
+      message_contains:
+      - axis
+      - mapping
+      - unsupported
+      data_keys: []
+      primary_span:
+        marker: unsupported-axis-mapping
+
+- id: XFM-supported-distribution-precedes-inconsistent-dimension-checking
+  category: tensor_xform
+  title: supported distribution precedes inconsistent dimension checking
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = ones[f32](5).then(
+          rearrange{ (a*(b+c)) -> ((a*b)+(a*c)) }
+            .with_sizes(["a": 2, "b": 1, "c": 2])
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: INCONSISTENT_DIMS
+      message_contains:
+      - inconsistent
+      - dims
+      data_keys:
+      - operation
+
+- id: XFM-mixed-sum-product-multi-output-partition-remains-supported
+  category: tensor_xform
+  title: Mixed sum-product multi-output partition remains supported
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, TransformError, ones, zeros}
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Str, Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](6),
+          [IndexItem::At(3)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let (head, tail) = source.then(
+          view{ (c*(a+b)) -> c a, c b }
+            .with_sizes(["a": 1, "b": 2, "c": 2])
+        )?
+        let head_mark = get_at(head, [IndexItem::At(1), IndexItem::At(0)].to_vec())?.item()?
+        let tail_mark = get_at(tail, [IndexItem::At(1), IndexItem::At(0)].to_vec())?.item()?
+        let ok = ((to_str(head.shape()) == "[2,1]")
+          && (to_str(tail.shape()) == "[2,2]")
+          && (head_mark == 1.0)
+          && (tail_mark == 0.0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-view-multi-output-normalizes-to-tensorview-tuple
+  category: tensor_xform
+  title: multi-output view normalizes to a TensorView tuple in output order
+  code: |
+    import std::tensor::{TensorView, TransformError, ones}
+
+    fn is_view(_x: TensorView[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let (head, tail) = ones[f32](1,12,1).then(
+          view{ b (h1+h2) c -> b h1 c, b h2 c }.with_sizes(["h1": 8])
+        )?
+        let ok = (is_view(head)
+          && is_view(tail)
+          && (to_str(head.shape()) == "[1,8,1]")
+          && (to_str(tail.shape()) == "[1,4,1]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-tensorview-remains-valid-after-source-binding-leaves-scope
+  category: tensor_xform
+  title: TensorView remains valid after source binding leaves scope
+  code: |
+    import std::tensor::{IndexError, ShapeError, TensorView, TransformError, zeros}
+    import std::tensor::index::{get_at, IndexItem}
+
+    fn retained_view() -> Res[TensorView[f32], TransformError] =
+      zeros[f32](2,3).then(view{ row col -> row col })
+
+    fn main!() -> Res[Str, Union[IndexError, ShapeError, TransformError]] =
+      result {
+        let retained = retained_view()?
+        let owned = retained.materialize()
+        let value = get_at(owned, [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+        yield Ok(to_str(value == 0.0))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: XFM-source-mutation-does-not-write-through-retained-tensorview
+  category: tensor_xform
+  title: source mutation does not write through retained TensorView
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, TransformError, ones, zeros}
+    import std::tensor::index::{get_at, set_at!, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Str, Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let mut source = zeros[f32](2,3)
+        let retained = source.then(view{ row col -> row col })?
+        set_at!(&mut source, [IndexItem::At(0), IndexItem::All].to_vec(), ones[f32](3), mode=ScatterMode::Assign)?
+
+        let retained_value = get_at(retained.materialize(), [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+        let source_value = get_at(source, [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+        yield Ok(to_str((retained_value == 0.0) && (source_value == 1.0)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: XFM-source-metadata-mutation-does-not-write-through-retained-tensorview
+  category: tensor_xform
+  title: source metadata mutation does not write through retained TensorView
+  code: |
+    import std::tensor::{AxisError, TransformError, zeros}
+
+    fn main!() -> Res[Str, Union[AxisError, TransformError]] =
+      result {
+        let mut source = zeros[f32](2,3).with_names([#0:'old_row, #1:'old_col])?
+        let retained = source.then(view{ row col -> row col })?
+        source.with_names!([#0:'new_row, #1:'new_col])?
+
+        let snapshot = retained.materialize()
+        let retained_old = snapshot.axis_of('old_row).is_ok()
+        let retained_new = snapshot.axis_of('new_row).is_err()
+        let source_new = source.axis_of('new_row).is_ok()
+        yield Ok(to_str(retained_old && retained_new && source_new))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: XFM-materialized-tensor-mutation-does-not-change-copied-tensorview
+  category: tensor_xform
+  title: materialized Tensor mutation does not change copied TensorView
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, TransformError, ones, zeros}
+    import std::tensor::index::{get_at, set_at!, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Str, Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let retained = zeros[f32](2,3).then(view{ row col -> row col })?
+        let copied = retained
+        let mut owned = retained.materialize()
+        set_at!(&mut owned, [IndexItem::At(0), IndexItem::All].to_vec(), ones[f32](3), mode=ScatterMode::Assign)?
+
+        let copied_value = get_at(copied.materialize(), [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+        let owned_value = get_at(owned, [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()?
+        yield Ok(to_str((copied_value == 0.0) && (owned_value == 1.0)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: XFM-view-without-enough-constraints-fails-with-ambiguousdims
+  category: tensor_xform
+  title: view without enough constraints fails with AmbiguousDims
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,12,3)
+        _ = x.then(view{ b (h*w) c -> b h w c })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: AMBIGUOUS_DIMS
+      message_contains:
+      - ambiguous
+      - dims
+      data_keys:
+      - operation
+- id: XFM-univariate-nonlinear-dim-root-is-inferred
+  category: tensor_xform
+  title: repeated univariate nonlinear dimension has one exact root
+  code: |
+    import std::tensor::{TransformError, ones}
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let x = ones[f32](9)
+        let y = x.then(view{ (h*h) -> h h })?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[3,3]"'
+
+- id: XFM-repeated-product-occurrences-remain-distinct-row-major-coordinates
+  category: tensor_xform
+  title: Repeated product occurrences remain distinct row-major coordinates
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](9),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let split = source.then(view{ (h*h) -> h h })?
+        yield Ok(split.materialize())
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [3, 3]
+        expected: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-large-univariate-nonlinear-dim-without-root-is-inconsistent
+  category: tensor_xform
+  title: large univariate nonlinear no-root case is inconsistent
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](1_000_000_001)
+        _ = x.then(view{ (h*h) -> h h })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: INCONSISTENT_DIMS
+      message_contains:
+      - inconsistent
+      - dims
+      data_keys:
+      - operation
+- id: XFM-unit-product-has-one-multivariate-solution
+  category: tensor_xform
+  title: isolated multivariate product of one has one solution
+  code: |
+    import std::tensor::{TransformError, ones}
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let x = ones[f32](1)
+        let y = x.then(view{ (h*w) -> h w })?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[1,1]"'
+- id: XFM-isolated-product-with-nondivisible-constant-is-inconsistent
+  category: tensor_xform
+  title: isolated product with a nondivisible constant is inconsistent
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](3)
+        _ = x.then(view{ (2*h*w) -> (2*h*w) })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: INCONSISTENT_DIMS
+      message_contains:
+      - inconsistent
+      - dims
+      data_keys:
+      - operation
+
+- id: XFM-axisexpr-product-overflow-is-inconsistent-not-wrapped
+  category: tensor_xform
+  title: AxisExpr product overflow is inconsistent, not wrapped
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](1)
+        _ = x.then(
+          view{
+            (9223372036854775807*9223372036854775807)
+              -> (9223372036854775807*9223372036854775807)
+          }
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: INCONSISTENT_DIMS
+      message_contains:
+      - inconsistent
+      - dims
+      data_keys:
+      - operation
+
+- id: XFM-output-only-axisexpr-product-overflow-is-inconsistent-not-wrapped
+  category: tensor_xform
+  title: Output-only AxisExpr product overflow is inconsistent, not wrapped
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = ones[f32]().then(
+          inflate{
+            -> (9223372036854775807*9223372036854775807)
+          }
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: INCONSISTENT_DIMS
+      message_contains:
+      - inconsistent
+      - dims
+      data_keys:
+      - operation
+
+- id: XFM-zero-product-has-multiple-dimension-solutions
+  category: tensor_xform
+  title: zero product has multiple dimension solutions
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](0)
+        _ = x.then(view{ (h*w) -> h w })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: AMBIGUOUS_DIMS
+      message_contains:
+      - ambiguous
+      - dims
+      data_keys:
+      - operation
+
+- id: XFM-resolved-zero-product-has-a-total-empty-coordinate-map
+  category: tensor_xform
+  title: Resolved zero product has a total empty coordinate map
+  code: |
+    import std::tensor::{Tensor, TransformError, zeros}
+
+    fn main!() -> Res[Tensor[f32], TransformError] =
+      result {
+        let split = zeros[f32](0).then(
+          view{ (h*w) -> h w }.with_sizes(["h": 0, "w": 3])
+        )?
+        yield Ok(split.materialize())
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [0, 3]
+        expected: []
+        mode: exact
+
+- id: XFM-nested-right-zero-product-has-a-total-empty-coordinate-map
+  category: tensor_xform
+  title: Nested right-zero product has a total empty coordinate map
+  code: |
+    import std::tensor::{Tensor, TransformError, zeros}
+
+    fn main!() -> Res[Tensor[f32], TransformError] =
+      result {
+        let split = zeros[f32](0).then(
+          rearrange{ (a*(b*c)) -> a b c }
+            .with_sizes(["a": 2, "b": 3, "c": 0])
+        )?
+        yield Ok(split)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2, 3, 0]
+        expected: []
+        mode: exact
+
+- id: XFM-mixed-multivariate-dims-require-explicit-binding
+  category: tensor_xform
+  title: unresolved mixed multivariate dimensions require explicit binding
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](14)
+        _ = x.then(view{ (h + w*r) -> (h + w*r) })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: DIM_BINDING_REQUIRED
+      message_contains:
+      - dim
+      - binding
+      - required
+      data_keys:
+      - operation
+      - variables
+- id: XFM-partial-binding-reduces-mixed-dims-to-univariate-solve
+  category: tensor_xform
+  title: partial with_sizes binding leaves a solvable univariate equation
+  code: |
+    import std::tensor::{TransformError, ones}
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let x = ones[f32](14)
+        let y = x.then(
+          view{ (h + w*r) -> (h + w*r) }.with_sizes(["h": 2, "w": 3])
+        )?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[14]"'
+- id: XFM-dynamic-mixed-multivariate-dims-require-explicit-binding
+  category: tensor_xform
+  title: dynamic mixed multivariate dimensions require explicit binding
+  code: |
+    import std::io::{IoError, args!}
+    import std::tensor::{TransformError, ones}
+
+    fn main!() -> Res[Str, Union[DomainError, IoError, TransformError]] =
+      result {
+        let argc = args!()?.len().to_i64()
+        let fourteen = Nat.from_i64(
+          wrapping_add(wrapping_sub(argc, argc), 14)
+        )?
+        let x = ones[f32](fourteen)
+        _ = x.then(view{ (h + w*r) -> (h + w*r) })?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TransformError
+    value_diagnostics:
+    - code: DIM_BINDING_REQUIRED
+      message_contains:
+      - dim
+      - binding
+      - required
+      data_keys:
+      - operation
+      - variables
+- id: XFM-output-only-free-dim-is-ambiguous
+  category: tensor_xform
+  title: output-only free dimension has multiple solutions
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2)
+        _ = x.then(inflate{ i -> i r })? // @primary ambiguous-output-dimension
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: AMBIGUOUS_DIMS
+      message_contains:
+      - ambiguous
+      - dims
+      data_keys:
+      - operation
+      primary_span:
+        marker: ambiguous-output-dimension
+- id: XFM-view-is-unary-in-v0-1
+  category: tensor_xform
+  title: view is unary in v0.1
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let a = ones[f32](2,3)
+        let b = ones[f32](2,3)
+        _ = (a, b).apply(view{ b c, b c -> b c })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: MULTI_INPUT_NOT_ALLOWED
+      message_contains:
+      - multi-input
+      data_keys: []
+- id: XFM-rearrange-cannot-grow-numel
+  category: tensor_xform
+  title: static rearrange numel growth precedes contributor dtype mismatch
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let op = rearrange{ i, j -> (i+j) k }.with_sizes(["k": 2])
+        _ = op(ones[f32](2), ones[i32](3))?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: NUMEL_MISMATCH_GROW
+      message_contains:
+      - numel
+      - grow
+      data_keys: []
+- id: XFM-rearrange-types-each-output-from-its-contributors
+  category: tensor_xform
+  title: rearrange types each output from its contributing input positions
+  code: |
+    import std::tensor::{Tensor, TransformError, ones}
+
+    fn is_f32_tensor(_x: Tensor[f32]) -> Bool = true
+    fn is_i32_tensor(_x: Tensor[i32]) -> Bool = true
+    fn merge_same[C: ReadableTensor](left: C, right: C) -> Res[Tensor[C::Elem], TransformError] =
+      rearrange{ i, j -> (i+j) }(left, right)
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let source_view = ones[f32](2).then(view{ i -> i })?
+        let split = rearrange{ i, j -> i, j }
+        let (left, right) = split(source_view, ones[i32](3))?
+        let merged = merge_same(ones[f32](2), ones[f32](3))?
+        let (scalar_f, scalar_i) = rearrange{ , -> , }(
+          ones[f32](),
+          ones[i32](),
+        )?
+        let ok = (is_f32_tensor(left)
+          && is_i32_tensor(right)
+          && is_f32_tensor(merged)
+          && is_f32_tensor(scalar_f)
+          && is_i32_tensor(scalar_i)
+          && (to_str(left.shape()) == "[2]")
+          && (to_str(right.shape()) == "[3]")
+          && (to_str(merged.shape()) == "[5]")
+          && (scalar_f.rank() == 0)
+          && (scalar_i.rank() == 0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: XFM-rearrange-rejects-mixed-dtypes-within-one-output
+  category: tensor_xform
+  title: rearrange rejects mixed contributor dtypes within one output
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let op = rearrange{ a, b, c, d -> (a+b), (c+d) }
+        _ = op(
+          ones[f32](1),
+          ones[i32](1),
+          ones[f64](1),
+          ones[i64](1),
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: REARRANGE_OUTPUT_DTYPE_MISMATCH
+      message_contains:
+      - rearrange
+      - output
+      - dtype
+      - mismatch
+      data_keys:
+      - output_index
+      - left_type
+      - right_type
+      data_equals:
+        output_index: 0
+        left_type: f32
+        right_type: i32
+- id: XFM-rearrange-rejects-distinct-unresolved-contributor-projections
+  category: tensor_xform
+  title: rearrange rejects distinct unresolved contributor projections
+  code: |
+    fn merge_distinct[C: ReadableTensor, D: ReadableTensor](
+      left: C,
+      right: D,
+    ) -> Bool {
+      _ = rearrange{ i, j -> (i+j) }(left, right)
+      yield true
+    }
+
+    fn main!() -> Res[Str, Str] = Ok("unreachable")
+  expect:
+    compile_error:
+      code: REARRANGE_OUTPUT_DTYPE_MISMATCH
+      message_contains:
+      - rearrange
+      - output
+      - dtype
+      - mismatch
+      data_keys:
+      - output_index
+      - left_type
+      - right_type
+      data_equals:
+        output_index: 0
+- id: XFM-inflate-duplicates-values-and-increases-rank
+  category: tensor_xform
+  title: inflate duplicates values and increases rank
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](2,3)
+        let y = x.then(inflate{ b c -> b c 4 })?
+        let ok = y.rank() == 3
+        yield if ok { yield Ok("ok") } else { yield Err("bad_rank") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+
+- id: XFM-inflate-product-repeat-factor-varies-fastest
+  category: tensor_xform
+  title: Inflate product repeat factor varies fastest
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](3),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let repeated = source.then(
+          inflate{ i -> (i*r) }.with_sizes(["r": 2])
+        )?
+        yield Ok(repeated)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-inflate-leading-repeat-factor-uses-tiled-product-order
+  category: tensor_xform
+  title: Inflate leading repeat factor uses tiled product order
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let source = set_at(
+          zeros[f32](3),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let tiled = source.then(
+          inflate{ i -> (r*i) }.with_sizes(["r": 2])
+        )?
+        yield Ok(tiled)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+        mode: exact
+
+- id: XFM-inflate-reads-tensorview-and-materializes-owning-result
+  category: tensor_xform
+  title: inflate reads TensorView directly and materializes an owning Tensor
+  code: |
+    import std::tensor::{Tensor, TransformError, ones}
+
+    fn is_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let view = ones[f32](2,3).then(view{ b c -> b c })?
+        let out = view.then(inflate{ b c -> b c 2 })?
+        let ok = is_tensor(out) && (to_str(out.shape()) == "[2,3,2]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-reduce-default-sum-keeps-only-rhs-axes
+  category: tensor_xform
+  title: reduce default sum keeps only RHS axes
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](2,3,4,5).with_names([#0:'b, #1:'c, #2:'h, #3:'w])?
+        let y = x.then(reduce{ b c h w -> b c })?
+        let i = y.axis_of('c)?
+        yield if i == #1 { yield Ok("ok") } else { yield Err("bad_axis") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: XFM-einop-single-output-schema-is-callable
+  category: tensor_xform
+  title: einop single-output schema is callable
+  code: |
+    import std::tensor::{EinopError, ones}
+
+    fn main!() -> Res[Str, EinopError] =
+      result {
+        let x = ones[f32](2,3)
+        let y = einop{ b c -> c b }(x)?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[3,2]"'
+
+- id: XFM-einop-product-output-uses-shared-row-major-coordinate-order
+  category: tensor_xform
+  title: Einop product output uses shared row-major coordinate order
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        let source = set_at(
+          zeros[f32](2,3),
+          [IndexItem::At(0), IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let flattened = einop{ h w -> (w*h) }(source)?
+        yield Ok(flattened)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-einop-cross-input-product-uses-rightmost-fastest-order
+  category: tensor_xform
+  title: Einop cross-input product uses rightmost-fastest order
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        let left = set_at(
+          zeros[f32](2),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let right = set_at(
+          zeros[f32](3),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let flattened = einop{ i, j -> (i*j) }(left, right)?
+        yield Ok(flattened)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        mode: exact
+
+- id: XFM-einop-multi-input-single-output-schema-is-callable
+  category: tensor_xform
+  title: einop multi-input single-output schema is callable
+  code: |
+    import std::tensor::{EinopError, ones}
+
+    fn main!() -> Res[Str, EinopError] =
+      result {
+        let x = ones[f32](2,3)
+        let w = ones[f32](3,4)
+        let y = einop{ i k, k j -> i j }(x, w)?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,4]"'
+- id: XFM-einop-multi-output-schema-returns-tuple-in-output-order
+  category: tensor_xform
+  title: einop multi-output schema returns tuple in output order
+  code: |
+    import std::tensor::{EinopError, ones}
+
+    fn main!() -> Res[Str, EinopError] =
+      result {
+        let x = ones[f32](2,3)
+        let op = einop{ b c -> c b, b c }
+        let out = op(x)?
+        let ok = (to_str(out.0.shape()) == "[3,2]") && (to_str(out.1.shape()) == "[2,3]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: XFM-einop-multi-output-values-are-independent-over-all-operands
+  category: tensor_xform
+  title: einop computes each output independently over every original operand
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError, ones, zeros}
+    import std::tensor::index::{get_at, set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Str, Union[DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        let mut left = zeros[f32](2,2)
+        left = set_at(left, [IndexItem::At(0), IndexItem::At(0)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        left = set_at(left, [IndexItem::At(1), IndexItem::At(1)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+
+        let mut right = zeros[f32](2,2)
+        right = set_at(right, [IndexItem::At(0), IndexItem::At(1)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        right = set_at(right, [IndexItem::At(1), IndexItem::At(0)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        right = set_at(right, [IndexItem::At(1), IndexItem::At(1)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+
+        let out = einop{ i k, k j -> i j, k }(left, right)?
+        let ok = ((to_str(out.0.shape()) == "[2,2]")
+          && (get_at(out.0, [IndexItem::At(0), IndexItem::At(0)].to_vec())?.item()? == 0.0)
+          && (get_at(out.0, [IndexItem::At(0), IndexItem::At(1)].to_vec())?.item()? == 1.0)
+          && (get_at(out.0, [IndexItem::At(1), IndexItem::At(0)].to_vec())?.item()? == 1.0)
+          && (get_at(out.0, [IndexItem::At(1), IndexItem::At(1)].to_vec())?.item()? == 1.0)
+          && (to_str(out.1.shape()) == "[2]")
+          && (get_at(out.1, [IndexItem::At(0)].to_vec())?.item()? == 1.0)
+          && (get_at(out.1, [IndexItem::At(1)].to_vec())?.item()? == 2.0))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-einop-output-only-symbol-is-explicit-new-axis
+  category: tensor_xform
+  title: einop output-only symbol creates an explicitly sized new axis
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        let source = set_at(
+          zeros[f32](2),
+          [IndexItem::At(0)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let op = einop{ i -> i r }.with_sizes(["r": 2])
+        yield Ok(op(source)?)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2, 2]
+        expected: [1.0, 1.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-einop-output-only-symbol-requires-size-binding
+  category: tensor_xform
+  title: einop output-only symbol without a size binding is ambiguous
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = einop{ i -> i r }(ones[f32](2))?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: AMBIGUOUS_DIMS
+      message_contains:
+      - ambiguous
+      - dims
+      data_keys:
+      - operation
+
+- id: XFM-einop-literal-occurrences-are-fresh-anonymous-axes
+  category: tensor_xform
+  title: repeated equal literals remain fresh on both sides
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        let mut source = set_at(
+          zeros[f32](4),
+          [IndexItem::At(0)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        source = set_at(
+          source,
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        yield Ok(einop{ (2*2) -> 2 }(source)?)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2]
+        expected: [2.0, 2.0]
+        mode: exact
+
+- id: XFM-einop-named-pack-aligns-members-instead-of-cross-product
+  category: tensor_xform
+  title: einop named pack carries and aligns its bound members
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        let left = ones[f32](2,3,2)
+        let mut right = zeros[f32](2,3,2)
+        right = set_at(right, [IndexItem::At(0), IndexItem::At(0), IndexItem::At(0)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        right = set_at(right, [IndexItem::At(0), IndexItem::At(1), IndexItem::At(0)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        right = set_at(right, [IndexItem::At(0), IndexItem::At(1), IndexItem::At(1)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        right = set_at(right, [IndexItem::At(1), IndexItem::At(0), IndexItem::At(1)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        right = set_at(right, [IndexItem::At(1), IndexItem::At(2), IndexItem::At(0)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        right = set_at(right, [IndexItem::At(1), IndexItem::At(2), IndexItem::At(1)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+
+        yield Ok(einop{ ...p k, ...p k -> ...p }(left, right)?)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2, 3]
+        expected: [1.0, 2.0, 0.0, 1.0, 0.0, 2.0]
+        mode: exact
+
+- id: XFM-einop-anonymous-input-pack-reduces-in-canonical-order
+  category: tensor_xform
+  title: einop reduces every anonymous input-pack member in canonical source order
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+    import std::tensor::prim::{wrapping_add, wrapping_sub}
+
+    fn order_trap() -> Res[Tensor[i8], Union[DTypeError, DeterminismError, IndexError, NumericError, ShapeError]] =
+      result {
+        let mut thirty_two = ones[i8]()
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        thirty_two = wrapping_add(thirty_two, thirty_two)?
+        let sixty_four = wrapping_add(thirty_two, thirty_two)?
+        let ninety_six = wrapping_add(sixty_four, thirty_two)?
+        let minus_thirty_two = wrapping_sub(zeros[i8](), thirty_two)?
+
+        // Row-major [96, -32, 32, 0] folds to 96. Reducing the first axis
+        // separately would begin with 96 + 32 and overflow.
+        let mut source = zeros[i8](2,2)
+        source = set_at(source, [IndexItem::At(0), IndexItem::At(0)].to_vec(), ninety_six, mode=ScatterMode::Assign)?
+        source = set_at(source, [IndexItem::At(0), IndexItem::At(1)].to_vec(), minus_thirty_two, mode=ScatterMode::Assign)?
+        source = set_at(source, [IndexItem::At(1), IndexItem::At(0)].to_vec(), thirty_two, mode=ScatterMode::Assign)?
+        yield Ok(source)
+      }
+
+    fn main!() -> Res[Str, Union[DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        let out = einop{ ... -> }(order_trap()?)?
+        yield Ok(to_str(out.item()? == 96))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-einop-product-repeated-label-selects-diagonal
+  category: tensor_xform
+  title: einop diagonalizes repeated labels exposed from a product axis
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError, Tensor, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        let mut source = zeros[f32](4)
+        source = set_at(source, [IndexItem::At(0)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        source = set_at(source, [IndexItem::At(1)].to_vec(), ones[f32](), mode=ScatterMode::Assign)?
+        yield Ok(einop{ (i*i) -> i }(source)?)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [2]
+        expected: [1.0, 0.0]
+        mode: exact
+
+- id: XFM-einop-repeated-label-dimension-mismatch-is-inconsistent
+  category: tensor_xform
+  title: einop rejects unequal dimensions for one repeated input label
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = einop{ i i -> i }(ones[f32](2,3))?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: INCONSISTENT_DIMS
+      message_contains:
+      - inconsistent
+      - dims
+      data_keys:
+      - operation
+
+- id: XFM-einop-bool-dtype-is-schema-static-per-output
+  category: tensor_xform
+  title: einop dtype remains schema-static when a named pack binds zero axes
+  code: |
+    import std::tensor::{EinopError, IndexError, NumericError, ShapeError, Tensor, ones}
+
+    fn is_bool_tensor(_x: Tensor[Bool]) -> Bool = true
+    fn is_u8_tensor(_x: Tensor[u8]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[EinopError, IndexError, NumericError, ShapeError]] =
+      result {
+        let out = einop{ ...p -> ...p, }(ones[bool]())?
+        let structural = out.0.item()?
+        let reduced = out.1.item()?
+        let ok = (is_bool_tensor(out.0)
+          && is_u8_tensor(out.1)
+          && structural
+          && (reduced == 1))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-einop-nary-promotion-precedes-prefix-multiplication
+  category: tensor_xform
+  title: einop selects the final N-ary dtype before multiplying an operand prefix
+  code: |
+    import std::tensor::{DTypeError, EinopError, NumericError, ShapeError, Tensor, ones}
+    import std::tensor::prim::wrapping_add
+
+    fn main!() -> Res[Tensor[i64], Union[DTypeError, EinopError, NumericError, ShapeError]] =
+      result {
+        let two = wrapping_add(ones[i8](), ones[i8]())?
+        let mut sixty_four = ones[i8]()
+        sixty_four = wrapping_add(sixty_four, sixty_four)?
+        sixty_four = wrapping_add(sixty_four, sixty_four)?
+        sixty_four = wrapping_add(sixty_four, sixty_four)?
+        sixty_four = wrapping_add(sixty_four, sixty_four)?
+        sixty_four = wrapping_add(sixty_four, sixty_four)?
+        sixty_four = wrapping_add(sixty_four, sixty_four)?
+        yield Ok(einop{ , , -> }(sixty_four, two, ones[i64]())?)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: i64
+        shape: []
+        expected: [128]
+        mode: exact
+
+- id: XFM-einop-later-output-failure-is-expression-atomic
+  category: tensor_xform
+  title: einop exposes no earlier output when a later output overflows
+  code: |
+    import std::tensor::{DTypeError, EinopError, NumericError, ShapeError, ones}
+    import std::tensor::prim::wrapping_add
+
+    fn main!() -> Res[Str, Union[DTypeError, EinopError, NumericError, ShapeError]] =
+      result {
+        let two = wrapping_add(ones[i8](2), ones[i8](2))?
+        let four = wrapping_add(two, two)?
+        let eight = wrapping_add(four, four)?
+        let sixteen = wrapping_add(eight, eight)?
+        let thirty_two = wrapping_add(sixteen, sixteen)?
+        let sixty_four = wrapping_add(thirty_two, thirty_two)?
+        let ninety_six = wrapping_add(sixty_four, thirty_two)?
+        let one_hundred = wrapping_add(ninety_six, four)?
+        _ = einop{ i -> i, }(one_hundred)?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: NumericError
+    value_diagnostics:
+    - code: INT_OVERFLOW
+      message_contains:
+      - int
+      - overflow
+      data_keys:
+      - operation
+      - dtype
+      data_equals:
+        operation: einop
+        dtype: i8
+
+- id: XFM-einop-rejects-duplicate-output-label
+  category: tensor_xform
+  title: einop rejects a repeated identifier within one output
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = einop{ i -> i*i }
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: EINOP_OUTPUT_LABEL_DUPLICATE
+      message_contains:
+      - einop
+      - output
+      - label
+      - duplicate
+      data_keys: []
+
+- id: XFM-einop-rejects-duplicate-output-named-pack
+  category: tensor_xform
+  title: einop rejects a repeated named-pack token within one output
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = einop{ ...p -> ...p ...p }
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: EINOP_OUTPUT_LABEL_DUPLICATE
+      message_contains:
+      - einop
+      - output
+      - label
+      - duplicate
+      data_keys: []
+
+- id: XFM-einop-rejects-unbound-anonymous-output-pack
+  category: tensor_xform
+  title: einop anonymous output pack has no possible input binding
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = einop{ i -> ... }
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: AXIS_PACK_UNBOUND
+      message_contains:
+      - axis pack
+      - unbound
+      data_keys: []
+- id: XFM-einop-rejects-tagged-sum-in-left-axis-expression
+  category: tensor_xform
+  title: einop rejects tagged sum in left axis expression
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = einop{ a*(b+c) -> a b c }
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: AXIS_MAPPING_UNSUPPORTED
+      message_contains:
+      - axis
+      - mapping
+      - unsupported
+      data_keys: []
+- id: XFM-einop-rejects-tagged-sum-in-right-axis-expression
+  category: tensor_xform
+  title: einop rejects tagged sum in right axis expression
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = einop{ a b -> a*(b+c) }
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: AXIS_MAPPING_UNSUPPORTED
+      message_contains:
+      - axis
+      - mapping
+      - unsupported
+      data_keys: []
+- id: XFM-contract-forbids-non-atomic-axis-expressions
+  category: tensor_xform
+  title: contract forbids non-atomic axis expressions
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = contract{ b (h*w), (h*w) c -> b c }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: CONTRACT_NON_ATOMIC_AXIS
+      message_contains:
+      - contract
+      - atomic
+      data_keys: []
+- id: XFM-einop-does-not-expose-reduce-by-customization-in-v0-1
+  category: tensor_xform
+  title: einop does not expose reduce_by customization in v0.1
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let op = einop{ i k, k j -> i j }
+      op.reduce_by({ |x| x })
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+- id: XFM-rearrange-rejects-output-segments-that-straddle-operands
+  category: tensor_xform
+  title: rearrange rejects output segments that straddle operands
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](1,2,1)
+        let y = ones[i32](1,2,1)
+        _ = (x, y).apply(
+          rearrange{ b (h1+h2) c, b h3 c -> b (h1 + (h2+h3)) c } // @primary straddling-output-segment
+            .with_sizes(["h1": 1, "h2": 1, "h3": 2])
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: SEGMENT_STRADDLE
+      message_contains:
+      - segment
+      - straddle
+      data_keys: []
+      primary_span:
+        marker: straddling-output-segment
+
+- id: XFM-rearrange-rejects-product-factors-from-distinct-operands
+  category: tensor_xform
+  title: Rearrange rejects product factors from distinct operands
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = rearrange{ i, j -> (i*j) }(
+          ones[f32](2),
+          ones[f32](2),
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: SEGMENT_STRADDLE
+      message_contains:
+      - segment
+      - straddle
+      data_keys: []
+
+- id: XFM-explicit-concat-then-unary-factoring-crosses-no-operand-boundary
+  category: tensor_xform
+  title: explicit concat then unary factoring crosses no operand boundary
+  code: |
+    import std::tensor::{DTypeError, DeterminismError, IndexError, ShapeError, Tensor, TransformError, ones, zeros}
+    import std::tensor::index::{set_at, IndexItem, ScatterMode}
+
+    fn main!() -> Res[Tensor[f32], Union[DTypeError, DeterminismError, IndexError, ShapeError, TransformError]] =
+      result {
+        let left = set_at(
+          zeros[f32](2),
+          [IndexItem::At(1)].to_vec(),
+          ones[f32](),
+          mode=ScatterMode::Assign,
+        )?
+        let joined = (left, zeros[f32](4)).apply(
+          rearrange{ (a*b), (a*c) -> ((a*b)+(a*c)) }
+            .with_sizes(["a": 2, "b": 1, "c": 2])
+        )?
+        let factored = joined.then(
+          rearrange{ ((a*b)+(a*c)) -> (a*(b+c)) }
+            .with_sizes(["a": 2, "b": 1, "c": 2])
+        )?
+        yield Ok(factored)
+      }
+  expect:
+    value:
+      kind: Ok
+      numeric_compare:
+        dtype: f32
+        shape: [6]
+        expected: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        mode: exact
+
+- id: XFM-cross-input-factoring-reaches-segment-straddle-after-structural-proof
+  category: tensor_xform
+  title: cross-input factoring reaches segment straddle after structural proof
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        _ = (ones[f32](2), ones[f32](4)).apply(
+          rearrange{ (a*b), (a*c) -> (a*(b+c)) }
+            .with_sizes(["a": 2, "b": 1, "c": 2])
+        )?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: SEGMENT_STRADDLE
+      message_contains:
+      - segment
+      - straddle
+      data_keys: []
+
+- id: XFM-axisexpr-precedence-is-parentheses-then-multiply-then-plus
+  category: tensor_xform
+  title: AxisExpr precedence is parentheses then multiply then plus
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](14, 1)
+        let y = x.then(
+          rearrange{ (h + w*r) c -> (h + w*r) c }.with_sizes(["h": 2, "w": 3, "r": 4])
+        )?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[14,1]"'
+- id: XFM-non-unique-dim-solve-is-rejected-even-if-reduction-output-is-shape-unique
+  category: tensor_xform
+  title: Non-unique dim solve is rejected even if reduction output is shape-unique
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](12)
+        _ = x.then(reduce{ (h*w) -> 1 })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: AMBIGUOUS_DIMS
+      message_contains:
+      - ambiguous
+      - dims
+      data_keys:
+      - operation
+- id: XFM-inflate-allows-zero-literal-factor-and-yields-empty-axis
+  category: tensor_xform
+  title: inflate allows zero literal factor and yields empty axis
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](2,3)
+        let y = x.then(inflate{ b c -> b c 0 })?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,3,0]"'
+- id: XFM-inflate-literal-factor-matches-with-sizes-symbolic-factor
+  category: tensor_xform
+  title: inflate literal factor matches with_sizes symbolic factor
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](2,3)
+        let y1 = x.then(inflate{ b c -> b c 3 })?
+        let y2 = x.then(inflate{ b c -> b c r }.with_sizes(["r": 3]))?
+        let ok = to_str(y1.shape()) == to_str(y2.shape())
+        yield if ok { yield Ok("ok") } else { yield Err("shape_mismatch") }
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: XFM-inflate-can-expand-rank-0-input-with-empty-operand-axis-list
+  category: tensor_xform
+  title: inflate can expand rank-0 input with empty operand axis list
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](3)
+        let s = contract{ i, i -> }(x, x)?
+        let y = s.then(inflate{ -> 3 })?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[3]"'
+
+- id: XFM-with-sizes-negative-binding-is-domain-invalid-value
+  category: tensor_xform
+  title: with_sizes negative binding is DOMAIN_INVALID_VALUE
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,12,3)
+        _ = x.then(view{ b (h*w) c -> b h w c }.with_sizes(["h": -1, "w": 4]))?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: DOMAIN_INVALID_VALUE
+      message_contains:
+      - domain
+      - invalid
+      - value
+      data_keys:
+      - domain
+      - value
+- id: XFM-with-sizes-conflicting-binding-is-inconsistent-dims
+  category: tensor_xform
+  title: with_sizes conflicting binding is INCONSISTENT_DIMS
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,12,3)
+        _ = x.then(view{ b (h*w) c -> b h w c }.with_sizes(["h": 5, "w": 4]))? // @primary conflicting-size-binding
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: INCONSISTENT_DIMS
+      message_contains:
+      - inconsistent
+      - dims
+      data_keys:
+      - operation
+      primary_span:
+        marker: conflicting-size-binding
+- id: XFM-with-sizes-rejects-static-unknown-key-before-solving
+  category: tensor_xform
+  title: with_sizes rejects the first static unknown key before dimension solving
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,12,3)
+        _ = x.then(view{ b (h*w) c -> b h w c }.with_sizes(["h": 3, "typo": 1, "extra": 2]))?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: WITH_SIZES_UNKNOWN_KEY
+      message_contains:
+      - with_sizes
+      - unknown
+      data_keys:
+      - key
+      - operation
+      data_equals:
+        key: typo
+        operation: view
+- id: XFM-with-sizes-rejects-named-axis-pack-key
+  category: tensor_xform
+  title: with_sizes rejects named axis packs as scalar dimension keys
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,3,4)
+        _ = x.then(rearrange{ b ...p c -> b c ...p }.with_sizes(["p": 3]))?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: WITH_SIZES_UNKNOWN_KEY
+      message_contains:
+      - with_sizes
+      - unknown
+      data_keys:
+      - key
+      - operation
+      data_equals:
+        key: p
+        operation: rearrange
+- id: XFM-with-sizes-rejects-dynamic-unknown-key-at-invocation
+  category: tensor_xform
+  title: with_sizes rejects a dynamic unknown key when the schema is invoked
+  code: |
+    import std::io::{IoError, args!}
+    import std::map::Map
+    import std::tensor::{TransformError, ones}
+
+    fn main!() -> Res[Str, Union[IoError, TransformError]] =
+      result {
+        let argc = args!()?.len()
+        let key = concat(["unknown_", to_str(argc)])
+        let sizes = Map[Str,Nat].new().insert(key, 3)
+        let x = ones[f32](2,12,3)
+        _ = x.then(view{ b (h*w) c -> b h w c }.with_sizes(sizes))?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TransformError
+    value_diagnostics:
+    - code: WITH_SIZES_UNKNOWN_KEY
+      message_contains:
+      - with_sizes
+      - unknown
+      data_keys:
+      - key
+      - operation
+- id: XFM-single-anonymous-axis-pack-matches-zero-or-more-axes
+  category: tensor_xform
+  title: single anonymous axis pack matches zero or more axes
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](2,3,4,5)
+        let y = x.then(rearrange{ ... -> h w c d }.with_sizes(["h": 2, "w": 3, "c": 4, "d": 5]))?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,3,4,5]"'
+- id: XFM-duplicate-anonymous-axis-packs-are-forbidden
+  category: tensor_xform
+  title: duplicate anonymous axis packs are forbidden
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,3,4)
+        _ = x.then(rearrange{ ... ... -> ... })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: AXIS_PACK_ANON_DUPLICATE
+      message_contains:
+      - axis pack
+      - anonymous
+      - duplicate
+      data_keys: []
+- id: XFM-named-axis-packs-support-deterministic-reorder-when-constraints-are-unique
+  category: tensor_xform
+  title: named axis packs support deterministic reorder when constraints are unique
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](2,3,4,5)
+        let y = x.then(
+          rearrange{ b ...p1 c ...p2 -> b ...p2 c ...p1 }.with_sizes(["c": 4])
+        )?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,5,4,3]"'
+- id: XFM-output-named-axis-pack-must-be-bound-on-input-side
+  category: tensor_xform
+  title: output named axis pack must be bound on input side
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,3,4)
+        _ = x.then(rearrange{ b ...p1 c -> b ...p2 c }.with_sizes(["c": 4]))?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: AXIS_PACK_UNBOUND
+      message_contains:
+      - axis pack
+      - unbound
+      data_keys: []
+- id: XFM-named-axis-pack-partition-ambiguity-fails-with-ambiguousdims
+  category: tensor_xform
+  title: named axis-pack partition ambiguity fails with AmbiguousDims
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,3,4,5)
+        _ = x.then(rearrange{ b ...p1 ...p2 -> b ...p2 ...p1 })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: AMBIGUOUS_DIMS
+      message_contains:
+      - ambiguous
+      - dims
+      data_keys:
+      - operation
+- id: XFM-named-axis-pack-with-no-rank-partition-is-inconsistent
+  category: tensor_xform
+  title: named axis pack with no rank partition is inconsistent
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2)
+        _ = x.then(rearrange{ b c ...p -> b c ...p })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: INCONSISTENT_DIMS
+      message_contains:
+      - inconsistent
+      - dims
+      data_keys:
+      - operation
+- id: XFM-contract-forbids-axis-pack-tokens-because-axes-must-be-atomic
+  category: tensor_xform
+  title: contract forbids axis-pack tokens because axes must be atomic
+  code: |
+    fn main!() -> Res[Str, Str] {
+      _ = contract{ b ...p, ...p c -> b c }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: CONTRACT_NON_ATOMIC_AXIS
+      message_contains:
+      - contract
+      - atomic
+      data_keys: []
+- id: XFM-named-axis-pack-can-bind-zero-axes
+  category: tensor_xform
+  title: named axis pack can bind zero axes
+  code: |
+    import std::tensor::{AxisError, ContractError, TransformError, ones}
+
+    fn main!() -> Res[Str, Union[AxisError, ContractError, Str, TransformError]] =
+      result {
+        let x = ones[f32](2,4)
+        let y = x.then(
+          rearrange{ b ...mid c -> b c ...mid }.with_sizes(["c": 4])
+        )?
+        yield Ok(to_str(y.shape()))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"[2,4]"'
+- id: XFM-non-affine-view-remap-is-rejected-with-not-a-view
+  category: tensor_xform
+  title: non-affine view remap is rejected with NOT_A_VIEW
+  code: |
+    import std::tensor::{TransformError, ones}
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let x = ones[f32](2,3,4)
+        let t = x.then(view{ b c d -> c b d })?
+        _ = t.then(view{ c b d -> (c*b) d })?
+        yield Ok("unreachable")
+      }
+  expect:
+    value:
+      kind: Err
+      repr: TransformError
+    value_diagnostics:
+    - code: NOT_A_VIEW
+      message_contains:
+      - view
+      - affine
+      data_keys: []
+- id: XFM-rearrange-cannot-shrink-numel
+  category: tensor_xform
+  title: rearrange cannot shrink numel
+  code: |
+    import std::tensor::ones
+
+    fn main!() -> Res[Str, Str] =
+      result {
+        let x = ones[f32](2,3)
+        _ = x.then(rearrange{ b c -> b })?
+        yield Ok("unreachable")
+      }
+  expect:
+    compile_error:
+      code: NUMEL_MISMATCH_SHRINK
+      message_contains:
+      - numel
+      - shrink
+      data_keys: []
+
+- id: XFM-view-composes-over-tensorview-input
+  category: tensor_xform
+  title: view composes directly over a TensorView input
+  code: |
+    import std::tensor::{TensorView, TransformError, ones}
+
+    fn is_view(_x: TensorView[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let first = ones[f32](2,3).then(view{ row col -> row col })?
+        let composed = first.then(view{ row col -> row col })?
+        let ok = is_view(composed) && (to_str(composed.shape()) == "[2,3]")
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-tensorview-snapshot-survives-source-binding-reassignment
+  category: tensor_xform
+  title: TensorView retained snapshot survives source binding reassignment
+  code: |
+    import std::tensor::{IndexError, ShapeError, TransformError, ones, zeros}
+    import std::tensor::index::{get_at, IndexItem}
+
+    fn main!() -> Res[Str, Union[IndexError, ShapeError, TransformError]] =
+      result {
+        let mut source = zeros[f32](2,3)
+        let retained = source.then(view{ row col -> row col })?
+        source = ones[f32](2,3)
+        let retained_value = get_at(retained, [IndexItem::At(0), IndexItem::At(0)].to_vec())?.item()?
+        let source_value = get_at(source, [IndexItem::At(0), IndexItem::At(0)].to_vec())?.item()?
+        yield Ok(to_str((retained_value == 0.0) && (source_value == 1.0)))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-rearrange-accepts-tensorview-in-later-operand-position
+  category: tensor_xform
+  title: rearrange assigns an independent readable carrier to a later operand
+  code: |
+    import std::tensor::{Tensor, TransformError, ones}
+
+    fn is_f32_tensor(_x: Tensor[f32]) -> Bool = true
+    fn is_i32_tensor(_x: Tensor[i32]) -> Bool = true
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let right_view = ones[i32](3).then(view{ j -> j })?
+        let (left, right) = rearrange{ i, j -> i, j }(ones[f32](2), right_view)?
+        let ok = (is_f32_tensor(left)
+          && is_i32_tensor(right)
+          && (to_str(left.shape()) == "[2]")
+          && (to_str(right.shape()) == "[3]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+
+- id: XFM-einop-accepts-later-view-operand-and-materializes-every-output
+  category: tensor_xform
+  title: einop accepts a later TensorView operand and materializes every tuple output
+  code: |
+    import std::tensor::{EinopError, Tensor, TransformError, ones}
+
+    fn is_tensor(_x: Tensor[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, Union[EinopError, TransformError]] =
+      result {
+        let right_view = ones[f32](3,4).then(view{ k j -> k j })?
+        let product = einop{ i k, k j -> i j }(ones[f32](2,3), right_view)?
+        let tuple_source = ones[f32](2,3).then(view{ b c -> b c })?
+        let (transposed, unchanged) = einop{ b c -> c b, b c }(tuple_source)?
+        let ok = (is_tensor(product)
+          && is_tensor(transposed)
+          && is_tensor(unchanged)
+          && (to_str(product.shape()) == "[2,4]")
+          && (to_str(transposed.shape()) == "[3,2]")
+          && (to_str(unchanged.shape()) == "[2,3]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: XFM-complete-view-literal-precedes-same-spelled-function
+  category: tensor_xform
+  title: complete view literal precedes a same-spelled ordinary function
+  code: |
+    import std::tensor::{TensorView, TransformError, ones}
+
+    fn view(value: i64) -> i64 = value
+    fn is_view(_value: TensorView[f32]) -> Bool = true
+
+    fn main!() -> Res[Str, TransformError] =
+      result {
+        let ordinary = view(7)
+        let transformed = ones[f32](2,3).then(view{ row col -> row col })?
+        let ok = ((ordinary == 7)
+          && is_view(transformed)
+          && (to_str(transformed.shape()) == "[2,3]"))
+        yield Ok(to_str(ok))
+      }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'

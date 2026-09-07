@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+target/
+# pixi environments
+.pixi/*
+!.pixi/config.toml

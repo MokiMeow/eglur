@@ -1,0 +1,251 @@
+use super::*;
+
+impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
+    pub(super) fn finish(mut self) -> PhaseAnalysis<BodyTypes> {
+        self.transfers.sort();
+        self.transfers.dedup();
+        debug_assert!(self.region_stack.is_empty());
+        debug_assert!(self.block_region_overrides.is_empty());
+        debug_assert!(self.result_contexts.is_empty());
+        debug_assert_eq!(self.question_floors, [0]);
+        debug_assert!(self.checked_contexts.is_empty());
+        debug_assert!(self.control_path_barriers.is_empty());
+        self.recorder.finish(PhaseProduct::Performed(BodyTypes {
+            expressions: self.expressions,
+            locals: self.locals,
+            members: self.members,
+            invocations: self.invocations,
+            reduce_by_commitments: self.reduce_by_commitments,
+            regions: self.regions,
+            checked_numeric: self.checked_numeric,
+            ownership_operations: self.ownership_operations,
+            bodies: self.bodies,
+            transfers: self.transfers.into_boxed_slice(),
+            callable_instances: self.callable_instances.into_boxed_slice(),
+            obligations: self.obligations.into_boxed_slice(),
+            method_dispatches: self.method_dispatches.into_boxed_slice(),
+        }))
+    }
+
+    pub(super) fn check_all(&mut self) -> Result<(), BodyTypingError> {
+        let declarations = self
+            .collection
+            .modules()
+            .flat_map(|module| module.declarations())
+            .map(|declaration| declaration.id())
+            .collect::<Vec<_>>();
+        for declaration in declarations {
+            self.check_declaration(declaration)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_declaration(&mut self, declaration: DefId) -> Result<(), BodyTypingError> {
+        let signature = match self.signatures.source_declaration(declaration) {
+            FactState::Known(signature) => signature.clone(),
+            FactState::Poisoned(poison) => {
+                self.bodies
+                    .insert(declaration, SemanticFact::Poisoned(poison.clone()))?;
+                return Ok(());
+            }
+            FactState::Unperformed | FactState::NotApplicable => return Ok(()),
+        };
+        let previous_owner = self.current_owner.replace(declaration);
+        let result = (|| {
+            match signature {
+                DeclarationSignature::Callable(callable) => {
+                    let callable = self
+                        .signatures
+                        .callable(callable)
+                        .cloned()
+                        .ok_or(BodyTypingError::UnknownCallable(callable))?;
+                    if callable.body().is_some() {
+                        self.check_callable_body(declaration, &callable)?;
+                    }
+                }
+                DeclarationSignature::Const { ty } => self.check_const_body(declaration, ty)?,
+                _ => {}
+            }
+            Ok(())
+        })();
+        self.current_owner = previous_owner;
+        result
+    }
+
+    pub(super) fn check_callable_body(
+        &mut self,
+        declaration: DefId,
+        signature: &CallableSignature,
+    ) -> Result<(), BodyTypingError> {
+        let (module, source, hir, item) = self.source_item(declaration)?;
+        let ItemKind::Function(function) = item.kind() else {
+            return Err(BodyTypingError::WrongDeclarationKind(declaration));
+        };
+        let body = hir.body(function.body);
+        let result_ty =
+            match self.normalize_type_at(source, function.name.origin(), signature.result())? {
+                Outcome::Known(ty) => ty,
+                Outcome::Poisoned(poison) => {
+                    return self.record_body_outcome(
+                        declaration,
+                        signature.result(),
+                        Outcome::Poisoned(poison),
+                    );
+                }
+                Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => return Ok(()),
+            };
+        let previous_return = self.current_return.replace(result_ty);
+        let region = ControlRegionKey::Callable(declaration);
+        self.enter_control_region(region.clone())?;
+        let outcome = (|| {
+            let mut setup = Outcome::Known(());
+            for parameter in signature.parameters() {
+                if let Some(pattern) = parameter.source_pattern() {
+                    let origin = body
+                        .pattern(pattern)
+                        .ok_or(BodyTypingError::WrongBodyPattern(pattern))?
+                        .origin();
+                    let parameter_ty =
+                        match self.normalize_type_at(source, origin, parameter.ty())? {
+                            Outcome::Known(ty) => ty,
+                            Outcome::Poisoned(poison) => {
+                                setup = self.merge_unit(setup, Outcome::Poisoned(poison))?;
+                                continue;
+                            }
+                            Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => {
+                                setup = self.merge_unit(setup, Outcome::Unperformed)?;
+                                continue;
+                            }
+                        };
+                    let bound = self.bind_pattern(
+                        module,
+                        source,
+                        body,
+                        pattern,
+                        parameter_ty,
+                        PatternBindingMode::Parameter,
+                    )?;
+                    setup = self.merge_unit(setup, bound)?;
+                }
+            }
+            match setup {
+                Outcome::Known(()) => match function.body_form {
+                    FunctionBody::Absent => Ok(Outcome::NotApplicable),
+                    FunctionBody::Expression(expression) | FunctionBody::Block(expression) => {
+                        let value = self.type_expression_in_current_region(
+                            module,
+                            source,
+                            hir,
+                            body,
+                            expression,
+                            TypeRequest::definitive(Some(result_ty)),
+                        )?;
+                        self.check_return_value(source, expression, result_ty, value)
+                    }
+                },
+                Outcome::Poisoned(poison) => Ok(Outcome::Poisoned(poison)),
+                Outcome::Unperformed => Ok(Outcome::Unperformed),
+                Outcome::Deferred | Outcome::NotApplicable => Ok(Outcome::Unperformed),
+            }
+        })();
+        self.leave_control_region(&region)?;
+        self.current_return = previous_return;
+        let outcome = outcome?;
+        self.record_body_outcome(declaration, result_ty, outcome)
+    }
+
+    pub(super) fn check_const_body(
+        &mut self,
+        declaration: DefId,
+        expected: TypeId,
+    ) -> Result<(), BodyTypingError> {
+        let (module, source, hir, item) = self.source_item(declaration)?;
+        let ItemKind::Const(value) = item.kind() else {
+            return Err(BodyTypingError::WrongDeclarationKind(declaration));
+        };
+        let body = hir.body(value.body);
+        let expected = match self.normalize_type_at(source, item.origin(), expected)? {
+            Outcome::Known(ty) => ty,
+            Outcome::Poisoned(poison) => {
+                return self.record_body_outcome(declaration, expected, Outcome::Poisoned(poison));
+            }
+            Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => return Ok(()),
+        };
+        let outcome = self.type_expression(
+            module,
+            source,
+            hir,
+            body,
+            value.value,
+            TypeRequest::definitive(Some(expected)),
+        )?;
+        let outcome = match outcome {
+            Outcome::Known(actual)
+                if self.signatures.types().is_assignable(actual.ty, expected)? =>
+            {
+                Outcome::Known(actual)
+            }
+            Outcome::Known(actual) => {
+                let origin = body
+                    .expression(value.value)
+                    .ok_or(BodyTypingError::WrongBodyExpression(value.value))?
+                    .origin();
+                Outcome::Poisoned(self.assignment_mismatch(source, origin, expected, actual.ty)?)
+            }
+            other => other,
+        };
+        self.record_body_outcome(declaration, expected, outcome)
+    }
+
+    pub(super) fn record_body_outcome(
+        &mut self,
+        declaration: DefId,
+        result: TypeId,
+        outcome: Outcome<TypedExpression>,
+    ) -> Result<(), BodyTypingError> {
+        let fact = match outcome {
+            Outcome::Known(_) => Some(SemanticFact::Known(BodyTypeSummary { result })),
+            Outcome::Poisoned(poison) => Some(SemanticFact::Poisoned(poison)),
+            Outcome::NotApplicable => Some(SemanticFact::NotApplicable),
+            Outcome::Deferred | Outcome::Unperformed => None,
+        };
+        if let Some(fact) = fact {
+            self.bodies.insert(declaration, fact)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn source_item(
+        &self,
+        declaration: DefId,
+    ) -> Result<
+        (
+            ModuleId,
+            &'input SemanticSource<'hir>,
+            &'hir HirFile,
+            &'hir eglur_hir::Item,
+        ),
+        BodyTypingError,
+    > {
+        let declaration_record = self
+            .collection
+            .declaration(declaration)
+            .ok_or(BodyTypingError::UnknownDeclaration(declaration))?;
+        let module = self
+            .collection
+            .module(declaration.module())
+            .ok_or(BodyTypingError::UnknownModule(declaration.module()))?;
+        let source = self
+            .sources
+            .get(&module.file())
+            .copied()
+            .ok_or(BodyTypingError::MissingSource(module.file()))?;
+        let hir = source
+            .hir()
+            .ok_or(BodyTypingError::MissingHir(module.file()))?;
+        let item = declaration_record
+            .item()
+            .ok_or(BodyTypingError::MissingDeclarationItem(declaration))?;
+        Ok((module.id(), source, hir, hir.item(item)))
+    }
+}
