@@ -156,6 +156,22 @@ fn infer_effects(
         .collect::<BTreeMap<_, _>>();
     let body_nodes = body_by_owner.keys().copied().collect::<BTreeSet<_>>();
     let mut solved = BTreeMap::<CanonicalTarget, SolvedFact>::new();
+    for (_, invocation) in body_types.invocations() {
+        if let crate::InvocationTarget::TensorConstructor {
+            declaration: CanonicalTarget::External(declaration),
+            ..
+        } = invocation.target()
+        {
+            let summary = trusted
+                .and_then(|environment| environment.summary(declaration))
+                .cloned()
+                .unwrap_or(EffectSummary::Unknown);
+            solved.insert(
+                CanonicalTarget::External(declaration.clone()),
+                SolvedFact::Known(summary),
+            );
+        }
+    }
 
     let declaration_targets = signatures
         .declarations()

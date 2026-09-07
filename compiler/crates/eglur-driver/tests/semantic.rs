@@ -372,7 +372,7 @@ fn source_and_local_shadows_lose_dtype_bracket_privilege_without_tensor_analysis
 }
 
 #[test]
-fn direct_tensor_constructor_dtype_bracket_activates_tensor_analysis() {
+fn direct_tensor_constructor_dtype_bracket_requires_constructor_checks() {
     let request = FileSetRequest::single(
         "main.eglur",
         concat!(
@@ -393,7 +393,8 @@ fn direct_tensor_constructor_dtype_bracket_activates_tensor_analysis() {
     let analysis = session.resolve(&profile, Some(&catalog)).unwrap();
     assert!(analysis.resolution().is_some());
     assert!(analysis.trace().missing().any(|entry| {
-        entry.capability() == CompileCapability::Typecheck(TypecheckCapability::AnalyzeTensorSource)
+        entry.capability()
+            == CompileCapability::Typecheck(TypecheckCapability::CheckTensorConstructors)
     }));
     assert!(diagnostic_codes(&session.into_diagnostics(None)).is_empty());
 }
@@ -423,7 +424,8 @@ fn aliased_tensor_constructor_reexport_preserves_dtype_bracket_privilege() {
     let analysis = session.resolve(&profile, Some(&catalog)).unwrap();
     assert!(analysis.resolution().is_some());
     assert!(analysis.trace().missing().any(|entry| {
-        entry.capability() == CompileCapability::Typecheck(TypecheckCapability::AnalyzeTensorSource)
+        entry.capability()
+            == CompileCapability::Typecheck(TypecheckCapability::CheckTensorConstructors)
     }));
     assert!(diagnostic_codes(&session.into_diagnostics(None)).is_empty());
 }

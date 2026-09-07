@@ -169,7 +169,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ExprKind::Call(call) => {
                 self.type_call(context, expression_id, origin, &call, request)?
             }
-            ExprKind::DTypeCall(call) => self.type_dtype_call(context, origin, &call)?,
+            ExprKind::DTypeCall(call) => {
+                self.type_dtype_call(context, expression_id, origin, &call)?
+            }
             ExprKind::Member { receiver, member } => {
                 self.type_member(context, expression_id, receiver, &member)?
             }
@@ -611,6 +613,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     fn type_dtype_call(
         &mut self,
         context: BodyContext<'_, '_>,
+        expression: ExprId,
         origin: OriginId,
         call: &eglur_hir::DTypeCallExpr,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
@@ -621,11 +624,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
         match self.names.fact(key) {
             FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1 => {
-                if matches!(
-                    self.external_semantic_owner(&targets[0]),
-                    Some(ExternalSemanticOwner::TensorSource(_))
-                ) {
-                    Ok(self.unsupported(TypecheckCapability::AnalyzeTensorSource, source, origin))
+                if let Some(ExternalSemanticOwner::TensorSource(constructor)) =
+                    self.external_semantic_owner(&targets[0])
+                {
+                    let target = targets[0].clone();
+                    self.type_tensor_constructor(
+                        context,
+                        expression,
+                        origin,
+                        call,
+                        target,
+                        constructor,
+                    )
                 } else {
                     self.dtype_bracket_forbidden(source, origin)
                 }

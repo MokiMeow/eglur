@@ -532,6 +532,9 @@ impl<'a> Planner<'a> {
             UnsupportedFeature::InvalidCheckedProgram,
         ))?;
         match invocation.target() {
+            InvocationTarget::TensorConstructor { .. } => {
+                Err(SupportReason::Feature(UnsupportedFeature::Tensor))
+            }
             InvocationTarget::Constructor { declaration, .. } => {
                 self.plan_constructor(declaration, checked.dispatch())
             }

@@ -30,6 +30,7 @@ const TEST_EMIT: &str = "std::test::emit!";
 const TEST_ABORT: &str = "std::test::abort!";
 const IO_PRINT: &str = "std::io::print!";
 const TENSOR_ZEROS: &str = "std::tensor::zeros";
+const TENSOR: &str = "std::tensor::Tensor";
 const TENSOR_ONES: &str = "std::tensor::ones";
 const TENSOR_NAN: &str = "std::tensor::nan";
 const TENSOR_RAND: &str = "std::tensor::rand!";
@@ -73,6 +74,13 @@ impl TrustedCatalog {
         let rand = external_id(TENSOR_RAND);
 
         let declarations = vec![
+            declaration(
+                external_id(TENSOR),
+                tensor.clone(),
+                "Tensor",
+                false,
+                DeclarationKind::OpaqueType,
+            )?,
             declaration(
                 numeric_error.clone(),
                 prelude.clone(),
@@ -370,8 +378,18 @@ impl TrustedCatalog {
         ];
         let display_members = display_impls(&display, &display_to_str);
         signatures.extend(display_members.signatures);
+        signatures.push(TrustedDeclarationSignature::new(
+            external_id(TENSOR),
+            TrustedSignatureKind::Nominal {
+                generic_parameters: Box::new([TrustedGenericParameter {
+                    name: "T".into(),
+                    bounds: Box::new([]),
+                }]),
+            },
+        ));
         let signatures = TrustedSignatureEnvironment::new(signatures)?;
         let inhabitance = TrustedInhabitanceEnvironment::new([
+            TrustedInhabitanceFact::new(external_id(TENSOR), TrustedNominalInhabitance::Inhabited),
             TrustedInhabitanceFact::new(
                 external_id(NUMERIC_ERROR),
                 TrustedNominalInhabitance::Unknown,
@@ -383,6 +401,16 @@ impl TrustedCatalog {
         ])?;
 
         let mut effects = vec![
+            TrustedEffectSummary::new(external_id(TENSOR_ZEROS), EffectSummary::pure()),
+            TrustedEffectSummary::new(external_id(TENSOR_ONES), EffectSummary::pure()),
+            TrustedEffectSummary::new(external_id(TENSOR_NAN), EffectSummary::pure()),
+            TrustedEffectSummary::new(
+                external_id(TENSOR_RAND),
+                EffectSummary::Known(KnownEffectSummary::new(
+                    [EffectCategory::Nondet],
+                    StateScope::None,
+                )?),
+            ),
             TrustedEffectSummary::new(display_to_str, EffectSummary::pure()),
             TrustedEffectSummary::new(to_str.clone(), EffectSummary::pure()),
             TrustedEffectSummary::new(wrapping_add.clone(), EffectSummary::pure()),
@@ -417,6 +445,7 @@ impl TrustedCatalog {
 
         let language_items = TrustedLanguageItemEnvironment::new([
             (LanguageItem::NumericError, numeric_error),
+            (LanguageItem::Tensor, external_id(TENSOR)),
             (LanguageItem::OptSome, some.clone()),
             (LanguageItem::OptNone, none.clone()),
             (LanguageItem::ResOk, ok.clone()),
@@ -467,7 +496,7 @@ impl TrustedCatalog {
         }
         validate_name_signatures(&names, &signatures)?;
         validate_inhabitance(&signatures, &inhabitance)?;
-        validate_effects(&signatures, &effects)?;
+        validate_effects(&names, &signatures, &effects)?;
         validate_trait_adapter_effects(&signatures, &effects)?;
         validate_runtime_hooks(&signatures, &normalized_hooks)?;
         Ok(Self {
@@ -618,6 +647,7 @@ fn validate_inhabitance(
 }
 
 fn validate_effects(
+    names: &ExternalNameEnvironment,
     signatures: &TrustedSignatureEnvironment,
     effects: &TrustedEffectEnvironment,
 ) -> Result<(), TrustedCatalogError> {
@@ -629,6 +659,17 @@ fn validate_effects(
         }
     }
     for effect in effects.summaries() {
+        if names
+            .declaration(effect.declaration())
+            .is_some_and(|declaration| {
+                matches!(
+                    declaration.semantic_owner(),
+                    ExternalSemanticOwner::TensorSource(_)
+                )
+            })
+        {
+            continue;
+        }
         let Some(signature) = signatures.declaration(effect.declaration()) else {
             return Err(TrustedCatalogError::OrphanEffect(
                 effect.declaration().clone(),

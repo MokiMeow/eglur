@@ -259,6 +259,26 @@ fn first_slice_effects_match_the_normative_effect_summary_profiles() {
     let catalog = TrustedCatalog::first_slice().unwrap();
     let selected = [
         (
+            "std::tensor::zeros",
+            "std::tensor",
+            "fn zeros[T](dims: Nat...) -> Tensor[T]",
+        ),
+        (
+            "std::tensor::ones",
+            "std::tensor",
+            "fn ones[T](dims: Nat...) -> Tensor[T]",
+        ),
+        (
+            "std::tensor::nan",
+            "std::tensor",
+            "fn nan[f32](dims: Nat...) -> Tensor[f32]",
+        ),
+        (
+            "std::tensor::rand!",
+            "std::tensor",
+            "fn rand![f32](dims: Nat...) -> Tensor[f32]",
+        ),
+        (
             "std::prelude::to_str",
             "std::prelude",
             "fn to_str[T](value: T) -> Str requires Display[T]",

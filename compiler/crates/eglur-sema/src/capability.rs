@@ -60,6 +60,7 @@ pub enum TypecheckCapability {
     CheckUnsafeExpressions,
     AnalyzeInhabitance,
     AnalyzeTensorSource,
+    CheckTensorConstructors,
 }
 
 impl TypecheckCapability {
@@ -91,6 +92,7 @@ impl TypecheckCapability {
             Self::CheckUnsafeExpressions => "typecheck.unsafe_expressions",
             Self::AnalyzeInhabitance => "typecheck.inhabitance",
             Self::AnalyzeTensorSource => "typecheck.tensor_source",
+            Self::CheckTensorConstructors => "typecheck.tensor_constructors",
         }
     }
 }
@@ -104,7 +106,7 @@ pub enum CompileCapability {
 
 impl CompileCapability {
     /// Complete closed capability vocabulary for this compiler revision.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::Resolve(ResolveCapability::CollectDeclarations),
         Self::Resolve(ResolveCapability::ResolveFileSetImports),
         Self::Resolve(ResolveCapability::ResolveLexicalValues),
@@ -137,6 +139,7 @@ impl CompileCapability {
         Self::Typecheck(TypecheckCapability::CheckUnsafeExpressions),
         Self::Typecheck(TypecheckCapability::AnalyzeInhabitance),
         Self::Typecheck(TypecheckCapability::AnalyzeTensorSource),
+        Self::Typecheck(TypecheckCapability::CheckTensorConstructors),
     ];
 
     #[must_use]
@@ -203,7 +206,8 @@ impl CompileCapability {
                 | TypecheckCapability::CheckOwnershipFlow
                 | TypecheckCapability::CheckUnsafeExpressions
                 | TypecheckCapability::AnalyzeInhabitance
-                | TypecheckCapability::AnalyzeTensorSource,
+                | TypecheckCapability::AnalyzeTensorSource
+                | TypecheckCapability::CheckTensorConstructors,
             ) => BODIES,
         }
     }
@@ -226,6 +230,7 @@ impl CompileCapability {
                 | Self::Typecheck(TypecheckCapability::CheckFailureFlow)
                 | Self::Typecheck(TypecheckCapability::CheckOwnershipFlow)
                 | Self::Typecheck(TypecheckCapability::AnalyzeInhabitance)
+                | Self::Typecheck(TypecheckCapability::CheckTensorConstructors)
                 | Self::Resolve(
                     ResolveCapability::CollectDeclarations
                         | ResolveCapability::ResolveFileSetImports

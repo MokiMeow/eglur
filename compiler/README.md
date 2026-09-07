@@ -99,6 +99,17 @@ cargo build --workspace --locked
 
 ## Semantic Integration Tests
 
+`SupportProfile::tensor_constructors_v1()` adds static checks for positional
+`zeros[T](...)`, `ones[T](...)`, `nan[f32](...)`, and `rand![f32](...)` calls.
+It resolves dtype aliases, checks dimensions against `Nat`, and records the
+`Tensor[T]` result and call effects. Dynamic dimensions do not require shape
+inference. The evaluator rejects these calls before executing the program.
+Dimension expressions still require supported core operations: unary negation,
+including a negative literal, currently reports a missing operator capability.
+Ordinary-call constructor forms, named dimensions, tensor operations, and
+storage or backend implementation remain unsupported; the core profile does
+not enable constructor checks.
+
 The end-to-end tests read the 23-fixture corpus in
 [`core-v1.expectations.json`](../tests/semantic/core-v1.expectations.json),
 runs each fixture through `FileSetRequest`, `CompilerSession`, the selected

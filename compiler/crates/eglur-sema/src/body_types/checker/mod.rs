@@ -44,6 +44,7 @@ mod ownership;
 mod patterns;
 mod statements;
 mod support;
+mod tensor;
 
 /// Checks source bodies once against canonical declaration signatures.
 #[allow(

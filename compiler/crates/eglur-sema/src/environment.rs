@@ -19,6 +19,38 @@ pub enum TensorSourceConstructor {
     Rand,
 }
 
+impl TensorSourceConstructor {
+    #[must_use]
+    pub const fn is_bang(self) -> bool {
+        matches!(self, Self::Rand)
+    }
+
+    #[must_use]
+    pub const fn accepts_dtype(self, dtype: crate::PrimitiveType) -> bool {
+        use crate::PrimitiveType::*;
+        match self {
+            Self::Nan | Self::Rand => matches!(dtype, F32),
+            Self::Zeros | Self::Ones => matches!(
+                dtype,
+                Bool | I8
+                    | I16
+                    | I32
+                    | I64
+                    | U8
+                    | U16
+                    | U32
+                    | U64
+                    | F16
+                    | Bf16
+                    | F32
+                    | F64
+                    | Complex64
+                    | Complex128
+            ),
+        }
+    }
+}
+
 /// Semantic layer responsible for one trusted external declaration.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ExternalSemanticOwner {

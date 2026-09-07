@@ -181,6 +181,11 @@ impl CallableInstance {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InvocationTarget {
     Callable(CallableInstanceId),
+    TensorConstructor {
+        declaration: CanonicalTarget,
+        constructor: crate::TensorSourceConstructor,
+        dtype: TypeId,
+    },
     Constructor {
         declaration: CanonicalTarget,
         substitution: SubstId,

@@ -1032,6 +1032,26 @@ impl NodeHasher<'_> {
         invocation: &InvocationFact,
     ) -> Result<(), SemanticFingerprintError> {
         match invocation.target() {
+            InvocationTarget::TensorConstructor {
+                declaration,
+                constructor,
+                dtype,
+            } => {
+                builder.write_u8(2);
+                self.keys
+                    .target(declaration)
+                    .ok_or_else(|| stable_target_error(declaration))?
+                    .write_to(builder);
+                builder.write_u8(match constructor {
+                    crate::TensorSourceConstructor::Zeros => 0,
+                    crate::TensorSourceConstructor::Ones => 1,
+                    crate::TensorSourceConstructor::Nan => 2,
+                    crate::TensorSourceConstructor::Rand => 3,
+                });
+                self.keys
+                    .stable_type(self.signatures, *dtype, &self.binders)?
+                    .write_to(builder);
+            }
             InvocationTarget::Callable(id) => {
                 builder.write_u8(0);
                 let instance = self

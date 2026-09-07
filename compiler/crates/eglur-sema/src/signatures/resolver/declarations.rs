@@ -290,7 +290,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             );
                         }
                         ExprKind::DTypeCall(call) => {
-                            roots.insert(call.dtype, TypePosition::Ordinary);
+                            roots.insert(call.dtype, TypePosition::ConstructorDType);
                         }
                         ExprKind::Lambda(lambda) => {
                             roots.extend(lambda.parameters.iter().filter_map(|parameter| {

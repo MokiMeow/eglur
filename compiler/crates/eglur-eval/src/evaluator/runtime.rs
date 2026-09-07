@@ -466,6 +466,7 @@ impl<'a> Evaluator<'a> {
             return invalid_flow();
         };
         match invocation.target() {
+            InvocationTarget::TensorConstructor { .. } => invalid_flow(),
             InvocationTarget::Constructor { declaration, .. } => {
                 self.eval_constructor(declaration, checked.dispatch(), arguments)
             }
