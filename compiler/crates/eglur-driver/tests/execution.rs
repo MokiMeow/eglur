@@ -580,3 +580,99 @@ fn unsupported_hooks_are_preflighted_and_limits_are_out_of_band() {
         ExecutionAttempt::ToolLimitExceeded(EvaluationToolLimit::Steps { limit: 0 })
     );
 }
+
+#[test]
+fn checked_unsigned_negation_preserves_dtype_and_reports_overflow() {
+    for (dtype, maximum) in [
+        ("u8", "255"),
+        ("u16", "65535"),
+        ("u32", "4294967295"),
+        ("u64", "18446744073709551615"),
+    ] {
+        for argument in ["0", "1", maximum] {
+            let source = format!(
+                "type Unsigned = {dtype}\n\
+                 fn id[T](x: T) -> T = x\n\
+                 fn negate(x: Unsigned) -> Res[Unsigned, NumericError] = checked {{ yield -x }}\n\
+                 fn main!() -> Res[Str, NumericError] = result {{\n\
+                   let value = negate(id::[Unsigned]({argument}))?\n\
+                   yield Ok(to_str(value))\n\
+                 }}\n"
+            );
+            let (program, catalog, profile) = compile_single(&source);
+            let result = completed(&program, &catalog, &profile);
+            if argument == "0" {
+                assert_eq!(result.process_status(), 0);
+                assert_eq!(ok_str(result.value()), "0");
+                assert!(result.value_diagnostics().is_empty());
+            } else {
+                assert_eq!(result.process_status(), 1);
+                assert_eq!(result.value_diagnostics().len(), 1);
+                let diagnostic = &result.value_diagnostics()[0];
+                assert_eq!(diagnostic.code(), "INT_OVERFLOW");
+                assert_eq!(diagnostic.data()["operation"].as_ref(), "negate");
+                assert_eq!(diagnostic.data()["dtype"].as_ref(), dtype);
+            }
+            let reduced = without_execution_capability(
+                &profile,
+                ExecutionCapability::CheckedIntegerArithmetic,
+            );
+            assert!(!matches!(
+                execute(&program, &reduced, &catalog, EvaluationLimits::default()),
+                ExecutionAttempt::Executed(_)
+            ));
+        }
+    }
+}
+
+#[test]
+fn checked_signed_negation_keeps_signed_minimum_overflow() {
+    for (dtype, minimum) in [
+        ("i8", "-128"),
+        ("i16", "-32768"),
+        ("i32", "-2147483648"),
+        ("i64", "-9223372036854775808"),
+    ] {
+        for (argument, expected) in [("0", Some("0")), ("-1", Some("1")), (minimum, None)] {
+            let source = format!(
+                "fn negate(x: {dtype}) -> Res[{dtype}, NumericError] = checked {{ yield -x }}\n\
+                 fn main!() -> Res[Str, NumericError] = result {{\n\
+                   let value = negate({argument})?\n\
+                   yield Ok(to_str(value))\n\
+                 }}\n"
+            );
+            let (program, catalog, profile) = compile_single(&source);
+            let result = completed(&program, &catalog, &profile);
+            if let Some(expected) = expected {
+                assert_eq!(result.process_status(), 0);
+                assert_eq!(ok_str(result.value()), expected);
+            } else {
+                assert_eq!(result.process_status(), 1);
+                assert_eq!(result.value_diagnostics()[0].code(), "INT_OVERFLOW");
+            }
+        }
+    }
+}
+
+#[test]
+fn checked_unsigned_negation_fault_stays_in_the_inner_region() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Res[u8, NumericError], NumericError] {\n",
+        "  let x: u8 = 1\n",
+        "  yield checked { yield checked { yield -x } }\n",
+        "}\n",
+    ));
+    let result = completed(&program, &catalog, &profile);
+    assert_eq!(result.process_status(), 0);
+    let Value::Variant { payload, .. } = result.value() else {
+        panic!("expected outer Ok");
+    };
+    let [Value::Variant { payload, .. }] = payload.as_ref() else {
+        panic!("expected inner Err");
+    };
+    let [Value::NumericError(diagnostic)] = payload.as_ref() else {
+        panic!("expected numeric fault");
+    };
+    assert_eq!(diagnostic.code(), "INT_OVERFLOW");
+    assert_eq!(diagnostic.data()["dtype"].as_ref(), "u8");
+}

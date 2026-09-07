@@ -471,7 +471,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ));
         }
         let expected = match request.expected {
-            Some(ty) if self.is_signed_fixed_width_integer(ty)? => Some(ty),
+            Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
             _ => None,
         };
         let operand = self.type_expression(
@@ -485,7 +485,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let Outcome::Known(operand) = operand else {
             return Ok(operand);
         };
-        if !self.is_signed_fixed_width_integer(operand.ty)? {
+        if !self.is_fixed_width_integer(operand.ty)? {
             self.demand_unimplemented(TypecheckCapability::CheckOperators, source, origin);
             return Ok(Outcome::Unperformed);
         }
