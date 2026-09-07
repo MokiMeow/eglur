@@ -231,9 +231,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ExprKind::Unary {
                 operator: UnaryOperator::Negate,
                 operand,
-            } if self.has_active_checked_context() => {
-                self.type_checked_negation(context, expression_id, origin, operand, request)?
-            }
+            } => self.type_checked_negation(context, expression_id, origin, operand, request)?,
             ExprKind::Binary { .. } | ExprKind::Unary { .. } => {
                 self.unsupported(TypecheckCapability::CheckOperators, source, origin)
             }

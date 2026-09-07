@@ -489,6 +489,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             self.demand_unimplemented(TypecheckCapability::CheckOperators, source, origin);
             return Ok(Outcome::Unperformed);
         }
+        if !self.has_active_checked_context() {
+            return Ok(Outcome::Poisoned(self.type_error(
+                source,
+                origin,
+                "NUMERIC_CHECKED_CONTEXT_REQUIRED",
+                "numeric unary - requires a checked block",
+                BTreeMap::new(),
+            )?));
+        }
         self.record_checked_numeric_operation(
             module,
             expression,
