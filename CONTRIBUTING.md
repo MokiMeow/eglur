@@ -19,7 +19,7 @@ its authoritative document, then update the affected guides and tests.
 For normative prose, follow the [spec writing
 guide](docs/contributing/spec-style.md). The [artifact
 inventory](docs/spec/artifact-inventory-v0.1.yaml) defines which files belong
-to a spec-package release and which role each file serves.
+to the specification and which role each file serves.
 
 ## Tooling Environment
 

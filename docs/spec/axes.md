@@ -1,6 +1,6 @@
 # Eglur Axes Specification
 
-Status: Normative v0.1.0 released.
+Status: Normative v0.1.0 draft.
 
 Scope: Normative for v0.1 unless this file or a section states otherwise.
 

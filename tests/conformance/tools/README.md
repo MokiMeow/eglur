@@ -82,8 +82,11 @@ CLI/repository boundary -> document codec -> canonical model
 
 Boundary modules resolve paths and read files or Git objects. Codecs normalize
 input once; analysis and policy operate on canonical values. Traceability and
-evidence consume suite and diagnostic facts, while `spec_release.gate` composes
-the final spec-package verdict.
+evidence consume suite and diagnostic facts. `spec_release.gate` retains the
+inactive standalone release composition for future process design; the
+supported CLI reports `UNAVAILABLE`. Use `pixi run check` for development
+validation, not the retained history or sign-off components. See
+[release operations](../RELEASE.md).
 
 Evidence callers import the relevant phase's `model`, `codec`, `projection`, or
 `policy` module directly. Package initializers do not provide facade aliases.

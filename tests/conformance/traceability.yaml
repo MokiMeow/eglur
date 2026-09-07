@@ -2,7 +2,7 @@
 version: '0.1'
 release_history_root: repository-root
 release: v0.1.0
-status: released
+status: draft
 coverage_scope: diagnostic_codes
 sources:
   required_codes:

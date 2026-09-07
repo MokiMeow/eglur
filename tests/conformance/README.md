@@ -89,8 +89,8 @@ covers cold/warm reuse, complete-coordinate isolation, failed-acquisition and
 invalid-package non-publication, lookup and publication fallback, recovered
 incomplete state, and same-coordinate concurrent convergence.
 
-`validate_conformance_schema.py` and the spec-package gate validate the profile
-schema; the gate does not execute probe cases. Those cases run only under an
+`validate_conformance_schema.py` validates the profile schema without executing
+probe cases. Those cases run only under an
 implementation-certification profile. Cache paths, receipts, lock files,
 filesystem calls, durability mechanisms, and provider scheduling are outside
 the portable probe contract.

@@ -7,8 +7,10 @@ definitions, and the tooling used to maintain them. A [Rust compiler
 workspace](compiler/README.md) implements the lexer/parser and a bounded
 semantic and execution subset; it is not a complete v0.1 implementation.
 
-A spec-package release publishes a versioned specification snapshot. It does
-not declare an Eglur implementation or language-toolchain release.
+The specification is a working draft targeting Eglur 0.1.0. It evolves with
+the implementation; there is no separate specification release. Pin a commit
+when referring to a particular draft. The eventual Eglur release will identify
+its specification revision and supported implementation scope.
 
 ## Start Here
 
@@ -18,7 +20,7 @@ not declare an Eglur implementation or language-toolchain release.
 | Language implementer | [Language specification](docs/spec/SPEC.md) | [Diagnostics](docs/spec/ERRORS.md), [conformance](docs/spec/CONFORMANCE.md), and the [implementation boundary](docs/spec/language/implementation-boundary.md) |
 | Conformance author | [Conformance author guide](tests/conformance/README.md) | [Suite manifest](tests/conformance/manifest.yaml) and [conformance rules](docs/spec/CONFORMANCE.md) |
 | Tooling maintainer | [Tooling architecture](tests/conformance/tools/README.md) | [Contributor guide](CONTRIBUTING.md) and [compiler guide](compiler/README.md) |
-| Release operator | [v0.1 release gate](docs/spec/RELEASE-GATE-v0.1.md) | [Release operations](tests/conformance/RELEASE.md) and [artifact inventory](docs/spec/artifact-inventory-v0.1.yaml) |
+| Release operator | [Release policy and availability](tests/conformance/RELEASE.md) | [Evidence contracts](docs/spec/RELEASE-GATE-v0.1.md) and [artifact inventory](docs/spec/artifact-inventory-v0.1.yaml) |
 | Design maintainer | [Open-item ledger](docs/spec/open-items-ledger-v0.1.yaml) | [Roadmap](docs/roadmap/README.md) and [spec writing guide](docs/contributing/spec-style.md) |
 
 ## Specification Set
@@ -30,7 +32,7 @@ The normative v0.1 documents are:
 - [Tensor axis semantics](docs/spec/axes.md)
 - [Diagnostics](docs/spec/ERRORS.md)
 - [Conformance rules](docs/spec/CONFORMANCE.md)
-- [Spec-package release and implementation-conformance policy](docs/spec/RELEASE-GATE-v0.1.md)
+- [Release availability and evidence contracts](docs/spec/RELEASE-GATE-v0.1.md)
 
 The [artifact inventory](docs/spec/artifact-inventory-v0.1.yaml) identifies the
 complete release set and the role of each artifact. The [suite

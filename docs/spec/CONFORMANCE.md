@@ -1,12 +1,19 @@
 # Eglur Conformance Specification
 
-Status: Normative v0.1.0 released.
+Status: Normative v0.1.0 draft.
 
 Scope: Normative for v0.1 unless this file or a section states otherwise.
 
 ## Scope
 
 This document defines how an implementation is judged conformant.
+
+The specification is a draft for the eventual Eglur 0.1.0 release. There is no
+standalone specification release. References below to spec-package sign-off
+and release gates describe retained, inactive evidence design; they do not
+require a release or freeze development commits. Artifact schemas, suite
+contracts, and static validation remain active. See the
+[release policy](RELEASE-GATE-v0.1.md#release-policy).
 
 It complements:
 
@@ -27,9 +34,9 @@ artifacts:
 
 `artifact-inventory-v0.1.yaml` separately classifies every normative,
 conformance-definition, release-control, and generated-evidence artifact. The
-spec-package release gate validates the inventory, the four conformance
+development validators check the inventory, the four conformance
 artifacts, the OPEN-item ledger, and linked machine contracts such as the
-standard-library effect catalog as static specification-package inputs. It does
+standard-library effect catalog as static specification-package inputs. They do
 not evaluate an implementation.
 
 Implementation conformance additionally requires a released executable-evidence

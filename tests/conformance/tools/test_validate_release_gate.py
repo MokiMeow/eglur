@@ -18,158 +18,47 @@ from eglur_conformance.validation import ValidationProblem
 
 
 class ReleaseGateCliBoundaryTests(unittest.TestCase):
-    """Keep spec release readiness distinct from implementation conformance."""
+    """Unavailable release operations cannot consume evidence or issue verdicts."""
 
-    def assert_parse_failure(self, arguments: list[str]) -> None:
-        """Require argparse to reject an incomplete or cross-mode command."""
-        with (
-            redirect_stderr(io.StringIO()),
-            self.assertRaises(SystemExit) as caught,
-        ):
-            release_cli.build_parser().parse_args(arguments)
+    def test_requires_an_explicit_operation(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+            release_cli.build_parser().parse_args([])
         self.assertEqual(caught.exception.code, 2)
 
-    def test_requires_an_explicit_verdict_kind(self) -> None:
-        self.assert_parse_failure([])
-
-    def test_spec_package_mode_requires_only_its_signoff(self) -> None:
-        self.assert_parse_failure(["spec-package"])
-        self.assert_parse_failure(
-            [
-                "spec-package",
+    def test_unavailable_modes_reject_evidence_arguments(self) -> None:
+        for mode in ("spec-package", "implementation"):
+            for flag in (
                 "--signoff",
-                "spec-release.yaml",
+                "--repo-root",
                 "--suite-results",
-                "suite-results.yaml",
-            ]
-        )
-
-    def test_implementation_mode_rejects_unreleased_evidence_arguments(self) -> None:
-        self.assert_parse_failure(
-            [
-                "implementation",
-                "--suite-results",
-                "suite-results.yaml",
-            ]
-        )
-        self.assert_parse_failure(
-            [
-                "implementation",
                 "--certificate",
-                "implementation-certificate.yaml",
-            ]
-        )
-
-    def test_spec_package_success_reports_only_go(self) -> None:
-        args = release_cli.build_parser().parse_args(
-            ["spec-package", "--signoff", "spec-release.yaml"]
-        )
-        evaluation = gate.GateEvaluation(
-            problems=(),
-            checked=("static-check", "spec-release.yaml"),
-        )
-        with (
-            patch.object(
-                release_cli.gate,
-                "evaluate_spec_package",
-                return_value=evaluation,
-            ),
-            redirect_stdout(io.StringIO()) as stdout,
-        ):
-            status = release_cli.run(args)
-
-        self.assertEqual(status, 0)
-        self.assertIn("spec-package release readiness: GO", stdout.getvalue())
-        self.assertIn("- static-check", stdout.getvalue())
-        self.assertNotIn("implementation conformance: PASS", stdout.getvalue())
-
-    def test_spec_package_resolves_signoff_from_explicit_repo_root(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            temporary_root = Path(directory)
-            repo_root = temporary_root / "nested" / "checkout"
-            outside_cwd = temporary_root / "outside"
-            repo_root.mkdir(parents=True)
-            outside_cwd.mkdir()
-            args = release_cli.build_parser().parse_args(
-                [
-                    "spec-package",
-                    "--repo-root",
-                    str(repo_root),
-                    "--signoff",
-                    "evidence/signoff.yaml",
-                ]
-            )
-            with (
-                chdir(outside_cwd),
-                patch.object(
-                    release_cli.gate,
-                    "evaluate_spec_package",
-                    return_value=gate.GateEvaluation(problems=(), checked=()),
-                ) as evaluate,
-                redirect_stdout(io.StringIO()),
             ):
-                status = release_cli.run(args)
+                with self.subTest(mode=mode, flag=flag):
+                    with (
+                        redirect_stderr(io.StringIO()),
+                        self.assertRaises(SystemExit) as caught,
+                    ):
+                        release_cli.build_parser().parse_args([mode, flag, "absent"])
+                    self.assertEqual(caught.exception.code, 2)
 
-        self.assertEqual(status, 0)
-        self.assertEqual(
-            evaluate.call_args.args,
-            (
-                repo_root.resolve(),
-                repo_root.resolve() / "evidence/signoff.yaml",
-                "evidence/signoff.yaml",
-            ),
-        )
-
-    def test_implementation_mode_fails_closed_without_evidence_profile(self) -> None:
-        args = release_cli.build_parser().parse_args(["implementation"])
-        with redirect_stderr(io.StringIO()) as stderr:
-            status = release_cli.run(args)
-
-        self.assertEqual(status, 2)
-        self.assertIn("implementation conformance: UNAVAILABLE", stderr.getvalue())
-        self.assertNotIn("implementation conformance: PASS", stderr.getvalue())
-
-    def test_boundary_error_reports_scoped_no_go(self) -> None:
-        args = release_cli.build_parser().parse_args(
-            ["spec-package", "--signoff", "spec-release.yaml"]
-        )
-        with (
-            patch.object(
-                release_cli.gate,
-                "evaluate_spec_package",
-                side_effect=TypeError("inventory must be a mapping"),
-            ),
-            redirect_stderr(io.StringIO()) as stderr,
-        ):
-            status = release_cli.run(args)
-
-        self.assertEqual(status, 1)
-        self.assertIn("spec-package release readiness: NO-GO", stderr.getvalue())
-        self.assertIn("inventory must be a mapping", stderr.getvalue())
-
-    def test_validation_problems_use_header_and_bullets(self) -> None:
-        args = release_cli.build_parser().parse_args(
-            ["spec-package", "--signoff", "spec-release.yaml"]
-        )
-        evaluation = gate.GateEvaluation(
-            problems=(ValidationProblem("first failure"),),
-            checked=(),
-        )
-        with (
-            patch.object(
-                release_cli.gate,
-                "evaluate_spec_package",
-                return_value=evaluation,
-            ),
-            redirect_stderr(io.StringIO()) as stderr,
-        ):
-            status = release_cli.run(args)
-
-        self.assertEqual(status, 1)
-        self.assertEqual(
-            stderr.getvalue(),
-            "spec-package release readiness: NO-GO:\n- first failure\n",
-        )
+    def test_unavailable_modes_do_not_require_a_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
+            for mode, label in (
+                ("spec-package", "spec-package release readiness"),
+                ("implementation", "implementation conformance"),
+            ):
+                with self.subTest(mode=mode):
+                    args = release_cli.build_parser().parse_args([mode])
+                    with (
+                        redirect_stdout(io.StringIO()) as stdout,
+                        redirect_stderr(io.StringIO()) as stderr,
+                    ):
+                        status = release_cli.run(args)
+                    self.assertEqual(status, 2)
+                    self.assertEqual(stdout.getvalue(), "")
+                    self.assertIn(f"{label}: UNAVAILABLE", stderr.getvalue())
+                    self.assertNotIn(f"{label}: GO", stderr.getvalue())
+                    self.assertNotIn(f"{label}: PASS", stderr.getvalue())
 
 
 class ReleaseGatePolicyTests(unittest.TestCase):

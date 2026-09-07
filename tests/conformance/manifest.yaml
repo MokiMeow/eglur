@@ -3,7 +3,7 @@
 version: '0.1'
 release_history_root: repository-root
 release: v0.1.0
-status: released
+status: "draft"
 root: tests/conformance
 suites:
 - id: core-effects

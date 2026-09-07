@@ -26,23 +26,26 @@ class ToolRepoRootTests(unittest.TestCase):
         cls.outside_cwd = temporary_root / "outside"
         cls.outside_cwd.mkdir()
 
-        shutil.copytree(
-            REPO_ROOT / "docs",
-            cls.checkout / "docs",
-            ignore=shutil.ignore_patterns(".DS_Store"),
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
         )
-        shutil.copytree(
-            REPO_ROOT / "tests/conformance",
-            cls.checkout / "tests/conformance",
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-        )
+        for relative in tracked.stdout.split("\0"):
+            if not relative:
+                continue
+            destination = cls.checkout / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(REPO_ROOT / relative, destination)
         subprocess.run(
             ["git", "init", "-q"],
             cwd=cls.checkout,
             check=True,
         )
         subprocess.run(
-            ["git", "add", "docs", "tests/conformance"],
+            ["git", "add", "."],
             cwd=cls.checkout,
             check=True,
         )

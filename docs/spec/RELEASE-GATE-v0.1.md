@@ -1,8 +1,32 @@
 # Eglur v0.1 Spec-Package Release and Implementation Conformance
 
-Status: Normative release and certification policy for v0.1.x
+Status: Draft evidence contracts; standalone spec-package release is inactive.
 
-Scope: Normative for v0.1.x spec-package release and implementation certification.
+Scope: Current availability and artifact validation are normative. Standalone
+spec-package sign-off, release-history transitions, and publication procedures
+are inactive design material, not requirements on development commits.
+
+## Release Policy
+
+Eglur does not publish a separate specification release. The specification is
+a working draft targeting Eglur 0.1.0 and evolves with the implementation.
+An eventual integrated release will identify its exact specification revision
+and implementation support. Maintainers must establish its acceptance criteria
+before enabling a release command; the retained standalone release design does
+not establish those criteria.
+
+The four artifact carriers retain `release: v0.1.0` as their target and use
+`status: draft`. Their schemas, agreement, and generated-data checks remain
+active. A historical `released` marker alone is not evidence that a release
+was published, and does not prevent further drafts of this target. The retained
+standalone history validator is not a development gate. No public history is
+rewritten to change an earlier marker.
+
+Both release CLI modes currently return `UNAVAILABLE` with exit status `2`.
+Neither accepts evidence arguments or issues a readiness or certification
+verdict. The rules below for a successful standalone `GO`, its history, and
+its sidecar apply only to that inactive design. Evidence schemas and static
+checks remain useful independently and do not certify an implementation.
 
 ## Scope
 
@@ -27,7 +51,8 @@ This policy is complementary to:
 
 ## Current Certification Availability
 
-The v0.1 repository provides an active spec-package release gate.
+The standalone spec-package release gate is inactive under the release policy
+above. `pixi run check` remains the supported development quality gate.
 
 The repository does not yet define a complete executable-evidence profile for implementation certification. The CLI therefore reports implementation conformance as `UNAVAILABLE` and exits nonzero. `UNAVAILABLE` is not a conformance verdict.
 
@@ -37,11 +62,13 @@ Until a complete profile is released:
 2. suite-level self-reported `pass` values are not sufficient evidence,
 3. arbitrary run IDs, log references, or digests are not sufficient evidence,
 4. implementation identity or execution-context placeholders are not sufficient evidence,
-5. spec-package `GO` remains independent of implementation availability.
+5. static specification validation does not claim implementation availability.
 
 This fail-closed state prevents an incomplete evidence schema from being mistaken for implementation certification.
 
 ## Spec-Package Release Verdict
+
+This retained design is inactive; the supported CLI cannot issue this verdict.
 
 A specification package is `GO` only if all of the following hold.
 
@@ -766,7 +793,8 @@ Binding rules:
 9. Compile success is only a compile-phase match. It does not create or imply a
    whole-test result or implementation-conformance verdict.
 
-The sign-off artifact MUST separately pass the active spec-package gate before
+Under the inactive standalone design, the sign-off artifact would have to pass
+the spec-package gate before
 an eventual implementation certificate may trust it. This layer parses the
 standard `eglur_compile_result` transport and checks it against raw stream
 addresses, termination state, and compile observations. It does not invoke a
@@ -949,17 +977,16 @@ anchor for the source-fixture inventory. It does not include
 specification commit, and future implementation evidence MUST bind its bytes
 separately.
 
-Validate it with:
+The supported command reports availability only:
 
 ```bash
-pixi -q run --locked release-gate spec-package \
-  --signoff path/to/spec-release-signoff.yaml
+pixi -q run --locked release-gate spec-package
 ```
 
-Successful output begins with exactly scoped meaning:
+It writes the following status to stderr and exits `2`:
 
 ```text
-spec-package release readiness: GO
+spec-package release readiness: UNAVAILABLE
 ```
 
 The implementation command currently fails closed:
@@ -979,16 +1006,16 @@ implementation conformance: UNAVAILABLE
 `tests/conformance/tools/validate_release_gate.py` is the canonical executable
 boundary and the locked `release-gate` Pixi task is its supported invocation.
 Argument parsing is owned by
-`eglur_conformance/spec_release/cli.py`; release policy and orchestration are
-owned by `eglur_conformance/spec_release/gate.py`. Integrations invoke the
+`eglur_conformance/spec_release/cli.py`; the inactive standalone orchestration
+is retained in `eglur_conformance/spec_release/gate.py`. Integrations invoke the
 Pixi task rather than importing the top-level script as a Python API.
 
 1. The validator requires the `spec-package` or `implementation` subcommand.
-2. `spec-package` requires a spec-package sign-off and rejects implementation evidence arguments.
+2. `spec-package` MUST report `UNAVAILABLE` and exit `2`. It accepts no sign-off, repository-root, or execution-evidence arguments.
 3. `implementation` MUST exit nonzero and report `UNAVAILABLE` until a complete executable-evidence profile is released.
 4. Argument omission MUST NOT select a weaker verdict.
-5. A zero exit status from `spec-package` means only spec-package release readiness `GO`.
-6. CI MUST use the explicit job name `spec-package-release-gate` for the active gate.
+5. Neither current subcommand can return a successful readiness or certification verdict.
+6. CI MUST NOT present static development checks as a spec-package release approval.
 7. CI MUST NOT publish a green implementation-conformance job while certification is unavailable.
 8. CI summaries MUST NOT shorten a verdict to an unqualified `release gate`, `GO`, `PASS`, or `green`.
 9. `coverage_scope: diagnostic_codes` attests only the diagnostic catalogs named by `traceability.yaml`; it does not claim complete normative-`MUST` coverage.

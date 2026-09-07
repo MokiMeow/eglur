@@ -1,6 +1,6 @@
 # Eglur Diagnostics Specification
 
-Status: Normative v0.1.0 released.
+Status: Normative v0.1.0 draft.
 
 Scope: Linked sections are normative for v0.1 unless they state otherwise.
 
