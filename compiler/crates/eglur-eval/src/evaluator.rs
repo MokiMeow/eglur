@@ -14,8 +14,8 @@ use eglur_sema::{
 };
 
 use crate::{
-    ExecutionCapability, ExecutionSupport, IntegerValue, RuntimeCatalog, RuntimeDiagnostic,
-    RuntimeEvent, RuntimeHook, Value,
+    ExecutionCapability, ExecutionSupport, RuntimeCatalog, RuntimeDiagnostic, RuntimeEvent,
+    RuntimeHook, Value,
 };
 
 /// Deterministic out-of-band evaluator limits.

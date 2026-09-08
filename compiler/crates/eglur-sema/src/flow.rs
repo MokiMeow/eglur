@@ -184,6 +184,18 @@ pub enum CheckedNumericOperator {
 
 impl CheckedNumericOperator {
     #[must_use]
+    pub const fn diagnostic_operation(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Subtract => "subtract",
+            Self::Multiply => "multiply",
+            Self::Divide => "divide",
+            Self::Remainder => "remainder",
+            Self::Negate => "negate",
+        }
+    }
+
+    #[must_use]
     pub const fn from_binary(operator: BinaryOperator) -> Option<Self> {
         match operator {
             BinaryOperator::Add => Some(Self::Add),

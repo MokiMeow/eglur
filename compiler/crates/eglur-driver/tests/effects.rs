@@ -467,7 +467,7 @@ fn poisoned_trait_dispatch_poison_propagates_to_the_effect_fact() {
 
 #[test]
 fn unsupported_body_operation_keeps_the_effect_fact_unperformed() {
-    let mut session = single("fn add(left: i64, right: i64) -> i64 = left + right\n");
+    let mut session = single("fn add(left: f64, right: f64) -> f64 = left + right\n");
     let catalog = TrustedCatalog::first_slice().unwrap();
 
     let analysis = session.resolve(&effect_profile(), Some(&catalog)).unwrap();

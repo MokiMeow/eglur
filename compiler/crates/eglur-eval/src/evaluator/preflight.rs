@@ -108,6 +108,16 @@ impl<'a> Planner<'a> {
         witnesses: &Witnesses,
     ) -> Result<(), SupportReason> {
         self.require(ExecutionCapability::CoreValues)?;
+        if let FactState::Known(typed) = self
+            .view
+            .program
+            .resolution()
+            .body_types()
+            .expression(ExpressionKey::new(module, expression))
+            && typed.integer_constant().is_some()
+        {
+            return Ok(());
+        }
         let body = self
             .view
             .body(module, expression.body())

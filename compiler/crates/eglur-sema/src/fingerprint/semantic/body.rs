@@ -246,6 +246,57 @@ impl NodeHasher<'_> {
         if let Some(&digest) = self.expressions.get(&id) {
             return Ok(digest);
         }
+        let mut pending = vec![(id, false)];
+        let mut visiting = BTreeSet::new();
+        while let Some((current, visited)) = pending.pop() {
+            if self.expressions.contains_key(&current) {
+                continue;
+            }
+            if visited {
+                self.hash_expression_node(current)?;
+                visiting.remove(&current);
+                continue;
+            }
+            if !visiting.insert(current) {
+                return Err(SemanticFingerprintError::CyclicBodyNode);
+            }
+            pending.push((current, true));
+            match self
+                .hir
+                .body(current.body())
+                .expression(current)
+                .ok_or(SemanticFingerprintError::IncompleteBodyFact("expression"))?
+                .kind()
+            {
+                ExprKind::Binary { left, right, .. } => {
+                    pending.push((*right, false));
+                    pending.push((*left, false));
+                }
+                ExprKind::Unary { operand, .. }
+                | ExprKind::Reference { value: operand, .. }
+                | ExprKind::Try(operand)
+                | ExprKind::Group(operand)
+                | ExprKind::Unsafe(operand)
+                | ExprKind::Result(operand)
+                | ExprKind::Checked(operand) => pending.push((*operand, false)),
+                _ => {}
+            }
+        }
+        self.expressions
+            .get(&id)
+            .copied()
+            .ok_or(SemanticFingerprintError::IncompleteBodyFact(
+                "expression digest",
+            ))
+    }
+
+    fn hash_expression_node(
+        &mut self,
+        id: ExprId,
+    ) -> Result<FingerprintDigest, SemanticFingerprintError> {
+        if let Some(&digest) = self.expressions.get(&id) {
+            return Ok(digest);
+        }
         let key = NodeKey::Expression(id);
         if !self.active.insert(key) {
             return Err(SemanticFingerprintError::CyclicBodyNode);
@@ -940,6 +991,14 @@ impl NodeHasher<'_> {
             NormalContinuation::Present => 1,
         });
         self.write_place(builder, typed.place())?;
+        match typed.integer_constant() {
+            Some(value) => {
+                builder.write_u8(1);
+                builder.write_str(value.primitive().spelling());
+                builder.write_bytes(&value.value().to_le_bytes());
+            }
+            None => builder.write_u8(0),
+        }
         self.write_resolution(
             builder,
             ResolutionKey::Expression {

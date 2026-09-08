@@ -75,10 +75,8 @@ fn operand_errors_precede_the_checked_context_requirement() {
 #[test]
 fn const_operands_are_not_misreported_as_missing_checked_context() {
     for source in [
-        "fn negate() -> i8 = -(1)\n",
-        "fn negate() -> i8 = -(-128)\n",
         "const ONE: i8 = 1\nfn negate() -> i8 = -ONE\n",
-        "fn negate() -> Res[i8, NumericError] = checked { yield -(1) }\n",
+        "const ONE: i8 = 1\nfn negate() -> Res[i8, NumericError] = checked { yield -ONE }\n",
     ] {
         let compiled = compile(source);
         assert!(compiled.diagnostics().diagnostics().is_empty(), "{source}");

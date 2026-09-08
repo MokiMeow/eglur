@@ -99,6 +99,13 @@ cargo build --workspace --locked
 
 ## Semantic Integration Tests
 
+The core profile evaluates fixed-width integer literal/group expressions and
+records their exact values for execution. Constant arithmetic failures remain
+compile errors, including inside `checked`. Dynamic arithmetic retains its
+`checked` boundary, with the specified total division and remainder exceptions.
+Mixed-dtype promotion, const-reference evaluation, and floating/complex
+constant arithmetic remain unsupported.
+
 `SupportProfile::tensor_constructors_v1()` adds static checks for positional
 `zeros[T](...)`, `ones[T](...)`, `nan[f32](...)`, and `rand![f32](...)` calls.
 It resolves dtype aliases, checks dimensions against `Nat`, and records the

@@ -122,6 +122,16 @@ impl<'a> Evaluator<'a> {
         let Some(body) = self.view.body(frame.module, expression.body()) else {
             return invalid_flow();
         };
+        if let FactState::Known(typed) = self
+            .view
+            .program
+            .resolution()
+            .body_types()
+            .expression(ExpressionKey::new(frame.module, expression))
+            && let Some(value) = typed.integer_constant()
+        {
+            return Flow::Value(RuntimeValue::Value(Value::Integer(value)));
+        }
         let Some(expression_node) = body.expression(expression) else {
             return invalid_flow();
         };
@@ -374,26 +384,16 @@ impl<'a> Evaluator<'a> {
                 None => return invalid_flow(),
             },
             LiteralKind::Integer => {
-                let key = ExpressionKey::new(module, expression);
-                let FactState::Known(typed) =
-                    self.view.program.resolution().body_types().expression(key)
-                else {
-                    return invalid_flow();
-                };
-                let Ok(TypeKind::Primitive(primitive)) = self
+                let FactState::Known(typed) = self
                     .view
                     .program
                     .resolution()
-                    .signatures()
-                    .types()
-                    .kind(typed.ty())
+                    .body_types()
+                    .expression(ExpressionKey::new(module, expression))
                 else {
                     return invalid_flow();
                 };
-                let Some(value) = parse_integer(literal.spelling()) else {
-                    return invalid_flow();
-                };
-                let Some(value) = IntegerValue::new(*primitive, value) else {
+                let Some(value) = typed.integer_constant() else {
                     return invalid_flow();
                 };
                 Value::Integer(value)

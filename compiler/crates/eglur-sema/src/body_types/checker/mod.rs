@@ -23,13 +23,13 @@ use crate::{
     ControlTransferKind, ControlTransferSource, DeclarationCollection, DeclarationKind,
     DeclarationSignature, DeclarationSignatures, DefId, DuplicateFact, EnumVariantPayloadSignature,
     ExpressionKey, ExternalNameEnvironment, ExternalSemanticOwner, FactState, FactTable,
-    GenericParameterId, IfBranch, Inhabitance, InhabitanceFacts, IntrinsicNominal, LanguageItem,
-    LocalBindingId, ModuleId, NameKey, NameLookupMaterialization, NameResolution, Namespace,
-    NominalHead, NormalContinuation, PrimitiveType, RawPointerMutability, ReferenceMutability,
-    ResolutionKey, ResolvedDeclarationSemantics, ResolvedImports, ResolvedName, SemanticFact,
-    SemanticLocation, SemanticSource, StatementKey, SubstId, TraitEnvironment, TraitNormalization,
-    TraitObligation, TraitReceiverCandidate, TraitRef, TypeId, TypeKind, TypeOccurrenceId,
-    materialize_name_lookup,
+    GenericParameterId, IfBranch, Inhabitance, InhabitanceFacts, IntegerEvaluation, IntegerValue,
+    IntrinsicNominal, LanguageItem, LocalBindingId, ModuleId, NameKey, NameLookupMaterialization,
+    NameResolution, Namespace, NominalHead, NormalContinuation, NumericFaultCause, PrimitiveType,
+    RawPointerMutability, ReferenceMutability, ResolutionKey, ResolvedDeclarationSemantics,
+    ResolvedImports, ResolvedName, SemanticFact, SemanticLocation, SemanticSource, StatementKey,
+    SubstId, TraitEnvironment, TraitNormalization, TraitObligation, TraitReceiverCandidate,
+    TraitRef, TypeId, TypeKind, TypeOccurrenceId, materialize_name_lookup,
 };
 
 use super::{BodyTypes, BodyTypingError, *};
@@ -39,6 +39,8 @@ mod construction;
 mod control;
 mod expression;
 mod failure;
+mod numeric;
+use numeric::ConstEligibility;
 mod orchestration;
 mod ownership;
 mod patterns;
@@ -91,6 +93,8 @@ pub fn typecheck_bodies(
         diagnostics,
         recorder,
         expressions: FactTable::new(),
+        const_eligibility: BTreeMap::new(),
+        preparing_integer_constants: false,
         locals: FactTable::new(),
         members: FactTable::new(),
         invocations: FactTable::new(),
@@ -129,6 +133,8 @@ struct BodyChecker<'input, 'hir, 'support> {
     diagnostics: &'input mut DiagnosticStore,
     recorder: DemandRecorder<'support>,
     expressions: FactTable<ExpressionKey, TypedExpression>,
+    const_eligibility: BTreeMap<ExpressionKey, ConstEligibility>,
+    preparing_integer_constants: bool,
     locals: FactTable<LocalBindingId, LocalTypeFact>,
     members: FactTable<ExpressionKey, MemberAccess>,
     invocations: FactTable<ExpressionKey, InvocationFact>,

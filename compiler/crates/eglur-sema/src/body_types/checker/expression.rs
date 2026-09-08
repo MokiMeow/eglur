@@ -138,6 +138,21 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             hir,
             body,
         };
+        if !self.preparing_integer_constants
+            && matches!(
+                kind,
+                ExprKind::Binary { .. }
+                    | ExprKind::Unary {
+                        operator: UnaryOperator::Negate,
+                        ..
+                    }
+                    | ExprKind::Group(_)
+            )
+            && let Some(outcome) =
+                self.type_integer_constant_tree(context, expression_id, request)?
+        {
+            return Ok(outcome);
+        }
         let outcome = match kind {
             ExprKind::Block { statements } => {
                 self.type_block_expression(context, expression_id, &statements, request.expected)?
@@ -217,7 +232,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 operator,
                 left,
                 right,
-            } if self.has_active_checked_context() => self.type_checked_binary(
+            } => self.type_checked_binary(
                 context,
                 CheckedBinaryRequest {
                     expression: expression_id,
@@ -232,7 +247,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 operator: UnaryOperator::Negate,
                 operand,
             } => self.type_checked_negation(context, expression_id, origin, operand, request)?,
-            ExprKind::Binary { .. } | ExprKind::Unary { .. } => {
+            ExprKind::Unary { .. } => {
                 self.unsupported(TypecheckCapability::CheckOperators, source, origin)
             }
             ExprKind::Match(match_expression) if match_expression.arms.is_empty() => {
@@ -499,7 +514,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
         }
 
-        Ok(Outcome::Known(self.value_expression(ty)))
+        let value = literal
+            .spelling()
+            .replace('_', "")
+            .parse::<i128>()
+            .ok()
+            .and_then(|value| IntegerValue::new(primitive, value))
+            .ok_or(BodyTypingError::InvalidIntegerConstant)?;
+        let mut typed = self.value_expression(ty);
+        typed.integer_constant = Some(value);
+        Ok(Outcome::Known(typed))
     }
 
     pub(super) fn type_name(
@@ -566,6 +590,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ResolvedName::Local(binding) => match self.locals.state(binding) {
                 FactState::Known(local) => Ok(Outcome::Known(TypedExpression {
                     ty: local.ty,
+                    integer_constant: None,
                     place: Some(TypedPlace {
                         kind: TypedPlaceKind::Local(*binding),
                         writable: local.mutability == Mutability::Mutable,
