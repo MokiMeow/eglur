@@ -358,6 +358,35 @@ fn later_local_is_not_hoisted_when_external_names_are_complete() {
 }
 
 #[test]
+fn nested_operators_preserve_scope_and_sibling_diagnostics() {
+    let external = empty_external();
+    let nested = format!("{}x{}", "x + (".repeat(64), ")".repeat(64));
+    let source = format!(
+        "fn f(x: i64) -> i64 = {nested}\nfn g(x: i64) -> i64 = ({{ let x = 2\nyield x }}) + x\n"
+    );
+    let analysis = analyze(
+        vec![("main.eglur", &source)],
+        &[&[0]],
+        &CapabilitySet::resolver(true),
+        Some(&external),
+    );
+    assert!(analysis.diagnostics.diagnostics().is_empty());
+    assert_eq!(analysis.names.locals().len(), 3);
+
+    let source = format!("fn f(x: i64) -> i64 = missing_left + ({nested}) + missing_right\n");
+    let analysis = analyze(
+        vec![("main.eglur", &source)],
+        &[&[0]],
+        &CapabilitySet::resolver(true),
+        Some(&external),
+    );
+    assert_eq!(
+        codes(&analysis.diagnostics),
+        ["NAME_NOT_FOUND", "NAME_NOT_FOUND"]
+    );
+}
+
+#[test]
 fn redeclaration_precedes_and_suppresses_initializer_lookup() {
     let external = empty_external();
     let analysis = analyze(
