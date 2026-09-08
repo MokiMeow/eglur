@@ -69,11 +69,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         })?;
 
         // Diagnose cycles before any same-module forward edge can claim the cause.
+        let mut cycle_affected = BTreeSet::new();
         for component in &components {
             let cyclic =
                 component.len() > 1 || dependencies[&component[0]].contains_key(&component[0]);
             if cyclic {
                 for &declaration in component {
+                    cycle_affected.insert(declaration);
                     let (_, _, _, item) = self.source_item(declaration)?;
                     self.reject_constant(
                         declaration,
@@ -98,9 +100,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         });
                     }
                 }
-                if let Some(poison) = inherited {
+                let depends_on_cycle = dependencies[&declaration]
+                    .keys()
+                    .any(|dependency| cycle_affected.contains(dependency));
+                if depends_on_cycle && let Some(poison) = &inherited {
+                    cycle_affected.insert(declaration);
                     self.bodies
-                        .insert(declaration, SemanticFact::Poisoned(poison))?;
+                        .insert(declaration, SemanticFact::Poisoned(poison.clone()))?;
                     continue;
                 }
                 let forward = dependencies[&declaration].iter().find(|(dependency, _)| {
@@ -114,6 +120,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         "CONST_FORWARD_REFERENCE",
                         "const forward reference",
                     )?;
+                    continue;
+                }
+                if let Some(poison) = inherited {
+                    self.bodies
+                        .insert(declaration, SemanticFact::Poisoned(poison))?;
                     continue;
                 }
                 self.check_declaration(declaration)?;

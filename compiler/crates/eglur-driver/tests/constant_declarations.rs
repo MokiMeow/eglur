@@ -123,6 +123,34 @@ fn cycle_diagnostics_precede_forward_references_and_propagate() {
 }
 
 #[test]
+fn unrelated_initializer_errors_do_not_hide_forward_references() {
+    let compiled = compile(&[(
+        "main.eglur",
+        "const A: i8 = B\nconst B: i8 = 127 + 1\nfn main!() -> Unit = ()\n",
+    )]);
+    assert_eq!(
+        compiled
+            .diagnostics()
+            .diagnostics()
+            .iter()
+            .map(|d| d.code().as_str())
+            .collect::<Vec<_>>(),
+        ["CONST_FORWARD_REFERENCE", "INT_OVERFLOW"]
+    );
+    let compiled = compile(&[(
+        "main.eglur",
+        "const A: i8 = B\nconst B: i8 = A + (127 + 1)\nconst C: i8 = A\nfn main!() -> Unit = ()\n",
+    )]);
+    let diagnostics = compiled.diagnostics().diagnostics();
+    assert_eq!(diagnostics.len(), 2);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.code().as_str() == "CONST_CYCLE")
+    );
+}
+
+#[test]
 fn forward_references_faults_and_nonconstant_initializers_are_compile_errors() {
     for (declarations, code) in [
         (
