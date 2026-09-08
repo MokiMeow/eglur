@@ -1,25 +1,19 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ConstEligibility {
-    IntegerCandidate,
-    OtherConstant,
-    Dynamic,
-}
-
-enum IntegerTypeStep {
-    Enter(ExprId, TypeRequest),
+enum NumericTypeStep {
+    Enter(ExprId, TypeRequest, NormalContinuation),
     AfterLeft {
         expression: ExprId,
         left: ExprId,
         right: ExprId,
         request: TypeRequest,
+        continuation: NormalContinuation,
     },
-    Finish(ExprId, TypeRequest),
+    Finish(ExprId, TypeRequest, NormalContinuation),
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn type_integer_constant_tree(
+    pub(super) fn type_numeric_tree(
         &mut self,
         context: BodyContext<'_, '_>,
         expression: ExprId,
@@ -31,19 +25,23 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             hir,
             body,
         } = context;
-        if self.classify_const_expression(module, body, expression)?
-            != ConstEligibility::IntegerCandidate
+        if matches!(body.expression(expression).ok_or(BodyTypingError::WrongBodyExpression(expression))?.kind(),
+            ExprKind::Binary { operator, .. } if CheckedNumericOperator::from_binary(*operator).is_none())
         {
             return Ok(None);
         }
-        self.preparing_integer_constants = true;
-        // Schedule the right operand only after the left has supplied its contextual type.
+        self.preparing_numeric_tree = true;
+        // Right operands inherit both the left type and its normal continuation.
         let result = (|| {
-            let mut pending = vec![IntegerTypeStep::Enter(expression, request)];
+            let mut pending = vec![NumericTypeStep::Enter(
+                expression,
+                request,
+                NormalContinuation::Present,
+            )];
             let mut outcome = Outcome::Unperformed;
             while let Some(step) = pending.pop() {
-                let (current, request) = match step {
-                    IntegerTypeStep::Enter(current, request) => {
+                let (current, request, continuation, finishing) = match step {
+                    NumericTypeStep::Enter(current, request, continuation) => {
                         let kind = body
                             .expression(current)
                             .ok_or(BodyTypingError::WrongBodyExpression(current))?
@@ -54,44 +52,61 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         };
                         match kind {
                             ExprKind::Group(inner) => {
-                                pending.push(IntegerTypeStep::Finish(current, request));
-                                pending.push(IntegerTypeStep::Enter(*inner, request));
+                                pending.push(NumericTypeStep::Finish(
+                                    current,
+                                    request,
+                                    continuation,
+                                ));
+                                pending.push(NumericTypeStep::Enter(*inner, request, continuation));
                                 continue;
                             }
-                            ExprKind::Unary { operand, .. } => {
-                                pending.push(IntegerTypeStep::Finish(current, request));
-                                pending.push(IntegerTypeStep::Enter(
+                            ExprKind::Unary {
+                                operator: UnaryOperator::Negate,
+                                operand,
+                            } => {
+                                pending.push(NumericTypeStep::Finish(
+                                    current,
+                                    request,
+                                    continuation,
+                                ));
+                                pending.push(NumericTypeStep::Enter(
                                     *operand,
                                     TypeRequest::definitive(expected),
+                                    continuation,
                                 ));
                                 continue;
                             }
-                            ExprKind::Binary { left, right, .. } => {
-                                pending.push(IntegerTypeStep::AfterLeft {
+                            ExprKind::Binary {
+                                operator,
+                                left,
+                                right,
+                            } if CheckedNumericOperator::from_binary(*operator).is_some() => {
+                                pending.push(NumericTypeStep::AfterLeft {
                                     expression: current,
                                     left: *left,
                                     right: *right,
                                     request,
+                                    continuation,
                                 });
-                                pending.push(IntegerTypeStep::Enter(
+                                pending.push(NumericTypeStep::Enter(
                                     *left,
                                     TypeRequest::definitive(expected),
+                                    continuation,
                                 ));
                                 continue;
                             }
-                            _ => (current, request),
+                            _ => (current, request, continuation, false),
                         }
                     }
-                    IntegerTypeStep::AfterLeft {
+                    NumericTypeStep::AfterLeft {
                         expression,
                         left,
                         right,
                         request,
+                        continuation,
                     } => {
-                        let expected = match self
-                            .expressions
-                            .state(&ExpressionKey::new(module, left))
-                        {
+                        let left = self.expressions.state(&ExpressionKey::new(module, left));
+                        let expected = match left {
                             FactState::Known(left) if self.is_fixed_width_integer(left.ty)? => {
                                 Some(left.ty)
                             }
@@ -100,16 +115,28 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 _ => None,
                             },
                         };
-                        pending.push(IntegerTypeStep::Finish(expression, request));
-                        pending.push(IntegerTypeStep::Enter(
+                        let right_path = continuation.strict(match left {
+                            FactState::Known(left) => left.normal_continuation,
+                            _ => NormalContinuation::Absent,
+                        });
+                        pending.push(NumericTypeStep::Finish(expression, request, continuation));
+                        pending.push(NumericTypeStep::Enter(
                             right,
                             TypeRequest::definitive(expected),
+                            right_path,
                         ));
                         continue;
                     }
-                    IntegerTypeStep::Finish(current, request) => (current, request),
+                    NumericTypeStep::Finish(current, request, continuation) => {
+                        (current, request, continuation, true)
+                    }
                 };
-                outcome = self.type_expression(module, source, hir, body, current, request)?;
+                self.preparing_numeric_tree = finishing;
+                let checked = self.with_control_path(continuation, |checker| {
+                    checker.type_expression(module, source, hir, body, current, request)
+                });
+                self.preparing_numeric_tree = true;
+                outcome = checked?;
                 if matches!(
                     outcome,
                     Outcome::Deferred | Outcome::Unperformed | Outcome::NotApplicable
@@ -119,7 +146,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             Ok(Some(outcome))
         })();
-        self.preparing_integer_constants = false;
+        self.preparing_numeric_tree = false;
         result
     }
 

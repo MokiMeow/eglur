@@ -138,7 +138,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             hir,
             body,
         };
-        if !self.preparing_integer_constants
+        if !self.preparing_numeric_tree
             && matches!(
                 kind,
                 ExprKind::Binary { .. }
@@ -148,8 +148,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     }
                     | ExprKind::Group(_)
             )
-            && let Some(outcome) =
-                self.type_integer_constant_tree(context, expression_id, request)?
+            && let Some(outcome) = self.type_numeric_tree(context, expression_id, request)?
         {
             return Ok(outcome);
         }

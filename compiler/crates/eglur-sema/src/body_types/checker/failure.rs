@@ -518,15 +518,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         body: &Body,
         expression: ExprId,
     ) -> Result<bool, BodyTypingError> {
-        Ok(self.classify_const_expression(module, body, expression)? != ConstEligibility::Dynamic)
-    }
-
-    pub(super) fn classify_const_expression(
-        &mut self,
-        module: ModuleId,
-        body: &Body,
-        expression: ExprId,
-    ) -> Result<ConstEligibility, BodyTypingError> {
         let mut pending = vec![(expression, false)];
         while let Some((current, visited)) = pending.pop() {
             let key = ExpressionKey::new(module, current);
@@ -552,60 +543,29 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             let child = |id| self.const_eligibility[&ExpressionKey::new(module, id)];
             let eligible = match value.kind() {
-                ExprKind::Literal(literal) if literal.kind() == LiteralKind::Integer => {
-                    ConstEligibility::IntegerCandidate
+                ExprKind::Literal(_) | ExprKind::Unit => true,
+                ExprKind::Name(_) => {
+                    matches!(self.names.fact(ResolutionKey::Expression { module, expression: current }),
+                    FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1
+                        && matches!(self.signatures.declaration(&targets[0]), FactState::Known(DeclarationSignature::Const { .. })))
                 }
-                ExprKind::Literal(_) | ExprKind::Unit => ConstEligibility::OtherConstant,
-                ExprKind::Name(_) => match self.names.fact(ResolutionKey::Expression {
-                    module,
-                    expression: current,
-                }) {
-                    FactState::Known(ResolvedName::Declarations(targets))
-                        if targets.len() == 1
-                            && matches!(
-                                self.signatures.declaration(&targets[0]),
-                                FactState::Known(DeclarationSignature::Const { .. })
-                            ) =>
-                    {
-                        ConstEligibility::IntegerCandidate
-                    }
-                    _ => ConstEligibility::Dynamic,
-                },
                 ExprKind::Group(inner) => child(*inner),
                 ExprKind::Unary {
-                    operator: UnaryOperator::Negate,
+                    operator: UnaryOperator::Negate | UnaryOperator::Not,
                     operand,
                 } => child(*operand),
-                ExprKind::Unary {
-                    operator: UnaryOperator::Not,
-                    operand,
-                } if child(*operand) != ConstEligibility::Dynamic => {
-                    ConstEligibility::OtherConstant
-                }
                 ExprKind::Binary {
                     operator,
                     left,
                     right,
                 } => {
-                    let left = child(*left);
-                    let right = child(*right);
-                    if matches!(
+                    !matches!(
                         operator,
                         BinaryOperator::Range | BinaryOperator::RangeInclusive
-                    ) || left == ConstEligibility::Dynamic
-                        || right == ConstEligibility::Dynamic
-                    {
-                        ConstEligibility::Dynamic
-                    } else if CheckedNumericOperator::from_binary(*operator).is_some()
-                        && left == ConstEligibility::IntegerCandidate
-                        && right == ConstEligibility::IntegerCandidate
-                    {
-                        ConstEligibility::IntegerCandidate
-                    } else {
-                        ConstEligibility::OtherConstant
-                    }
+                    ) && child(*left)
+                        && child(*right)
                 }
-                _ => ConstEligibility::Dynamic,
+                _ => false,
             };
             self.const_eligibility.insert(key, eligible);
         }

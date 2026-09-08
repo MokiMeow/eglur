@@ -41,7 +41,6 @@ mod control;
 mod expression;
 mod failure;
 mod numeric;
-use numeric::ConstEligibility;
 mod orchestration;
 mod ownership;
 mod patterns;
@@ -95,7 +94,7 @@ pub fn typecheck_bodies(
         recorder,
         expressions: FactTable::new(),
         const_eligibility: BTreeMap::new(),
-        preparing_integer_constants: false,
+        preparing_numeric_tree: false,
         evaluate_constant_declarations: support.supports(CompileCapability::Typecheck(
             TypecheckCapability::EvaluateSelectedIntegerConstDeclarations,
         )),
@@ -137,8 +136,8 @@ struct BodyChecker<'input, 'hir, 'support> {
     diagnostics: &'input mut DiagnosticStore,
     recorder: DemandRecorder<'support>,
     expressions: FactTable<ExpressionKey, TypedExpression>,
-    const_eligibility: BTreeMap<ExpressionKey, ConstEligibility>,
-    preparing_integer_constants: bool,
+    const_eligibility: BTreeMap<ExpressionKey, bool>,
+    preparing_numeric_tree: bool,
     evaluate_constant_declarations: bool,
     locals: FactTable<LocalBindingId, LocalTypeFact>,
     members: FactTable<ExpressionKey, MemberAccess>,
