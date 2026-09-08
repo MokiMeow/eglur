@@ -553,7 +553,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             let child = |id| self.const_eligibility[&ExpressionKey::new(module, id)];
             let eligible = match value.kind() {
                 ExprKind::Literal(literal) if literal.kind() == LiteralKind::Integer => {
-                    ConstEligibility::IntegerExpression
+                    ConstEligibility::IntegerCandidate
                 }
                 ExprKind::Literal(_) | ExprKind::Unit => ConstEligibility::OtherConstant,
                 ExprKind::Name(_) => match self.names.fact(ResolutionKey::Expression {
@@ -567,7 +567,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 FactState::Known(DeclarationSignature::Const { .. })
                             ) =>
                     {
-                        ConstEligibility::OtherConstant
+                        ConstEligibility::IntegerCandidate
                     }
                     _ => ConstEligibility::Dynamic,
                 },
@@ -597,10 +597,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     {
                         ConstEligibility::Dynamic
                     } else if CheckedNumericOperator::from_binary(*operator).is_some()
-                        && left == ConstEligibility::IntegerExpression
-                        && right == ConstEligibility::IntegerExpression
+                        && left == ConstEligibility::IntegerCandidate
+                        && right == ConstEligibility::IntegerCandidate
                     {
-                        ConstEligibility::IntegerExpression
+                        ConstEligibility::IntegerCandidate
                     } else {
                         ConstEligibility::OtherConstant
                     }

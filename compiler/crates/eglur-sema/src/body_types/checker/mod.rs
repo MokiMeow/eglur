@@ -35,6 +35,7 @@ use crate::{
 use super::{BodyTypes, BodyTypingError, *};
 
 mod calls;
+mod constants;
 mod construction;
 mod control;
 mod expression;
@@ -95,6 +96,9 @@ pub fn typecheck_bodies(
         expressions: FactTable::new(),
         const_eligibility: BTreeMap::new(),
         preparing_integer_constants: false,
+        evaluate_constant_declarations: support.supports(CompileCapability::Typecheck(
+            TypecheckCapability::EvaluateSelectedIntegerConstDeclarations,
+        )),
         locals: FactTable::new(),
         members: FactTable::new(),
         invocations: FactTable::new(),
@@ -135,6 +139,7 @@ struct BodyChecker<'input, 'hir, 'support> {
     expressions: FactTable<ExpressionKey, TypedExpression>,
     const_eligibility: BTreeMap<ExpressionKey, ConstEligibility>,
     preparing_integer_constants: bool,
+    evaluate_constant_declarations: bool,
     locals: FactTable<LocalBindingId, LocalTypeFact>,
     members: FactTable<ExpressionKey, MemberAccess>,
     invocations: FactTable<ExpressionKey, InvocationFact>,

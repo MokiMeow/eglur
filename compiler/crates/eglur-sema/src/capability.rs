@@ -48,6 +48,7 @@ pub enum TypecheckCapability {
     CheckOperators,
     CheckSelectedCheckedIntegerArithmetic,
     EvaluateSelectedIntegerConstExpressions,
+    EvaluateSelectedIntegerConstDeclarations,
     EvaluateScalarConstExpressions,
     CheckBranching,
     AnalyzePatternCoverage,
@@ -82,6 +83,9 @@ impl TypecheckCapability {
             }
             Self::EvaluateScalarConstExpressions => "typecheck.scalar_const_evaluation",
             Self::EvaluateSelectedIntegerConstExpressions => "typecheck.integer_const_expressions",
+            Self::EvaluateSelectedIntegerConstDeclarations => {
+                "typecheck.integer_const_declarations"
+            }
             Self::CheckBranching => "typecheck.branching",
             Self::AnalyzePatternCoverage => "typecheck.pattern_coverage",
             Self::CheckAdvancedPatterns => "typecheck.advanced_patterns",
@@ -108,7 +112,7 @@ pub enum CompileCapability {
 
 impl CompileCapability {
     /// Complete closed capability vocabulary for this compiler revision.
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 35] = [
         Self::Resolve(ResolveCapability::CollectDeclarations),
         Self::Resolve(ResolveCapability::ResolveFileSetImports),
         Self::Resolve(ResolveCapability::ResolveLexicalValues),
@@ -130,6 +134,7 @@ impl CompileCapability {
         Self::Typecheck(TypecheckCapability::CheckSelectedCheckedIntegerArithmetic),
         Self::Typecheck(TypecheckCapability::EvaluateScalarConstExpressions),
         Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstExpressions),
+        Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstDeclarations),
         Self::Typecheck(TypecheckCapability::CheckBranching),
         Self::Typecheck(TypecheckCapability::AnalyzePatternCoverage),
         Self::Typecheck(TypecheckCapability::CheckAdvancedPatterns),
@@ -198,6 +203,11 @@ impl CompileCapability {
                     TypecheckCapability::CheckSelectedCheckedIntegerArithmetic,
                 )]
             }
+            Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstDeclarations) => {
+                &[Self::Typecheck(
+                    TypecheckCapability::EvaluateSelectedIntegerConstExpressions,
+                )]
+            }
             Self::Typecheck(
                 TypecheckCapability::ResolveMembers
                 | TypecheckCapability::ResolveMethods
@@ -235,6 +245,7 @@ impl CompileCapability {
                 | Self::Typecheck(TypecheckCapability::ResolveOverloads)
                 | Self::Typecheck(TypecheckCapability::CheckSelectedCheckedIntegerArithmetic)
                 | Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstExpressions)
+                | Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstDeclarations)
                 | Self::Typecheck(TypecheckCapability::CheckBranching)
                 | Self::Typecheck(TypecheckCapability::CheckFailureFlow)
                 | Self::Typecheck(TypecheckCapability::CheckOwnershipFlow)

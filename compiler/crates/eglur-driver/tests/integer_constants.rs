@@ -185,7 +185,7 @@ fn folded_arithmetic_needs_no_runtime_integer_arithmetic_capability() {
 #[test]
 fn unsupported_const_references_are_not_confused_with_dynamic_values() {
     let compiled =
-        compile("const ONE: i8 = 1\nfn main!() -> Unit { let x: i8 = -ONE\nyield () }\n");
+        compile("const ONE: f64 = 1.0\nfn main!() -> Unit { let x: f64 = -ONE\nyield () }\n");
     assert!(compiled.diagnostics().diagnostics().is_empty());
     assert!(compiled.trace().missing().any(|entry| entry.capability()
         == CompileCapability::Typecheck(TypecheckCapability::EvaluateScalarConstExpressions)));

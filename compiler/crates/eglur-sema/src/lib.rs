@@ -5,6 +5,7 @@
 mod body_types;
 mod capability;
 mod declaration;
+mod declaration_graph;
 mod diagnostic;
 mod effects;
 mod environment;

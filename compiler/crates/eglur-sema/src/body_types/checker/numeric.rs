@@ -2,9 +2,20 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConstEligibility {
-    IntegerExpression,
+    IntegerCandidate,
     OtherConstant,
     Dynamic,
+}
+
+enum IntegerTypeStep {
+    Enter(ExprId, TypeRequest),
+    AfterLeft {
+        expression: ExprId,
+        left: ExprId,
+        right: ExprId,
+        request: TypeRequest,
+    },
+    Finish(ExprId, TypeRequest),
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
@@ -21,58 +32,84 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             body,
         } = context;
         if self.classify_const_expression(module, body, expression)?
-            != ConstEligibility::IntegerExpression
+            != ConstEligibility::IntegerCandidate
         {
             return Ok(None);
         }
-        let mut pending = vec![(expression, false)];
-        let mut order = Vec::new();
-        let mut has_operator = false;
-        while let Some((current, visited)) = pending.pop() {
-            if visited {
-                order.push(current);
-                continue;
-            }
-            pending.push((current, true));
-            match body
-                .expression(current)
-                .ok_or(BodyTypingError::WrongBodyExpression(current))?
-                .kind()
-            {
-                ExprKind::Group(inner) => pending.push((*inner, false)),
-                ExprKind::Unary { operand, .. } => {
-                    has_operator = true;
-                    pending.push((*operand, false));
-                }
-                ExprKind::Binary { left, right, .. } => {
-                    has_operator = true;
-                    pending.push((*right, false));
-                    pending.push((*left, false));
-                }
-                _ => {}
-            }
-        }
-        let expected = match request.expected {
-            Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
-            _ => None,
-        };
         self.preparing_integer_constants = true;
-        // Parent checks find cached children instead of nesting large checker frames.
+        // Schedule the right operand only after the left has supplied its contextual type.
         let result = (|| {
+            let mut pending = vec![IntegerTypeStep::Enter(expression, request)];
             let mut outcome = Outcome::Unperformed;
-            for current in order {
-                outcome = self.type_expression(
-                    module,
-                    source,
-                    hir,
-                    body,
-                    current,
-                    if has_operator {
-                        TypeRequest::definitive(expected)
-                    } else {
-                        request
-                    },
-                )?;
+            while let Some(step) = pending.pop() {
+                let (current, request) = match step {
+                    IntegerTypeStep::Enter(current, request) => {
+                        let kind = body
+                            .expression(current)
+                            .ok_or(BodyTypingError::WrongBodyExpression(current))?
+                            .kind();
+                        let expected = match request.expected {
+                            Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
+                            _ => None,
+                        };
+                        match kind {
+                            ExprKind::Group(inner) => {
+                                pending.push(IntegerTypeStep::Finish(current, request));
+                                pending.push(IntegerTypeStep::Enter(*inner, request));
+                                continue;
+                            }
+                            ExprKind::Unary { operand, .. } => {
+                                pending.push(IntegerTypeStep::Finish(current, request));
+                                pending.push(IntegerTypeStep::Enter(
+                                    *operand,
+                                    TypeRequest::definitive(expected),
+                                ));
+                                continue;
+                            }
+                            ExprKind::Binary { left, right, .. } => {
+                                pending.push(IntegerTypeStep::AfterLeft {
+                                    expression: current,
+                                    left: *left,
+                                    right: *right,
+                                    request,
+                                });
+                                pending.push(IntegerTypeStep::Enter(
+                                    *left,
+                                    TypeRequest::definitive(expected),
+                                ));
+                                continue;
+                            }
+                            _ => (current, request),
+                        }
+                    }
+                    IntegerTypeStep::AfterLeft {
+                        expression,
+                        left,
+                        right,
+                        request,
+                    } => {
+                        let expected = match self
+                            .expressions
+                            .state(&ExpressionKey::new(module, left))
+                        {
+                            FactState::Known(left) if self.is_fixed_width_integer(left.ty)? => {
+                                Some(left.ty)
+                            }
+                            _ => match request.expected {
+                                Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
+                                _ => None,
+                            },
+                        };
+                        pending.push(IntegerTypeStep::Finish(expression, request));
+                        pending.push(IntegerTypeStep::Enter(
+                            right,
+                            TypeRequest::definitive(expected),
+                        ));
+                        continue;
+                    }
+                    IntegerTypeStep::Finish(current, request) => (current, request),
+                };
+                outcome = self.type_expression(module, source, hir, body, current, request)?;
                 if matches!(
                     outcome,
                     Outcome::Deferred | Outcome::Unperformed | Outcome::NotApplicable

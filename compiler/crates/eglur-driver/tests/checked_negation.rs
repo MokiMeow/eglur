@@ -2,7 +2,6 @@ use eglur_driver::{
     CompilerSession, FileSetRequest, ProgramMode, SealedCompilation, SessionOptions,
     SupportProfile, TrustedCatalog,
 };
-use eglur_sema::{CompileCapability, TypecheckCapability};
 
 fn compile(source: &str) -> SealedCompilation {
     let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
@@ -80,16 +79,8 @@ fn const_operands_are_not_misreported_as_missing_checked_context() {
     ] {
         let compiled = compile(source);
         assert!(compiled.diagnostics().diagnostics().is_empty(), "{source}");
-        assert!(compiled.checked_program().is_none());
-        assert!(
-            compiled.trace().missing().any(|demand| {
-                demand.capability()
-                    == CompileCapability::Typecheck(
-                        TypecheckCapability::EvaluateScalarConstExpressions,
-                    )
-            }),
-            "{source}"
-        );
+        assert!(compiled.checked_program().is_some(), "{source}");
+        assert_eq!(compiled.trace().missing().count(), 0, "{source}");
     }
 }
 

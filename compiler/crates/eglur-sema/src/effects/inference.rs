@@ -18,10 +18,10 @@ use super::body::{
     EffectBody, EffectBodyError, EffectBodyFact, EffectDispatch, EffectOperation, MutablePath,
     MutableRoot, collect_effect_bodies,
 };
-use super::graph::{EffectGraphError, dependency_first_sccs};
 use super::{
     EffectCategory, EffectSummary, KnownEffectSummary, StateScope, TrustedEffectEnvironment,
 };
+use crate::declaration_graph::{DeclarationGraphError, dependency_first_sccs};
 
 // A strict chain can add IO, NONDET, localizable STATE, nonlocal STATE, then Unknown.
 const EFFECT_LATTICE_HEIGHT: usize = 6;
@@ -591,8 +591,8 @@ impl From<EffectBodyError> for EffectAnalysisError {
     }
 }
 
-impl From<EffectGraphError> for EffectAnalysisError {
-    fn from(error: EffectGraphError) -> Self {
+impl From<DeclarationGraphError> for EffectAnalysisError {
+    fn from(error: DeclarationGraphError) -> Self {
         Self::GraphInvariant(error.to_string().into_boxed_str())
     }
 }

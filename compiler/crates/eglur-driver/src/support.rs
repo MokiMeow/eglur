@@ -68,7 +68,7 @@ impl SupportProfile {
     /// Returns the exact compile and execution profile for the first semantic slice.
     #[must_use]
     pub fn semantic_core_v1() -> Self {
-        const COMPILE: [CompileCapability; 21] = [
+        const COMPILE: [CompileCapability; 22] = [
             CompileCapability::Resolve(ResolveCapability::CollectDeclarations),
             CompileCapability::Resolve(ResolveCapability::ResolveFileSetImports),
             CompileCapability::Resolve(ResolveCapability::ResolveLexicalValues),
@@ -89,6 +89,9 @@ impl SupportProfile {
             ),
             CompileCapability::Typecheck(
                 TypecheckCapability::EvaluateSelectedIntegerConstExpressions,
+            ),
+            CompileCapability::Typecheck(
+                TypecheckCapability::EvaluateSelectedIntegerConstDeclarations,
             ),
             CompileCapability::Typecheck(TypecheckCapability::CheckBranching),
             CompileCapability::Typecheck(TypecheckCapability::CheckOwnershipFlow),

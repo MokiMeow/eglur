@@ -624,7 +624,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 };
                 match signature {
                     DeclarationSignature::Const { ty } => {
-                        Ok(Outcome::Known(self.value_expression(ty)))
+                        self.type_constant_reference(source, expression, &target, ty)
                     }
                     DeclarationSignature::Constructor(constructor)
                         if matches!(constructor.payload(), ConstructorPayloadSignature::Unit) =>
