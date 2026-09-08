@@ -28,6 +28,44 @@ pub enum PrimitiveType {
 }
 
 impl PrimitiveType {
+    /// Selects the binary numeric dtype; this does not convert operand values.
+    /// Domain scalars and nonnumeric types have no promotion. Bool + Bool selects u8.
+    #[must_use]
+    pub const fn promote_numeric(self, other: Self) -> Option<Self> {
+        let (Some(left), Some(right)) = (self.numeric_precedence(), other.numeric_precedence())
+        else {
+            return None;
+        };
+        if matches!((self, other), (Self::Bool, Self::Bool)) {
+            Some(Self::U8)
+        } else if left >= right {
+            Some(self)
+        } else {
+            Some(other)
+        }
+    }
+
+    const fn numeric_precedence(self) -> Option<u8> {
+        match self {
+            Self::Bool => Some(0),
+            Self::U8 => Some(1),
+            Self::I8 => Some(2),
+            Self::U16 => Some(3),
+            Self::I16 => Some(4),
+            Self::U32 => Some(5),
+            Self::I32 => Some(6),
+            Self::U64 => Some(7),
+            Self::I64 => Some(8),
+            Self::F16 => Some(9),
+            Self::Bf16 => Some(10),
+            Self::F32 => Some(11),
+            Self::F64 => Some(12),
+            Self::Complex64 => Some(13),
+            Self::Complex128 => Some(14),
+            Self::Unit | Self::Str | Self::Nat | Self::PositiveNat => None,
+        }
+    }
+
     /// Returns the canonical source spelling of this primitive.
     #[must_use]
     pub const fn spelling(self) -> &'static str {
