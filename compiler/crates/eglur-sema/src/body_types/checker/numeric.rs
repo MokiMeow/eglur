@@ -2,6 +2,13 @@ use super::*;
 
 enum NumericTypeStep {
     Enter(ExprId, TypeRequest, NormalContinuation),
+    AfterRightProbe {
+        expression: ExprId,
+        left: ExprId,
+        right: ExprId,
+        request: TypeRequest,
+        continuation: NormalContinuation,
+    },
     AfterLeft {
         expression: ExprId,
         left: ExprId,
@@ -33,6 +40,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         self.preparing_numeric_tree = true;
         // Right operands inherit both the left type and its normal continuation.
         let result = (|| {
+            let mut literal_trees = BTreeMap::new();
             let mut pending = vec![NumericTypeStep::Enter(
                 expression,
                 request,
@@ -42,6 +50,21 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             while let Some(step) = pending.pop() {
                 let (current, request, continuation, finishing) = match step {
                     NumericTypeStep::Enter(current, request, continuation) => {
+                        match self.expressions.state(&ExpressionKey::new(module, current)) {
+                            FactState::Known(value) => {
+                                outcome = Outcome::Known(value.clone());
+                                continue;
+                            }
+                            FactState::Poisoned(poison) => {
+                                outcome = Outcome::Poisoned(poison.clone());
+                                continue;
+                            }
+                            FactState::NotApplicable => {
+                                outcome = Outcome::NotApplicable;
+                                break;
+                            }
+                            FactState::Unperformed => {}
+                        }
                         let kind = body
                             .expression(current)
                             .ok_or(BodyTypingError::WrongBodyExpression(current))?
@@ -81,6 +104,28 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 left,
                                 right,
                             } if CheckedNumericOperator::from_binary(*operator).is_some() => {
+                                if expected.is_none()
+                                    && Self::is_integer_literal_tree(
+                                        body,
+                                        *left,
+                                        &mut literal_trees,
+                                    )?
+                                {
+                                    // A literal-only left side has no effects to reorder.
+                                    pending.push(NumericTypeStep::AfterRightProbe {
+                                        expression: current,
+                                        left: *left,
+                                        right: *right,
+                                        request,
+                                        continuation,
+                                    });
+                                    pending.push(NumericTypeStep::Enter(
+                                        *right,
+                                        TypeRequest::probe(),
+                                        continuation,
+                                    ));
+                                    continue;
+                                }
                                 pending.push(NumericTypeStep::AfterLeft {
                                     expression: current,
                                     left: *left,
@@ -97,6 +142,36 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             }
                             _ => (current, request, continuation, false),
                         }
+                    }
+                    NumericTypeStep::AfterRightProbe {
+                        expression,
+                        left,
+                        right,
+                        request,
+                        continuation,
+                    } => {
+                        let expected = match self
+                            .expressions
+                            .state(&ExpressionKey::new(module, right))
+                        {
+                            FactState::Known(right) if self.is_fixed_width_integer(right.ty)? => {
+                                Some(right.ty)
+                            }
+                            _ => None,
+                        };
+                        pending.push(NumericTypeStep::AfterLeft {
+                            expression,
+                            left,
+                            right,
+                            request,
+                            continuation,
+                        });
+                        pending.push(NumericTypeStep::Enter(
+                            left,
+                            TypeRequest::definitive(expected),
+                            continuation,
+                        ));
+                        continue;
                     }
                     NumericTypeStep::AfterLeft {
                         expression,
@@ -137,10 +212,19 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
                 self.preparing_numeric_tree = true;
                 outcome = checked?;
-                if matches!(
-                    outcome,
-                    Outcome::Deferred | Outcome::Unperformed | Outcome::NotApplicable
-                ) {
+                if matches!(outcome, Outcome::Deferred) {
+                    // An inconclusive opposite-operand probe resumes at its caller.
+                    while pending.last().is_some_and(|step| {
+                        !matches!(step, NumericTypeStep::AfterRightProbe { .. })
+                    }) {
+                        pending.pop();
+                    }
+                    if !pending.is_empty() {
+                        continue;
+                    }
+                    break;
+                }
+                if matches!(outcome, Outcome::Unperformed | Outcome::NotApplicable) {
                     break;
                 }
             }
@@ -221,9 +305,21 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Deferred => return Ok(Outcome::Deferred),
             Outcome::Unperformed | Outcome::NotApplicable => return Ok(Outcome::Unperformed),
         };
-        if left.ty != right.ty || !self.is_fixed_width_integer(left.ty)? {
+        let (TypeKind::Primitive(left_dtype), TypeKind::Primitive(right_dtype)) = (
+            self.signatures.types().kind(left.ty)?,
+            self.signatures.types().kind(right.ty)?,
+        ) else {
+            return Ok(self.unsupported(TypecheckCapability::CheckOperators, source, origin));
+        };
+        if !left_dtype.is_fixed_width_integer() || !right_dtype.is_fixed_width_integer() {
             return Ok(self.unsupported(TypecheckCapability::CheckOperators, source, origin));
         }
+        let destination = left_dtype
+            .promote_numeric(*right_dtype)
+            .ok_or(BodyTypingError::InvalidIntegerConstant)?;
+        let conversion_can_fail = !self.integer_conversion_is_total(&left, destination)?
+            || !self.integer_conversion_is_total(&right, destination)?;
+        let result_type = self.primitive(destination)?;
         if (left_const && left.integer_constant.is_none())
             || (right_const && right.integer_constant.is_none())
         {
@@ -238,33 +334,35 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 source,
                 origin,
                 operator,
-                left.checked(operator, left.primitive(), Some(right)),
-                left.primitive(),
+                left.checked(operator, destination, Some(right)),
+                destination,
             );
         }
-        let signed = self.is_signed_fixed_width_integer(left.ty)?;
-        let total = right.integer_constant.is_some_and(|right| match operator {
-            CheckedNumericOperator::Remainder => right.value() != 0,
-            CheckedNumericOperator::Divide => {
-                right.value() != 0 && (!signed || right.value() != -1)
-            }
-            _ => false,
-        });
+        let signed = self.is_signed_fixed_width_integer(result_type)?;
+        let total = !conversion_can_fail
+            && right.integer_constant.is_some_and(|right| match operator {
+                CheckedNumericOperator::Remainder => right.value() != 0,
+                CheckedNumericOperator::Divide => {
+                    right.value() != 0 && (!signed || right.value() != -1)
+                }
+                _ => false,
+            });
         if !total && !self.has_active_checked_context() {
             return self.numeric_checked_required(source, origin, operator);
         }
         let continuation = left.normal_continuation.strict(right.normal_continuation);
         self.record_checked_numeric_operation(
-            module,
-            expression,
+            ExpressionKey::new(module, expression),
             operator,
-            left.ty,
+            result_type,
             continuation,
             total,
+            conversion_can_fail,
         )?;
-        Ok(Outcome::Known(
-            self.value_expression_with_continuation(left.ty, continuation),
-        ))
+        Ok(Outcome::Known(self.value_expression_with_continuation(
+            result_type,
+            continuation,
+        )))
     }
 
     pub(super) fn type_checked_negation(
@@ -331,17 +429,85 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return self.numeric_checked_required(source, origin, CheckedNumericOperator::Negate);
         }
         self.record_checked_numeric_operation(
-            module,
-            expression,
+            ExpressionKey::new(module, expression),
             CheckedNumericOperator::Negate,
             operand.ty,
             operand.normal_continuation,
+            false,
             false,
         )?;
         Ok(Outcome::Known(self.value_expression_with_continuation(
             operand.ty,
             operand.normal_continuation,
         )))
+    }
+
+    fn integer_conversion_is_total(
+        &self,
+        value: &TypedExpression,
+        destination: PrimitiveType,
+    ) -> Result<bool, BodyTypingError> {
+        if let Some(value) = value.integer_constant {
+            return Ok(IntegerValue::new(destination, value.value()).is_some());
+        }
+        let TypeKind::Primitive(source) = self.signatures.types().kind(value.ty)? else {
+            return Err(BodyTypingError::InvalidIntegerConstant);
+        };
+        let (Some((source_min, source_max)), Some((target_min, target_max))) =
+            (source.integer_bounds(), destination.integer_bounds())
+        else {
+            return Err(BodyTypingError::InvalidIntegerConstant);
+        };
+        Ok(target_min <= source_min && source_max <= target_max)
+    }
+
+    fn is_integer_literal_tree(
+        body: &Body,
+        expression: ExprId,
+        known: &mut BTreeMap<ExprId, bool>,
+    ) -> Result<bool, BodyTypingError> {
+        let mut pending = vec![(expression, false)];
+        while let Some((current, finishing)) = pending.pop() {
+            if known.contains_key(&current) {
+                continue;
+            }
+            let children = match body
+                .expression(current)
+                .ok_or(BodyTypingError::WrongBodyExpression(current))?
+                .kind()
+            {
+                ExprKind::Group(inner) => [Some(*inner), None],
+                ExprKind::Unary {
+                    operator: UnaryOperator::Negate,
+                    operand,
+                } => [Some(*operand), None],
+                ExprKind::Binary {
+                    operator,
+                    left,
+                    right,
+                } if CheckedNumericOperator::from_binary(*operator).is_some() => {
+                    [Some(*left), Some(*right)]
+                }
+                ExprKind::Literal(literal) if literal.kind() == LiteralKind::Integer => {
+                    known.insert(current, true);
+                    continue;
+                }
+                _ => {
+                    known.insert(current, false);
+                    continue;
+                }
+            };
+            if finishing {
+                known.insert(
+                    current,
+                    children.into_iter().flatten().all(|child| known[&child]),
+                );
+            } else {
+                pending.push((current, true));
+                pending.extend(children.into_iter().flatten().map(|child| (child, false)));
+            }
+        }
+        Ok(known[&expression])
     }
 
     fn require_integer_const(&mut self, source: &SemanticSource<'_>, origin: OriginId) -> bool {

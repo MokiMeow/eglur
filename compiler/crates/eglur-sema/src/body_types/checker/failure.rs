@@ -372,22 +372,24 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
     pub(super) fn record_checked_numeric_operation(
         &mut self,
-        module: ModuleId,
-        expression: ExprId,
+        key: ExpressionKey,
         operator: CheckedNumericOperator,
         result: TypeId,
         continuation: NormalContinuation,
         total: bool,
+        conversion_can_fail: bool,
     ) -> Result<(), BodyTypingError> {
         let faults = if total {
             Box::new([]) as Box<[NumericFaultCause]>
         } else {
             operator
-                .faults(self.is_signed_fixed_width_integer(result)?)
+                .faults(
+                    self.is_signed_fixed_width_integer(result)?,
+                    conversion_can_fail,
+                )
                 .to_vec()
                 .into_boxed_slice()
         };
-        let key = ExpressionKey::new(module, expression);
         let operation = CheckedNumericOperation::new(operator, result, faults.clone());
         match self.checked_numeric.state(&key) {
             FactState::Unperformed => self
@@ -409,7 +411,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let target = self.checked_contexts[context_index].region.clone();
         for fault in faults {
             self.record_control_transfer(
-                ControlTransferSource::Expression(ExpressionKey::new(module, expression)),
+                ControlTransferSource::Expression(key),
                 ControlTransferKind::CheckedFault(fault),
                 target.clone(),
             )?;

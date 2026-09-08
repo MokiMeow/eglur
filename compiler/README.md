@@ -105,8 +105,11 @@ dependencies are checked for cycles and same-module forward references before
 evaluation; function bodies may refer to later constants. Arithmetic failures remain
 compile errors, including inside `checked`. Dynamic arithmetic retains its
 `checked` boundary, with the specified total division and remainder exceptions.
-Mixed-dtype promotion and floating/complex constant arithmetic remain
-unsupported. Constant initializers cannot execute general function calls.
+Mixed fixed-width integer operands use the shared numeric promotion rules;
+conversion overflow is checked before arithmetic. Total division and remainder
+exceptions apply only when the operand conversions are also statically safe.
+Floating/complex arithmetic and Bool numeric operators remain unsupported.
+Constant initializers cannot execute general function calls.
 
 `SupportProfile::tensor_constructors_v1()` adds static checks for positional
 `zeros[T](...)`, `ones[T](...)`, `nan[f32](...)`, and `rand![f32](...)` calls.
