@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 
 use eglur_source::{ByteOffset, ByteRange, FileId, FileSpan};
 use rowan::{GreenNode, GreenNodeBuilder, Language, NodeOrToken};
@@ -26,13 +27,32 @@ impl Language for EglurLanguage {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct GreenTree(GreenNode);
+pub(crate) struct GreenTree(Arc<GreenOwner>);
+
+#[derive(Debug)]
+struct GreenOwner {
+    root: Option<GreenNode>,
+}
+
+impl Drop for GreenOwner {
+    fn drop(&mut self) {
+        let mut pending: Vec<_> = self.root.take().into_iter().collect();
+        while let Some(node) = pending.pop() {
+            // Retain children before releasing their parent to bound rowan's recursive drop.
+            pending.extend(node.children().filter_map(|child| match child {
+                NodeOrToken::Node(child) => Some(child.to_owned()),
+                NodeOrToken::Token(_) => None,
+            }));
+        }
+    }
+}
 
 impl GreenTree {
     pub(crate) fn root(&self, file: FileId) -> SyntaxNode {
         SyntaxNode {
             file,
-            raw: rowan::SyntaxNode::new_root(self.0.clone()),
+            raw: rowan::SyntaxNode::new_root(self.0.root.as_ref().expect("live tree root").clone()),
+            tree: self.clone(),
         }
     }
 }
@@ -42,6 +62,8 @@ impl GreenTree {
 pub struct SyntaxNode {
     file: FileId,
     raw: rowan::SyntaxNode<EglurLanguage>,
+    // Field order releases the red handle before the shared green owner.
+    tree: GreenTree,
 }
 
 impl SyntaxNode {
@@ -66,7 +88,11 @@ impl SyntaxNode {
     /// Iterates direct child nodes without exposing rowan types.
     pub fn children(&self) -> impl Iterator<Item = Self> + '_ {
         let file = self.file;
-        self.raw.children().map(move |raw| Self { file, raw })
+        self.raw.children().map(move |raw| Self {
+            file,
+            raw,
+            tree: self.tree.clone(),
+        })
     }
 
     /// Iterates direct child nodes and tokens in source order.
@@ -75,8 +101,16 @@ impl SyntaxNode {
         self.raw
             .children_with_tokens()
             .map(move |element| match element {
-                NodeOrToken::Node(raw) => SyntaxElement::Node(Self { file, raw }),
-                NodeOrToken::Token(raw) => SyntaxElement::Token(SyntaxToken { file, raw }),
+                NodeOrToken::Node(raw) => SyntaxElement::Node(Self {
+                    file,
+                    raw,
+                    tree: self.tree.clone(),
+                }),
+                NodeOrToken::Token(raw) => SyntaxElement::Token(SyntaxToken {
+                    file,
+                    raw,
+                    _tree: self.tree.clone(),
+                }),
             })
     }
 }
@@ -96,6 +130,8 @@ impl fmt::Debug for SyntaxNode {
 pub struct SyntaxToken {
     file: FileId,
     raw: rowan::SyntaxToken<EglurLanguage>,
+    // Kept after raw for the same release ordering as SyntaxNode.
+    _tree: GreenTree,
 }
 
 impl SyntaxToken {
@@ -196,7 +232,9 @@ pub(crate) fn build_tree(lexed: &Lexed<'_>, mut events: Vec<Event>) -> GreenTree
         }
     }
 
-    GreenTree(builder.finish())
+    GreenTree(Arc::new(GreenOwner {
+        root: Some(builder.finish()),
+    }))
 }
 
 pub(crate) fn error_tree_events(lexed: &Lexed<'_>) -> Vec<Event> {
@@ -247,4 +285,38 @@ fn byte_range(range: rowan::TextRange) -> ByteRange {
         ByteOffset::new(u32::from(range.end())),
     )
     .expect("rowan ranges are ordered")
+}
+
+#[cfg(test)]
+mod lifetime_tests {
+    use super::*;
+    use crate::{FrontendOutcome, parse};
+    use eglur_source::SourceFile;
+
+    #[test]
+    fn green_owner_is_reclaimed_after_the_last_detached_token() {
+        let source = SourceFile::new(FileId::new(0), b"fn f() -> Unit = ()\n".to_vec());
+        let FrontendOutcome::Parsed(parsed) = parse(&source) else {
+            panic!("UTF-8")
+        };
+        let root = parsed.syntax();
+        let owner = Arc::downgrade(&root.tree.0);
+        let function = root.children().next().unwrap();
+        let token = function
+            .children_with_tokens()
+            .find_map(|child| match child {
+                SyntaxElement::Token(token) => Some(token),
+                _ => None,
+            })
+            .unwrap();
+        drop(root);
+        drop(function);
+        drop(parsed);
+        assert!(owner.upgrade().is_some());
+        let clone = token.clone();
+        drop(token);
+        assert!(owner.upgrade().is_some());
+        drop(clone);
+        assert!(owner.upgrade().is_none());
+    }
 }
