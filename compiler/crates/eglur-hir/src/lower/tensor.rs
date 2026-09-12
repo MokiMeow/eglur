@@ -10,6 +10,17 @@ use crate::{
     TensorSchemaFamily, TransformAxisList,
 };
 
+enum AxisBinaryOperator {
+    Add,
+    Multiply,
+}
+
+enum AxisStep {
+    Enter(Option<SyntaxNode>, FileSpan),
+    Binary(crate::OriginId, Option<AxisBinaryOperator>),
+    Group(crate::OriginId),
+}
+
 impl Builder {
     pub(super) fn lower_tensor_schema(
         &mut self,
@@ -263,76 +274,102 @@ impl Builder {
         &mut self,
         body: crate::BodyId,
         node: Option<SyntaxNode>,
-        fallback: eglur_source::FileSpan,
+        fallback: FileSpan,
     ) -> crate::AxisExprId {
-        let Some(node) = node else {
-            return self.invalid_axis(body, fallback);
-        };
-        let origin = self.written(node.span());
-        let kind = match node.kind() {
-            SyntaxKind::AxisBinaryExpr => {
-                let mut children = direct_nodes(&node).into_iter();
-                let left = self.lower_axis(body, children.next(), node.span());
-                let right = self.lower_axis(body, children.next(), node.span());
-                if direct_token(&node, SyntaxKind::Plus).is_some() {
-                    AxisExprKind::Add { left, right }
-                } else if direct_token(&node, SyntaxKind::Star).is_some() {
-                    AxisExprKind::Multiply { left, right }
-                } else {
-                    self.invalid.push(crate::InvalidOccurrence::new(
-                        InvalidCategory::TensorAxis,
-                        origin,
-                    ));
-                    AxisExprKind::Invalid
+        let mut pending = vec![AxisStep::Enter(node, fallback)];
+        let mut values = Vec::new();
+
+        while let Some(step) = pending.pop() {
+            let (origin, kind) = match step {
+                AxisStep::Enter(node, fallback) => {
+                    let Some(node) = node else {
+                        values.push(self.invalid_axis(body, fallback));
+                        continue;
+                    };
+                    // Preserve origin preorder and left-to-right child allocation order.
+                    let origin = self.written(node.span());
+                    let kind = match node.kind() {
+                        SyntaxKind::AxisBinaryExpr => {
+                            let mut children = direct_nodes(&node).into_iter();
+                            let left = children.next();
+                            let right = children.next();
+                            let operator = if direct_token(&node, SyntaxKind::Plus).is_some() {
+                                Some(AxisBinaryOperator::Add)
+                            } else if direct_token(&node, SyntaxKind::Star).is_some() {
+                                Some(AxisBinaryOperator::Multiply)
+                            } else {
+                                None
+                            };
+                            pending.push(AxisStep::Binary(origin, operator));
+                            pending.push(AxisStep::Enter(right, node.span()));
+                            pending.push(AxisStep::Enter(left, node.span()));
+                            continue;
+                        }
+                        SyntaxKind::AxisAtom => {
+                            if let Some(nested) = direct_nodes(&node).into_iter().find(|child| {
+                                matches!(
+                                    child.kind(),
+                                    SyntaxKind::AxisBinaryExpr | SyntaxKind::AxisAtom
+                                )
+                            }) {
+                                pending.push(AxisStep::Group(origin));
+                                pending.push(AxisStep::Enter(Some(nested), node.span()));
+                                continue;
+                            }
+                            direct_tokens(&node).into_iter().next().and_then(|token| {
+                                match token.kind() {
+                                    SyntaxKind::Identifier => Some(AxisExprKind::Name(
+                                        self.lower_name_token(Some(token), node.span()),
+                                    )),
+                                    SyntaxKind::Integer => Some(AxisExprKind::Integer(
+                                        self.lower_literal_token(Some(token), node.span()),
+                                    )),
+                                    SyntaxKind::AxisPackAnonymous => Some(AxisExprKind::Pack(None)),
+                                    SyntaxKind::AxisPackNamed => {
+                                        let text = token
+                                            .text()
+                                            .strip_prefix("...")
+                                            .unwrap_or(token.text());
+                                        let name = Name::valid(
+                                            text.into(),
+                                            false,
+                                            self.written(token.span()),
+                                        );
+                                        Some(AxisExprKind::Pack(Some(name)))
+                                    }
+                                    _ => None,
+                                }
+                            })
+                        }
+                        _ => None,
+                    };
+                    (origin, kind)
                 }
-            }
-            SyntaxKind::AxisAtom => {
-                if let Some(nested) = direct_nodes(&node).into_iter().find(|child| {
-                    matches!(
-                        child.kind(),
-                        SyntaxKind::AxisBinaryExpr | SyntaxKind::AxisAtom
-                    )
-                }) {
-                    AxisExprKind::Group(self.lower_axis(body, Some(nested), node.span()))
-                } else if let Some(token) = direct_tokens(&node).into_iter().next() {
-                    match token.kind() {
-                        SyntaxKind::Identifier => {
-                            AxisExprKind::Name(self.lower_name_token(Some(token), node.span()))
-                        }
-                        SyntaxKind::Integer => AxisExprKind::Integer(
-                            self.lower_literal_token(Some(token), node.span()),
-                        ),
-                        SyntaxKind::AxisPackAnonymous => AxisExprKind::Pack(None),
-                        SyntaxKind::AxisPackNamed => {
-                            let text = token.text().strip_prefix("...").unwrap_or(token.text());
-                            let name = Name::valid(text.into(), false, self.written(token.span()));
-                            AxisExprKind::Pack(Some(name))
-                        }
-                        _ => {
-                            self.invalid.push(crate::InvalidOccurrence::new(
-                                InvalidCategory::TensorAxis,
-                                origin,
-                            ));
-                            AxisExprKind::Invalid
-                        }
-                    }
-                } else {
-                    self.invalid.push(crate::InvalidOccurrence::new(
-                        InvalidCategory::TensorAxis,
-                        origin,
-                    ));
-                    AxisExprKind::Invalid
+                AxisStep::Binary(origin, operator) => {
+                    let right = values.pop().expect("right axis is lowered");
+                    let left = values.pop().expect("left axis is lowered");
+                    let kind = operator.map(|operator| match operator {
+                        AxisBinaryOperator::Add => AxisExprKind::Add { left, right },
+                        AxisBinaryOperator::Multiply => AxisExprKind::Multiply { left, right },
+                    });
+                    (origin, kind)
                 }
-            }
-            _ => {
+                AxisStep::Group(origin) => {
+                    let inner = values.pop().expect("grouped axis is lowered");
+                    (origin, Some(AxisExprKind::Group(inner)))
+                }
+            };
+            let kind = kind.unwrap_or_else(|| {
                 self.invalid.push(crate::InvalidOccurrence::new(
                     InvalidCategory::TensorAxis,
                     origin,
                 ));
                 AxisExprKind::Invalid
-            }
-        };
-        self.alloc_axis(body, AxisExpr::new(origin, kind))
+            });
+            values.push(self.alloc_axis(body, AxisExpr::new(origin, kind)));
+        }
+        assert_eq!(values.len(), 1, "axis tree produces one result");
+        values.pop().expect("axis root is lowered")
     }
 
     fn invalid_axis(
