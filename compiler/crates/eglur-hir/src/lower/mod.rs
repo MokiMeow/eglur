@@ -1,5 +1,6 @@
 mod body;
 mod item;
+mod operators;
 mod pattern;
 mod tensor;
 mod ty;

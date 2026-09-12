@@ -8,7 +8,7 @@ use crate::{
     BinaryOperator, CallArgument, CallExpr, CallSyntax, CatalogCallExpr, ConstructorPayload,
     DTypeCallExpr, DesugaringKind, Expr, ExprId, ExprKind, FieldInitializer, FunctionBody, IfExpr,
     InvalidCategory, LambdaExpr, LambdaSyntax, LetSyntax, Literal, LiteralKind, MapEntry, MatchArm,
-    MatchExpr, MatchGuard, Mutability, Parameter, Stmt, StmtId, StmtKind, UnaryOperator,
+    MatchExpr, MatchGuard, Mutability, Parameter, Stmt, StmtId, StmtKind,
 };
 
 impl Builder {
@@ -21,31 +21,17 @@ impl Builder {
         let Some(node) = node else {
             return self.invalid_expr(body, fallback);
         };
+        if matches!(
+            node.kind(),
+            SyntaxKind::BinaryExpr | SyntaxKind::UnaryExpr | SyntaxKind::GroupExpr
+        ) {
+            return self.lower_operator_tree(body, node);
+        }
         if node.kind() == SyntaxKind::CallExpr {
             return self.lower_call(body, &node);
         }
 
         let written_origin = self.written(node.span());
-        if node.kind() == SyntaxKind::UnaryExpr
-            && let Some(sign) = direct_token(&node, SyntaxKind::Minus)
-            && let Some(operand) = expression_children(&node).into_iter().next()
-            && operand.kind() == SyntaxKind::LiteralExpr
-            && let Some(token) = direct_token(&operand, SyntaxKind::Integer)
-        {
-            // Keep the sign with the magnitude so signed minima need no out-of-range operand.
-            let range = eglur_source::ByteRange::new(
-                sign.span().range().start(),
-                token.span().range().end(),
-            )
-            .expect("signed literal tokens are source ordered");
-            let origin = self.written(eglur_source::FileSpan::new(node.span().file(), range));
-            let literal = Literal::new(
-                LiteralKind::Integer,
-                format!("-{}", token.text()).into_boxed_str(),
-                origin,
-            );
-            return self.alloc_expr(body, Expr::new(written_origin, ExprKind::Literal(literal)));
-        }
         let kind = match node.kind() {
             SyntaxKind::BlockExpr => ExprKind::Block {
                 statements: direct_nodes(&node)
@@ -54,49 +40,6 @@ impl Builder {
                     .collect::<Vec<_>>()
                     .into_boxed_slice(),
             },
-            SyntaxKind::BinaryExpr => {
-                let mut expressions = expression_children(&node).into_iter();
-                let left = self.lower_expr(body, expressions.next(), node.span());
-                let right = self.lower_expr(body, expressions.next(), node.span());
-                if let Some(operator) = lower_binary_operator(&node) {
-                    ExprKind::Binary {
-                        operator,
-                        left,
-                        right,
-                    }
-                } else {
-                    self.invalid.push(crate::InvalidOccurrence::new(
-                        InvalidCategory::Expression,
-                        written_origin,
-                    ));
-                    ExprKind::Invalid
-                }
-            }
-            SyntaxKind::UnaryExpr => {
-                let operand = self.lower_expr(
-                    body,
-                    expression_children(&node).into_iter().next(),
-                    node.span(),
-                );
-                let operator = if direct_token(&node, SyntaxKind::Bang).is_some() {
-                    Some(UnaryOperator::Not)
-                } else if direct_token(&node, SyntaxKind::Minus).is_some() {
-                    Some(UnaryOperator::Negate)
-                } else if direct_token(&node, SyntaxKind::Star).is_some() {
-                    Some(UnaryOperator::Dereference)
-                } else {
-                    None
-                };
-                if let Some(operator) = operator {
-                    ExprKind::Unary { operator, operand }
-                } else {
-                    self.invalid.push(crate::InvalidOccurrence::new(
-                        InvalidCategory::Expression,
-                        written_origin,
-                    ));
-                    ExprKind::Invalid
-                }
-            }
             SyntaxKind::RefExpr => ExprKind::Reference {
                 mutability: if direct_token(&node, SyntaxKind::MutKw).is_some() {
                     Mutability::Mutable
@@ -164,11 +107,6 @@ impl Builder {
             SyntaxKind::NameExpr => ExprKind::Name(self.lower_expr_path(Some(&node), node.span())),
             SyntaxKind::HoleExpr => ExprKind::Hole,
             SyntaxKind::UnitExpr => ExprKind::Unit,
-            SyntaxKind::GroupExpr => ExprKind::Group(self.lower_expr(
-                body,
-                expression_children(&node).into_iter().next(),
-                node.span(),
-            )),
             SyntaxKind::UnsafeExpr => ExprKind::Unsafe(self.lower_expr(
                 body,
                 direct_child(&node, SyntaxKind::BlockExpr),
@@ -843,7 +781,7 @@ fn first_literal_token(node: &SyntaxNode) -> Option<SyntaxToken> {
         })
 }
 
-fn lower_binary_operator(node: &SyntaxNode) -> Option<BinaryOperator> {
+pub(super) fn lower_binary_operator(node: &SyntaxNode) -> Option<BinaryOperator> {
     direct_tokens(node)
         .into_iter()
         .find_map(|token| match token.kind() {
