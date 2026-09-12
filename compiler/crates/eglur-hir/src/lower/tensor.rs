@@ -52,12 +52,12 @@ impl Builder {
         })
     }
 
-    pub(super) fn lower_reduce_by(&mut self, body: crate::BodyId, node: &SyntaxNode) -> ExprKind {
-        let receiver = self.lower_expr(
-            body,
-            expression_children(node).into_iter().next(),
-            node.span(),
-        );
+    pub(super) fn finish_reduce_by(
+        &mut self,
+        body: crate::BodyId,
+        node: &SyntaxNode,
+        receiver: crate::ExprId,
+    ) -> ExprKind {
         let arguments = direct_child(node, SyntaxKind::ReduceByArgumentList);
         let phases = arguments
             .as_ref()

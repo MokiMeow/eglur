@@ -5,14 +5,14 @@ use super::{
     first_name_token, is_expression_kind, is_trivia,
 };
 use crate::{
-    BinaryOperator, CallArgument, CallExpr, CallSyntax, CatalogCallExpr, ConstructorPayload,
-    DTypeCallExpr, DesugaringKind, Expr, ExprId, ExprKind, FieldInitializer, FunctionBody, IfExpr,
-    InvalidCategory, LambdaExpr, LambdaSyntax, LetSyntax, Literal, LiteralKind, MapEntry, MatchArm,
-    MatchExpr, MatchGuard, Mutability, Parameter, Stmt, StmtId, StmtKind,
+    BinaryOperator, CallArgument, CatalogCallExpr, ConstructorPayload, Expr, ExprId, ExprKind,
+    FieldInitializer, FunctionBody, IfExpr, InvalidCategory, LambdaExpr, LambdaSyntax, LetSyntax,
+    Literal, LiteralKind, MapEntry, MatchArm, MatchExpr, MatchGuard, Mutability, Parameter, Stmt,
+    StmtId, StmtKind,
 };
 
 impl Builder {
-    pub(super) fn lower_expr(
+    pub(super) fn lower_expr_leaf(
         &mut self,
         body: crate::BodyId,
         node: Option<SyntaxNode>,
@@ -21,14 +21,10 @@ impl Builder {
         let Some(node) = node else {
             return self.invalid_expr(body, fallback);
         };
-        if matches!(
-            node.kind(),
-            SyntaxKind::BinaryExpr | SyntaxKind::UnaryExpr | SyntaxKind::GroupExpr
-        ) {
-            return self.lower_operator_tree(body, node);
-        }
         if node.kind() == SyntaxKind::CallExpr {
-            return self.lower_call(body, &node);
+            let origin = self.written(node.span());
+            let kind = ExprKind::CatalogCall(self.lower_catalog_call(body, &node));
+            return self.alloc_expr(body, Expr::new(origin, kind));
         }
 
         let written_origin = self.written(node.span());
@@ -40,18 +36,6 @@ impl Builder {
                     .collect::<Vec<_>>()
                     .into_boxed_slice(),
             },
-            SyntaxKind::RefExpr => ExprKind::Reference {
-                mutability: if direct_token(&node, SyntaxKind::MutKw).is_some() {
-                    Mutability::Mutable
-                } else {
-                    Mutability::Immutable
-                },
-                value: self.lower_expr(
-                    body,
-                    expression_children(&node).into_iter().next(),
-                    node.span(),
-                ),
-            },
             SyntaxKind::OwnExpr => {
                 ExprKind::Own(self.lower_name_token(first_name_token(&node), node.span()))
             }
@@ -62,45 +46,6 @@ impl Builder {
                 explicit_move: direct_token(&node, SyntaxKind::MoveKw).is_some(),
                 name: self.lower_name_token(first_name_token(&node), node.span()),
             },
-            SyntaxKind::MemberExpr => {
-                let receiver = self.lower_expr(
-                    body,
-                    expression_children(&node).into_iter().next(),
-                    node.span(),
-                );
-                ExprKind::Member {
-                    receiver,
-                    member: self.lower_name_token(first_name_token(&node), node.span()),
-                }
-            }
-            SyntaxKind::TupleProjectionExpr => {
-                let receiver = self.lower_expr(
-                    body,
-                    expression_children(&node).into_iter().next(),
-                    node.span(),
-                );
-                if let Some(index) =
-                    direct_token(&node, SyntaxKind::TupleIndex).filter(|token| !token.is_missing())
-                {
-                    ExprKind::TupleProjection {
-                        receiver,
-                        index: index.text().into(),
-                    }
-                } else {
-                    self.invalid.push(crate::InvalidOccurrence::new(
-                        InvalidCategory::Expression,
-                        written_origin,
-                    ));
-                    ExprKind::Invalid
-                }
-            }
-            SyntaxKind::TryExpr => ExprKind::Try(self.lower_expr(
-                body,
-                expression_children(&node).into_iter().next(),
-                node.span(),
-            )),
-            SyntaxKind::DTypeBracketCallExpr => self.lower_dtype_call(body, &node),
-            SyntaxKind::ReduceByCandidateExpr => self.lower_reduce_by(body, &node),
             SyntaxKind::LiteralExpr => {
                 ExprKind::Literal(self.lower_literal_token(first_literal_token(&node), node.span()))
             }
@@ -315,142 +260,7 @@ impl Builder {
         Literal::new(kind, token.text().into(), self.written(token.span()))
     }
 
-    fn lower_call(&mut self, body: crate::BodyId, node: &SyntaxNode) -> ExprId {
-        if self.is_catalog_call(node) {
-            let origin = self.written(node.span());
-            let kind = ExprKind::CatalogCall(self.lower_catalog_call(body, node));
-            return self.alloc_expr(body, Expr::new(origin, kind));
-        }
-        if let Some((syntax, callee, inputs)) = self.lower_postfix_application(body, node) {
-            let origin = self.derived(
-                node.span(),
-                syntax
-                    .call_desugaring()
-                    .expect("postfix application is a desugaring"),
-            );
-            let partial_application = self.expr_is_hole(callee)
-                || inputs
-                    .iter()
-                    .any(|argument| self.expr_is_hole(argument.value));
-            let kind = ExprKind::Call(CallExpr {
-                callee,
-                arguments: inputs.into_boxed_slice(),
-                type_arguments: Box::new([]),
-                syntax,
-                partial_application,
-            });
-            return self.alloc_expr(body, Expr::new(origin, kind));
-        }
-
-        let expression_nodes = expression_children(node);
-        let callee = self.lower_expr(body, expression_nodes.first().cloned(), node.span());
-        let type_arguments = direct_child(node, SyntaxKind::TypeArgumentList)
-            .map(|types| self.lower_type_list_container(&types))
-            .unwrap_or_default();
-        let mut arguments = direct_child(node, SyntaxKind::ArgumentList)
-            .map(|arguments| self.lower_call_arguments(body, &arguments))
-            .unwrap_or_default();
-        let trailing = direct_nodes(node)
-            .into_iter()
-            .find(|child| child.kind() == SyntaxKind::LambdaExpr);
-        let syntax = if let Some(lambda) = trailing {
-            let lambda_span = lambda.span();
-            let value = self.lower_expr(body, Some(lambda), node.span());
-            let syntax = CallSyntax::TrailingArgument;
-            let argument_origin = self.derived(
-                lambda_span,
-                syntax
-                    .argument_desugaring()
-                    .expect("trailing argument syntax is a desugaring"),
-            );
-            arguments.push(CallArgument {
-                name: None,
-                value,
-                origin: argument_origin,
-            });
-            syntax
-        } else if direct_token(node, SyntaxKind::ColonColon).is_some() {
-            CallSyntax::ExplicitTypeArguments
-        } else {
-            CallSyntax::Direct
-        };
-        let partial_application = arguments
-            .iter()
-            .any(|argument| self.expr_is_hole(argument.value));
-        let origin = if let Some(kind) = syntax.call_desugaring() {
-            self.derived(node.span(), kind)
-        } else if partial_application {
-            self.derived(node.span(), DesugaringKind::HolePartialApplication)
-        } else {
-            self.written(node.span())
-        };
-        self.alloc_expr(
-            body,
-            Expr::new(
-                origin,
-                ExprKind::Call(CallExpr {
-                    callee,
-                    arguments: arguments.into_boxed_slice(),
-                    type_arguments: type_arguments.into_boxed_slice(),
-                    syntax,
-                    partial_application,
-                }),
-            ),
-        )
-    }
-
-    fn lower_postfix_application(
-        &mut self,
-        body: crate::BodyId,
-        node: &SyntaxNode,
-    ) -> Option<(CallSyntax, ExprId, Vec<CallArgument>)> {
-        let callee_node = expression_children(node).into_iter().next()?;
-        if callee_node.kind() != SyntaxKind::MemberExpr
-            || direct_child(node, SyntaxKind::TypeArgumentList).is_some()
-        {
-            return None;
-        }
-        let member = first_name_token(&callee_node)?;
-        let syntax = match member.text() {
-            "then" => CallSyntax::PostfixThen,
-            "apply" => CallSyntax::PostfixApply,
-            _ => return None,
-        };
-        let argument_list = direct_child(node, SyntaxKind::ArgumentList)?;
-        let argument_nodes = direct_nodes(&argument_list);
-        if argument_nodes.len() != 1 || argument_nodes[0].kind() == SyntaxKind::NamedArgument {
-            return None;
-        }
-        let callable_node = argument_nodes[0].clone();
-        if !is_expression_kind(callable_node.kind()) {
-            return None;
-        }
-        let receiver_node = expression_children(&callee_node).into_iter().next()?;
-        let callable = self.lower_expr(body, Some(callable_node), node.span());
-        let input_nodes = if syntax == CallSyntax::PostfixApply
-            && receiver_node.kind() == SyntaxKind::TupleExpr
-        {
-            expression_children(&receiver_node)
-        } else if syntax == CallSyntax::PostfixThen {
-            vec![receiver_node]
-        } else {
-            return None;
-        };
-        let inputs = input_nodes
-            .into_iter()
-            .map(|input| {
-                let span = input.span();
-                CallArgument {
-                    name: None,
-                    value: self.lower_expr(body, Some(input), node.span()),
-                    origin: self.written(span),
-                }
-            })
-            .collect();
-        Some((syntax, callable, inputs))
-    }
-
-    fn is_catalog_call(&self, node: &SyntaxNode) -> bool {
+    pub(super) fn is_catalog_call(&self, node: &SyntaxNode) -> bool {
         direct_token(node, SyntaxKind::Dot).is_some()
             && direct_child(node, SyntaxKind::TypeArgumentList).is_some()
             && direct_token(node, SyntaxKind::ColonColon).is_none()
@@ -516,25 +326,6 @@ impl Builder {
                 }
             })
             .collect()
-    }
-
-    fn lower_dtype_call(&mut self, body: crate::BodyId, node: &SyntaxNode) -> ExprKind {
-        let callee = self.lower_expr(
-            body,
-            expression_children(node).into_iter().next(),
-            node.span(),
-        );
-        let dtype = direct_child(node, SyntaxKind::TypeArgumentList)
-            .and_then(|types| self.lower_type_list_container(&types).into_iter().next())
-            .unwrap_or_else(|| self.lower_type(None, node.span()));
-        let arguments = direct_child(node, SyntaxKind::ArgumentList)
-            .map(|arguments| self.lower_call_arguments(body, &arguments))
-            .unwrap_or_default();
-        ExprKind::DTypeCall(DTypeCallExpr {
-            callee,
-            dtype,
-            arguments: arguments.into_boxed_slice(),
-        })
     }
 
     fn lower_expression_list(&mut self, body: crate::BodyId, node: &SyntaxNode) -> Vec<ExprId> {
