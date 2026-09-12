@@ -289,6 +289,16 @@ fn first_slice_effects_match_the_normative_effect_summary_profiles() {
             "fn wrapping_add[T](lhs: T, rhs: T) -> T requires FixedWidthInteger[T]",
         ),
         (
+            "std::prelude::wrapping_sub",
+            "std::prelude",
+            "fn wrapping_sub[T](lhs: T, rhs: T) -> T requires FixedWidthInteger[T]",
+        ),
+        (
+            "std::prelude::wrapping_mul",
+            "std::prelude",
+            "fn wrapping_mul[T](lhs: T, rhs: T) -> T requires FixedWidthInteger[T]",
+        ),
+        (
             "std::io::print!",
             "std::io",
             "fn print!(s: Str) -> Res[Unit, TextError]",

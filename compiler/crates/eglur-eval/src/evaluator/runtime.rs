@@ -622,16 +622,23 @@ impl<'a> Evaluator<'a> {
                 },
                 _ => invalid_flow(),
             },
-            RuntimeHook::WrappingAdd => match values.as_slice() {
-                [Value::Integer(left), Value::Integer(right)]
-                    if left.primitive() == right.primitive() =>
-                {
-                    left.wrapping_add(*right)
+            RuntimeHook::WrappingAdd | RuntimeHook::WrappingSub | RuntimeHook::WrappingMul => {
+                match values.as_slice() {
+                    [Value::Integer(left), Value::Integer(right)]
+                        if left.primitive() == right.primitive() =>
+                    {
+                        match hook {
+                            RuntimeHook::WrappingAdd => left.wrapping_add(*right),
+                            RuntimeHook::WrappingSub => left.wrapping_sub(*right),
+                            RuntimeHook::WrappingMul => left.wrapping_mul(*right),
+                            _ => unreachable!(),
+                        }
                         .map(|value| Flow::Value(RuntimeValue::Value(Value::Integer(value))))
                         .unwrap_or_else(invalid_flow)
+                    }
+                    _ => invalid_flow(),
                 }
-                _ => invalid_flow(),
-            },
+            }
             RuntimeHook::TestEmit => match values.as_slice() {
                 [Value::Str(message)] => {
                     self.events.push(RuntimeEvent::Emitted(message.clone()));

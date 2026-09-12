@@ -5,7 +5,7 @@ use eglur_driver::{
 };
 use eglur_sema::{
     CanonicalTarget, CompileCapability, DeclarationKind, EffectCategory, EffectSummary, FactState,
-    PhaseProduct, ResolveCapability, StateScope, TypecheckCapability,
+    PhaseProduct, ResolveCapability, StateScope, TrustedSignatureKind, TypecheckCapability,
 };
 
 fn effect_profile() -> SupportProfile {
@@ -144,7 +144,18 @@ fn imported_localizable_state_is_discharged_for_a_non_escaping_local() {
         .find(|observation| observation.phase() == Phase::EffectAnalysis)
         .expect("selected effect phase is observed");
     assert_eq!(observation.input_count(), 2);
-    assert_eq!(observation.output_count(), 22);
+    assert_eq!(
+        observation.output_count(),
+        catalog
+            .signatures()
+            .declarations()
+            .filter(|declaration| matches!(
+                declaration.kind(),
+                TrustedSignatureKind::Callable { .. }
+            ))
+            .count()
+            + 2
+    );
     assert!(matches!(
         session.into_diagnostics(None),
         DiagnosticSnapshot::Accepted(_)

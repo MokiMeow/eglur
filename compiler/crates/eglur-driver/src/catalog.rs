@@ -26,6 +26,8 @@ const OK: &str = "std::res::Ok";
 const ERR: &str = "std::res::Err";
 const TO_STR: &str = "std::prelude::to_str";
 const WRAPPING_ADD: &str = "std::prelude::wrapping_add";
+const WRAPPING_SUB: &str = "std::prelude::wrapping_sub";
+const WRAPPING_MUL: &str = "std::prelude::wrapping_mul";
 const TEST_EMIT: &str = "std::test::emit!";
 const TEST_ABORT: &str = "std::test::abort!";
 const IO_PRINT: &str = "std::io::print!";
@@ -65,6 +67,8 @@ impl TrustedCatalog {
         let err = external_id(ERR);
         let to_str = external_id(TO_STR);
         let wrapping_add = external_id(WRAPPING_ADD);
+        let wrapping_sub = external_id(WRAPPING_SUB);
+        let wrapping_mul = external_id(WRAPPING_MUL);
         let emit = external_id(TEST_EMIT);
         let abort = external_id(TEST_ABORT);
         let print = external_id(IO_PRINT);
@@ -145,6 +149,20 @@ impl TrustedCatalog {
                 DeclarationKind::Function,
             )?,
             declaration(
+                wrapping_sub.clone(),
+                prelude.clone(),
+                "wrapping_sub",
+                false,
+                DeclarationKind::Function,
+            )?,
+            declaration(
+                wrapping_mul.clone(),
+                prelude.clone(),
+                "wrapping_mul",
+                false,
+                DeclarationKind::Function,
+            )?,
+            declaration(
                 emit.clone(),
                 test.clone(),
                 "emit",
@@ -206,6 +224,8 @@ impl TrustedCatalog {
                 err.clone(),
                 to_str.clone(),
                 wrapping_add.clone(),
+                wrapping_sub.clone(),
+                wrapping_mul.clone(),
             ],
         )?;
 
@@ -316,21 +336,6 @@ impl TrustedCatalog {
                 argument: 0,
             }),
             TrustedDeclarationSignature::new(
-                wrapping_add.clone(),
-                TrustedSignatureKind::Callable {
-                    bang: false,
-                    generic_parameters: Box::new([generic("T", [])]),
-                    parameters: Box::new([
-                        parameter("lhs", TrustedTypeExpr::GenericParameter(0)),
-                        parameter("rhs", TrustedTypeExpr::GenericParameter(0)),
-                    ]),
-                    result: TrustedTypeExpr::GenericParameter(0),
-                    requirements: Box::new([TrustedCallableRequirement::FixedWidthInteger(
-                        TrustedTypeExpr::GenericParameter(0),
-                    )]),
-                },
-            ),
-            TrustedDeclarationSignature::new(
                 emit.clone(),
                 TrustedSignatureKind::Callable {
                     bang: true,
@@ -376,6 +381,27 @@ impl TrustedCatalog {
                 },
             ),
         ];
+        for id in [
+            wrapping_add.clone(),
+            wrapping_sub.clone(),
+            wrapping_mul.clone(),
+        ] {
+            signatures.push(TrustedDeclarationSignature::new(
+                id,
+                TrustedSignatureKind::Callable {
+                    bang: false,
+                    generic_parameters: Box::new([generic("T", [])]),
+                    parameters: Box::new([
+                        parameter("lhs", TrustedTypeExpr::GenericParameter(0)),
+                        parameter("rhs", TrustedTypeExpr::GenericParameter(0)),
+                    ]),
+                    result: TrustedTypeExpr::GenericParameter(0),
+                    requirements: Box::new([TrustedCallableRequirement::FixedWidthInteger(
+                        TrustedTypeExpr::GenericParameter(0),
+                    )]),
+                },
+            ));
+        }
         let display_members = display_impls(&display, &display_to_str);
         signatures.extend(display_members.signatures);
         signatures.push(TrustedDeclarationSignature::new(
@@ -414,6 +440,8 @@ impl TrustedCatalog {
             TrustedEffectSummary::new(display_to_str, EffectSummary::pure()),
             TrustedEffectSummary::new(to_str.clone(), EffectSummary::pure()),
             TrustedEffectSummary::new(wrapping_add.clone(), EffectSummary::pure()),
+            TrustedEffectSummary::new(wrapping_sub.clone(), EffectSummary::pure()),
+            TrustedEffectSummary::new(wrapping_mul.clone(), EffectSummary::pure()),
             TrustedEffectSummary::new(
                 emit.clone(),
                 EffectSummary::Known(KnownEffectSummary::new(
@@ -438,6 +466,8 @@ impl TrustedCatalog {
             (ok.clone(), RuntimeHook::ResOk),
             (err.clone(), RuntimeHook::ResErr),
             (wrapping_add, RuntimeHook::WrappingAdd),
+            (wrapping_sub, RuntimeHook::WrappingSub),
+            (wrapping_mul, RuntimeHook::WrappingMul),
             (emit, RuntimeHook::TestEmit),
             (abort, RuntimeHook::TestAbort),
         ];

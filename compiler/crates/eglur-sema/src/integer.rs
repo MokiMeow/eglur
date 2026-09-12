@@ -88,6 +88,44 @@ impl IntegerValue {
         };
         Self::new(self.primitive, value)
     }
+
+    #[must_use]
+    pub fn wrapping_sub(self, right: Self) -> Option<Self> {
+        if self.primitive != right.primitive {
+            return None;
+        }
+        let value = match self.primitive {
+            PrimitiveType::I8 => i128::from((self.value as i8).wrapping_sub(right.value as i8)),
+            PrimitiveType::I16 => i128::from((self.value as i16).wrapping_sub(right.value as i16)),
+            PrimitiveType::I32 => i128::from((self.value as i32).wrapping_sub(right.value as i32)),
+            PrimitiveType::I64 => i128::from((self.value as i64).wrapping_sub(right.value as i64)),
+            PrimitiveType::U8 => i128::from((self.value as u8).wrapping_sub(right.value as u8)),
+            PrimitiveType::U16 => i128::from((self.value as u16).wrapping_sub(right.value as u16)),
+            PrimitiveType::U32 => i128::from((self.value as u32).wrapping_sub(right.value as u32)),
+            PrimitiveType::U64 => i128::from((self.value as u64).wrapping_sub(right.value as u64)),
+            _ => return None,
+        };
+        Self::new(self.primitive, value)
+    }
+
+    #[must_use]
+    pub fn wrapping_mul(self, right: Self) -> Option<Self> {
+        if self.primitive != right.primitive {
+            return None;
+        }
+        let value = match self.primitive {
+            PrimitiveType::I8 => i128::from((self.value as i8).wrapping_mul(right.value as i8)),
+            PrimitiveType::I16 => i128::from((self.value as i16).wrapping_mul(right.value as i16)),
+            PrimitiveType::I32 => i128::from((self.value as i32).wrapping_mul(right.value as i32)),
+            PrimitiveType::I64 => i128::from((self.value as i64).wrapping_mul(right.value as i64)),
+            PrimitiveType::U8 => i128::from((self.value as u8).wrapping_mul(right.value as u8)),
+            PrimitiveType::U16 => i128::from((self.value as u16).wrapping_mul(right.value as u16)),
+            PrimitiveType::U32 => i128::from((self.value as u32).wrapping_mul(right.value as u32)),
+            PrimitiveType::U64 => i128::from((self.value as u64).wrapping_mul(right.value as u64)),
+            _ => return None,
+        };
+        Self::new(self.primitive, value)
+    }
 }
 
 /// Arithmetic failure is distinct from an invalid compiler-supplied operation.
