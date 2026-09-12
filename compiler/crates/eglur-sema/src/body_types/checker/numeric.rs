@@ -33,7 +33,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             body,
         } = context;
         if matches!(body.expression(expression).ok_or(BodyTypingError::WrongBodyExpression(expression))?.kind(),
-            ExprKind::Binary { operator, .. } if CheckedNumericOperator::from_binary(*operator).is_none())
+            ExprKind::Binary { operator, .. } if operator.numeric_symbol().is_none())
         {
             return Ok(None);
         }
@@ -103,7 +103,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 operator,
                                 left,
                                 right,
-                            } if CheckedNumericOperator::from_binary(*operator).is_some() => {
+                            } if operator.numeric_symbol().is_some() => {
                                 if expected.is_none()
                                     && Self::is_integer_literal_tree(
                                         body,
@@ -253,6 +253,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             right,
             ty: request,
         } = request;
+        let Some(symbol) = operator.numeric_symbol() else {
+            return Ok(self.unsupported(TypecheckCapability::CheckOperators, source, origin));
+        };
         if !self.recorder.require(
             CompileCapability::Typecheck(
                 TypecheckCapability::CheckSelectedCheckedIntegerArithmetic,
@@ -261,14 +264,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         ) {
             return Ok(Outcome::Unperformed);
         }
-        let Some(operator) = CheckedNumericOperator::from_binary(operator) else {
-            return Ok(self.unsupported(TypecheckCapability::CheckOperators, source, origin));
-        };
         let left_const = self.is_const_evaluable_expression(module, body, left)?;
         let right_const = self.is_const_evaluable_expression(module, body, right)?;
-        if (left_const || right_const) && !self.require_integer_const(source, origin) {
-            return Ok(Outcome::Unperformed);
-        }
         let expected = match request.expected {
             Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
             _ => None,
@@ -305,6 +302,25 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Deferred => return Ok(Outcome::Deferred),
             Outcome::Unperformed | Outcome::NotApplicable => return Ok(Outcome::Unperformed),
         };
+        if self.is_nonnumeric_operand(left.ty)? || self.is_nonnumeric_operand(right.ty)? {
+            let left_type = self.format_type(left.ty)?;
+            let right_type = self.format_type(right.ty)?;
+            return Ok(Outcome::Poisoned(self.type_error(
+                source,
+                origin,
+                "NUMERIC_OPERAND_NOT_NUMERIC",
+                format!("numeric {symbol} operand types are {left_type} and {right_type}"),
+                BTreeMap::from([
+                    ("reason".into(), "binary_operand".into()),
+                    ("operation".into(), symbol.into()),
+                    ("left_type".into(), left_type.into()),
+                    ("right_type".into(), right_type.into()),
+                ]),
+            )?));
+        }
+        let Some(operator) = CheckedNumericOperator::from_binary(operator) else {
+            return Ok(self.unsupported(TypecheckCapability::CheckOperators, source, origin));
+        };
         let (TypeKind::Primitive(left_dtype), TypeKind::Primitive(right_dtype)) = (
             self.signatures.types().kind(left.ty)?,
             self.signatures.types().kind(right.ty)?,
@@ -317,6 +333,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let destination = left_dtype
             .promote_numeric(*right_dtype)
             .ok_or(BodyTypingError::InvalidIntegerConstant)?;
+        if (left_const || right_const) && !self.require_integer_const(source, origin) {
+            return Ok(Outcome::Unperformed);
+        }
         let conversion_can_fail = !self.integer_conversion_is_total(&left, destination)?
             || !self.integer_conversion_is_total(&right, destination)?;
         let result_type = self.primitive(destination)?;
@@ -388,9 +407,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(Outcome::Unperformed);
         }
         let is_const = self.is_const_evaluable_expression(module, body, operand)?;
-        if is_const && !self.require_integer_const(source, origin) {
-            return Ok(Outcome::Unperformed);
-        }
         let expected = match request.expected {
             Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
             _ => None,
@@ -406,8 +422,25 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let Outcome::Known(operand) = operand else {
             return Ok(operand);
         };
+        if self.is_nonnumeric_operand(operand.ty)? {
+            let actual = self.format_type(operand.ty)?;
+            return Ok(Outcome::Poisoned(self.type_error(
+                source,
+                origin,
+                "NUMERIC_OPERAND_NOT_NUMERIC",
+                format!("numeric - operand has type {actual}"),
+                BTreeMap::from([
+                    ("reason".into(), "unary_operand".into()),
+                    ("operation".into(), "-".into()),
+                    ("actual_type".into(), actual.into()),
+                ]),
+            )?));
+        }
         if !self.is_fixed_width_integer(operand.ty)? {
             return Ok(self.unsupported(TypecheckCapability::CheckOperators, source, origin));
+        }
+        if is_const && !self.require_integer_const(source, origin) {
+            return Ok(Outcome::Unperformed);
         }
         if let Some(value) = operand.integer_constant {
             return self.finish_integer_constant(
@@ -440,6 +473,22 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             operand.ty,
             operand.normal_continuation,
         )))
+    }
+
+    fn is_nonnumeric_operand(&self, ty: TypeId) -> Result<bool, BodyTypingError> {
+        Ok(match self.signatures.types().kind(ty)? {
+            TypeKind::Primitive(dtype) => !dtype.is_numeric(),
+            TypeKind::Never
+            | TypeKind::GenericParameter(_)
+            | TypeKind::SelfType(_)
+            | TypeKind::AssociatedProjection(_) => false,
+            TypeKind::Nominal { .. }
+            | TypeKind::Reference { .. }
+            | TypeKind::RawPointer { .. }
+            | TypeKind::Tuple(_)
+            | TypeKind::Callable { .. }
+            | TypeKind::ErrorUnion(_) => true,
+        })
     }
 
     fn integer_conversion_is_total(

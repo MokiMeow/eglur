@@ -111,6 +111,9 @@ exceptions apply only when the operand conversions are also statically safe.
 The scalar `wrapping_add`, `wrapping_sub`, and `wrapping_mul` helpers accept
 same-dtype fixed-width integers and wrap modulo `2^bits` without `checked`.
 Floating/complex arithmetic and Bool numeric operators remain unsupported.
+Arithmetic with known nonnumeric operands reports `NUMERIC_OPERAND_NOT_NUMERIC`,
+including unary minus and fractional division. Diagnostics retain canonical
+operand types before promotion and suppress errors derived from poisoned operands.
 Constant initializers cannot execute general function calls.
 
 `SupportProfile::tensor_constructors_v1()` adds static checks for positional

@@ -45,6 +45,11 @@ impl PrimitiveType {
         }
     }
 
+    #[must_use]
+    pub const fn is_numeric(self) -> bool {
+        self.numeric_precedence().is_some()
+    }
+
     const fn numeric_precedence(self) -> Option<u8> {
         match self {
             Self::Bool => Some(0),
