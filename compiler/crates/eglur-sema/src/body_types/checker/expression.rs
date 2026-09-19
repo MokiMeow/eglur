@@ -1,3 +1,4 @@
+use super::invocation::InvocationPlan;
 use super::*;
 
 pub(super) enum ExpressionPlan {
@@ -15,6 +16,10 @@ pub(super) enum ExpressionPlan {
         key: ExpressionKey,
         expression: ExprId,
         request: TypeRequest,
+    },
+    Invocation {
+        key: ExpressionKey,
+        plan: Box<InvocationPlan>,
     },
 }
 
@@ -207,7 +212,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 operand,
             } => self.type_dereference(module, source, hir, body, operand)?,
             ExprKind::Call(call) => {
-                self.type_call(context, expression_id, origin, &call, request)?
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_call(
+                        context,
+                        expression_id,
+                        origin,
+                        &call,
+                        request,
+                    )?),
+                });
             }
             ExprKind::DTypeCall(call) => {
                 self.type_dtype_call(context, expression_id, origin, &call)?
@@ -303,99 +317,22 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.unsupported(TypecheckCapability::CheckUnsafeExpressions, source, origin)
             }
             ExprKind::ReduceByCandidate(candidate) => {
-                self.type_reduce_by_candidate(context, expression_id, origin, &candidate, request)?
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_reduce_by_candidate(
+                        context,
+                        expression_id,
+                        origin,
+                        candidate,
+                        request,
+                    )?),
+                });
             }
             ExprKind::CatalogCall(_) | ExprKind::TensorSchema(_) => {
                 self.unsupported(TypecheckCapability::AnalyzeTensorSource, source, origin)
             }
         };
         Ok(ExpressionPlan::Publish { key, outcome })
-    }
-
-    fn type_reduce_by_candidate(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        origin: OriginId,
-        candidate: &ReduceByCandidateExpr,
-        request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        let mut receiver = candidate.receiver;
-        let canonical = loop {
-            let receiver_expression = body
-                .expression(receiver)
-                .ok_or(BodyTypingError::WrongBodyExpression(receiver))?;
-            match receiver_expression.kind() {
-                ExprKind::TensorSchema(schema) => {
-                    break schema.family == TensorSchemaFamily::Reduce;
-                }
-                ExprKind::Group(inner) => receiver = *inner,
-                _ => break false,
-            }
-        };
-
-        if canonical {
-            let commitment = if candidate
-                .ordered_phases
-                .as_ref()
-                .is_some_and(|phases| !phases.phases.is_empty())
-            {
-                Some(ReduceByCommitment::TensorPhases)
-            } else if candidate.single_reducer.is_some() {
-                Some(ReduceByCommitment::TensorSingle)
-            } else {
-                None
-            };
-            let Some(commitment) = commitment else {
-                return self.invalid_reduce_by_arguments(source, candidate.arguments_origin);
-            };
-            self.reduce_by_commitments.insert(
-                ExpressionKey::new(module, expression),
-                SemanticFact::Known(commitment),
-            )?;
-            return Ok(self.unsupported(TypecheckCapability::AnalyzeTensorSource, source, origin));
-        }
-
-        let receiver_type = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
-            candidate.receiver,
-            TypeRequest::definitive(None),
-        )?;
-        let Outcome::Known(_) = receiver_type else {
-            return Ok(receiver_type);
-        };
-        let Some(ordinary) = &candidate.ordinary else {
-            return self.invalid_reduce_by_arguments(source, candidate.arguments_origin);
-        };
-        self.reduce_by_commitments.insert(
-            ExpressionKey::new(module, expression),
-            SemanticFact::Known(ReduceByCommitment::Ordinary),
-        )?;
-        self.type_call(context, expression, origin, &ordinary.call, request)
-    }
-
-    fn invalid_reduce_by_arguments(
-        &mut self,
-        source: &SemanticSource<'_>,
-        origin: OriginId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        self.type_error(
-            source,
-            origin,
-            "REDUCE_BY_ARGUMENTS_INVALID",
-            "reduce_by arguments are invalid for the resolved receiver",
-            BTreeMap::new(),
-        )
-        .map(Outcome::Poisoned)
     }
 
     pub(super) fn type_literal(

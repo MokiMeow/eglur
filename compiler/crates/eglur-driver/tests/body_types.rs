@@ -13,6 +13,9 @@ use eglur_sema::{
 #[path = "body_types/application.rs"]
 mod application;
 
+#[path = "body_types/invocation_traversal.rs"]
+mod invocation_traversal;
+
 #[path = "body_types/pattern_bindings.rs"]
 mod pattern_bindings;
 

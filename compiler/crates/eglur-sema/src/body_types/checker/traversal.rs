@@ -1,4 +1,6 @@
+use super::application::{ApplicationContinuation, ApplicationPlan};
 use super::expression::ExpressionPlan;
+use super::invocation::{InvocationFrame, InvocationPlan, ReduceByFrame};
 use super::statements::{BlockFrame, StatementContinuation, StatementPlan};
 use super::*;
 
@@ -14,6 +16,12 @@ enum Step {
     Statement(StmtId, Option<TypeId>),
     ResumeStatement(StatementContinuation),
     ResumeBlock(BlockFrame),
+    Invocation(Box<InvocationPlan>),
+    ResumeApplication {
+        continuation: ApplicationContinuation,
+        invocation: Box<InvocationFrame>,
+    },
+    ResumeReduceBy(Box<ReduceByFrame>),
     Cleanup(Cleanup),
 }
 
@@ -24,8 +32,23 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         request: TypeRequest,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let mut pending = vec![Step::Expression(expression, request)];
-        let result = self.run_expression_steps(context, &mut pending);
+        self.type_body_steps(context, vec![Step::Expression(expression, request)])
+    }
+
+    pub(super) fn type_invocation_steps(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        plan: InvocationPlan,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        self.type_body_steps(context, vec![Step::Invocation(Box::new(plan))])
+    }
+
+    fn type_body_steps(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        mut pending: Vec<Step>,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        let result = self.run_body_steps(context, &mut pending);
         let Err(mut error) = result else {
             return result;
         };
@@ -41,7 +64,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Err(error)
     }
 
-    fn run_expression_steps(
+    fn run_body_steps(
         &mut self,
         context: BodyContext<'_, '_>,
         pending: &mut Vec<Step>,
@@ -78,6 +101,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             pending.push(Step::Publish(key));
                             pending.push(Step::Expression(expression, request));
                         }
+                        ExpressionPlan::Invocation { key, plan } => {
+                            pending.push(Step::Publish(key));
+                            pending.push(Step::Invocation(plan));
+                        }
                     }
                 }
                 Step::Publish(key) => {
@@ -113,10 +140,82 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .expect("block continuation follows its statement");
                     pending.push(Step::Block(self.resume_block(block, value)?));
                 }
+                Step::Invocation(plan) => match *plan {
+                    InvocationPlan::Complete(outcome) => expression_value = Some(outcome),
+                    InvocationPlan::Application { plan, continuation } => {
+                        self.schedule_application(
+                            context,
+                            plan,
+                            continuation,
+                            &mut expression_value,
+                            pending,
+                        )?;
+                    }
+                    InvocationPlan::Receiver {
+                        expression,
+                        continuation,
+                    } => {
+                        pending.push(Step::ResumeReduceBy(continuation));
+                        pending.push(Step::Expression(expression, TypeRequest::definitive(None)));
+                    }
+                },
+                Step::ResumeApplication {
+                    continuation,
+                    invocation,
+                } => {
+                    let outcome = expression_value
+                        .take()
+                        .expect("application continuation follows its child expression");
+                    let plan = self.resume_application(context.source, continuation, outcome)?;
+                    self.schedule_application(
+                        context,
+                        plan,
+                        invocation,
+                        &mut expression_value,
+                        pending,
+                    )?;
+                }
+                Step::ResumeReduceBy(continuation) => {
+                    let outcome = expression_value
+                        .take()
+                        .expect("reduce_by continuation follows its receiver");
+                    let plan = self.resume_reduce_by_receiver(context, *continuation, outcome)?;
+                    pending.push(Step::Invocation(Box::new(plan)));
+                }
                 Step::Cleanup(cleanup) => self.finish_typing_scope(cleanup)?,
             }
         }
         Ok(expression_value.expect("expression work produces its final result"))
+    }
+
+    fn schedule_application(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        plan: ApplicationPlan,
+        invocation: Box<InvocationFrame>,
+        value: &mut Option<Outcome<TypedExpression>>,
+        pending: &mut Vec<Step>,
+    ) -> Result<(), BodyTypingError> {
+        match plan {
+            ApplicationPlan::Complete(outcome) => {
+                *value = Some(self.finish_invocation(context, *invocation, outcome)?);
+            }
+            ApplicationPlan::Expression {
+                expression,
+                request,
+                path,
+                continuation,
+            } => {
+                let barrier = self.push_control_path_barrier(path);
+                pending.push(Step::ResumeApplication {
+                    continuation,
+                    invocation,
+                });
+                pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
+                pending.push(Step::Expression(expression, request));
+            }
+        }
+        Ok(())
     }
 
     fn schedule_statement(
