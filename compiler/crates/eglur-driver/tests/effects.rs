@@ -8,6 +8,9 @@ use eglur_sema::{
     PhaseProduct, ResolveCapability, StateScope, TrustedSignatureKind, TypecheckCapability,
 };
 
+#[path = "effects/traversal.rs"]
+mod traversal;
+
 fn effect_profile() -> SupportProfile {
     SupportProfile::compile_only(
         SupportSchemaVersion::V1,
