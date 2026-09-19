@@ -10,6 +10,15 @@ use crate::{
     TensorSchemaFamily, TransformAxisList,
 };
 
+use super::traversal::{Step, Traversal, take_tail};
+
+pub(super) enum ReduceStep {
+    Ordinary(crate::OriginId, SyntaxNode, crate::ExprId, usize),
+    Phases(crate::OriginId, SyntaxNode, crate::ExprId, usize),
+    Phase(SyntaxNode),
+    Reducer(crate::OriginId, Box<[Name]>),
+}
+
 enum AxisBinaryOperator {
     Add,
     Multiply,
@@ -63,26 +72,100 @@ impl Builder {
         })
     }
 
-    pub(super) fn finish_reduce_by(
+    pub(super) fn schedule_reduce_by(
         &mut self,
         body: crate::BodyId,
-        node: &SyntaxNode,
+        origin: crate::OriginId,
+        node: SyntaxNode,
         receiver: crate::ExprId,
-    ) -> ExprKind {
-        let arguments = direct_child(node, SyntaxKind::ReduceByArgumentList);
+        traversal: &mut Traversal,
+    ) {
+        let arguments = direct_child(&node, SyntaxKind::ReduceByArgumentList);
         let phases = arguments
             .as_ref()
             .map(|arguments| direct_children(arguments, SyntaxKind::ReduceByPhase))
             .unwrap_or_default();
-
-        if !phases.is_empty() {
-            return self.lower_phase_candidates(body, node, receiver, phases);
+        if phases.is_empty() {
+            let count = arguments
+                .as_ref()
+                .map_or(0, |arguments| direct_nodes(arguments).len());
+            traversal.push(
+                body,
+                Step::Reduce(ReduceStep::Ordinary(origin, node, receiver, count)),
+            );
+            self.schedule_arguments(body, arguments, traversal);
+        } else {
+            traversal.push(
+                body,
+                Step::Reduce(ReduceStep::Phases(origin, node, receiver, phases.len())),
+            );
+            for phase in phases.into_iter().rev() {
+                traversal.push(body, Step::Reduce(ReduceStep::Phase(phase)));
+            }
         }
+    }
 
-        let ordinary_arguments = arguments
-            .as_ref()
-            .map(|arguments| self.lower_call_arguments(body, arguments))
-            .unwrap_or_default();
+    pub(super) fn resume_reduce(
+        &mut self,
+        body: crate::BodyId,
+        step: ReduceStep,
+        traversal: &mut Traversal,
+    ) {
+        let (origin, kind) = match step {
+            ReduceStep::Phase(phase) => {
+                let origin = self.written(phase.span());
+                let axes = direct_tokens(&phase)
+                    .into_iter()
+                    .filter(|token| token.kind() == SyntaxKind::Identifier)
+                    .map(|token| self.lower_name_token(Some(token), phase.span()))
+                    .collect::<Vec<_>>();
+                traversal.push(
+                    body,
+                    Step::Reduce(ReduceStep::Reducer(origin, axes.into_boxed_slice())),
+                );
+                traversal.expression(
+                    body,
+                    expression_children(&phase).into_iter().next(),
+                    phase.span(),
+                );
+                return;
+            }
+            ReduceStep::Reducer(origin, axes) => {
+                let reducer = traversal.value();
+                traversal.phases.push(ReduceByPhase {
+                    axes,
+                    reducer,
+                    origin,
+                });
+                return;
+            }
+            ReduceStep::Ordinary(origin, node, receiver, count) => {
+                let arguments = take_tail(&mut traversal.arguments, count).into_vec();
+                (
+                    origin,
+                    self.finish_reduce_by(body, &node, receiver, arguments),
+                )
+            }
+            ReduceStep::Phases(origin, node, receiver, count) => {
+                let phases = take_tail(&mut traversal.phases, count).into_vec();
+                (
+                    origin,
+                    self.finish_phase_candidates(body, &node, receiver, phases),
+                )
+            }
+        };
+        traversal
+            .values
+            .push(self.alloc_expr(body, Expr::new(origin, kind)));
+    }
+
+    fn finish_reduce_by(
+        &mut self,
+        body: crate::BodyId,
+        node: &SyntaxNode,
+        receiver: crate::ExprId,
+        ordinary_arguments: Vec<CallArgument>,
+    ) -> ExprKind {
         let single_reducer = if ordinary_arguments.len() == 1
             && ordinary_arguments[0].name.is_none()
         {
@@ -108,34 +191,13 @@ impl Builder {
         })
     }
 
-    fn lower_phase_candidates(
+    fn finish_phase_candidates(
         &mut self,
         body: crate::BodyId,
         node: &SyntaxNode,
         receiver: crate::ExprId,
-        phase_nodes: Vec<SyntaxNode>,
+        phases: Vec<ReduceByPhase>,
     ) -> ExprKind {
-        let phases = phase_nodes
-            .into_iter()
-            .map(|phase| {
-                let origin = self.written(phase.span());
-                let axes = direct_tokens(&phase)
-                    .into_iter()
-                    .filter(|token| token.kind() == SyntaxKind::Identifier)
-                    .map(|token| self.lower_name_token(Some(token), phase.span()))
-                    .collect::<Vec<_>>();
-                let reducer = self.lower_expr(
-                    body,
-                    expression_children(&phase).into_iter().next(),
-                    phase.span(),
-                );
-                ReduceByPhase {
-                    axes: axes.into_boxed_slice(),
-                    reducer,
-                    origin,
-                }
-            })
-            .collect::<Vec<_>>();
         let ordered_origin =
             self.derived(node.span(), DesugaringKind::ReduceByOrderedPhasesCandidate);
 

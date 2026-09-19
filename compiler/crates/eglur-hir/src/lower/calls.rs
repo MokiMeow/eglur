@@ -48,84 +48,203 @@ impl PostfixApplication {
     }
 }
 
+use super::traversal::{Step, Traversal, take_tail};
+use crate::{BodyId, CatalogCallExpr, Name, OriginId, TypeRefId};
+use eglur_source::FileSpan;
+
+pub(super) enum CallStep {
+    Callee(SyntaxNode),
+    Finish(SyntaxNode, ExprId, Box<[TypeRefId]>, usize, CallSyntax),
+    Argument(SyntaxNode, FileSpan),
+    ArgumentValue(OriginId, Option<Name>),
+    TrailingArgument(FileSpan),
+    DType(OriginId, ExprId, TypeRefId, usize),
+    Catalog(OriginId, crate::Path, Box<[TypeRefId]>, Name, usize),
+}
+
 impl Builder {
-    pub(super) fn finish_call(
+    pub(super) fn schedule_arguments(
         &mut self,
-        body: crate::BodyId,
-        node: &SyntaxNode,
-        callee: ExprId,
-    ) -> ExprId {
-        let type_arguments = direct_child(node, SyntaxKind::TypeArgumentList)
-            .map(|types| self.lower_type_list_container(&types))
-            .unwrap_or_default();
-        let mut arguments = direct_child(node, SyntaxKind::ArgumentList)
-            .map(|arguments| self.lower_call_arguments(body, &arguments))
-            .unwrap_or_default();
-        let trailing = direct_nodes(node)
-            .into_iter()
-            .find(|child| child.kind() == SyntaxKind::LambdaExpr);
-        let syntax = if let Some(lambda) = trailing {
-            let lambda_span = lambda.span();
-            let value = self.lower_expr(body, Some(lambda), node.span());
-            let syntax = CallSyntax::TrailingArgument;
-            let argument_origin = self.derived(
-                lambda_span,
-                syntax
-                    .argument_desugaring()
-                    .expect("trailing argument syntax is a desugaring"),
-            );
-            arguments.push(CallArgument {
-                name: None,
-                value,
-                origin: argument_origin,
-            });
-            syntax
-        } else if direct_token(node, SyntaxKind::ColonColon).is_some() {
-            CallSyntax::ExplicitTypeArguments
-        } else {
-            CallSyntax::Direct
-        };
-        let partial_application = arguments
-            .iter()
-            .any(|argument| self.expr_is_hole(argument.value));
-        let origin = if let Some(kind) = syntax.call_desugaring() {
-            self.derived(node.span(), kind)
-        } else if partial_application {
-            self.derived(node.span(), DesugaringKind::HolePartialApplication)
-        } else {
-            self.written(node.span())
-        };
-        self.alloc_expr(
-            body,
-            Expr::new(
-                origin,
-                ExprKind::Call(CallExpr {
-                    callee,
-                    arguments: arguments.into_boxed_slice(),
-                    type_arguments: type_arguments.into_boxed_slice(),
-                    syntax,
-                    partial_application,
-                }),
-            ),
-        )
+        body: BodyId,
+        list: Option<SyntaxNode>,
+        traversal: &mut Traversal,
+    ) {
+        let Some(list) = list else { return };
+        let nodes = direct_nodes(&list);
+        for node in nodes.into_iter().rev() {
+            traversal.push(body, Step::Call(CallStep::Argument(node, list.span())));
+        }
     }
 
-    pub(super) fn finish_dtype_call(
+    pub(super) fn schedule_dtype_call(
         &mut self,
-        body: crate::BodyId,
-        node: &SyntaxNode,
+        body: BodyId,
+        origin: OriginId,
+        node: SyntaxNode,
         callee: ExprId,
-    ) -> ExprKind {
-        let dtype = direct_child(node, SyntaxKind::TypeArgumentList)
+        traversal: &mut Traversal,
+    ) {
+        let dtype = direct_child(&node, SyntaxKind::TypeArgumentList)
             .and_then(|types| self.lower_type_list_container(&types).into_iter().next())
             .unwrap_or_else(|| self.lower_type(None, node.span()));
-        let arguments = direct_child(node, SyntaxKind::ArgumentList)
-            .map(|arguments| self.lower_call_arguments(body, &arguments))
+        let arguments = direct_child(&node, SyntaxKind::ArgumentList);
+        let count = arguments
+            .as_ref()
+            .map_or(0, |list| direct_nodes(list).len());
+        traversal.push(
+            body,
+            Step::Call(CallStep::DType(origin, callee, dtype, count)),
+        );
+        self.schedule_arguments(body, arguments, traversal);
+    }
+
+    pub(super) fn schedule_catalog_call(
+        &mut self,
+        body: BodyId,
+        origin: OriginId,
+        node: &SyntaxNode,
+        traversal: &mut Traversal,
+    ) {
+        let owner_node = expression_children(node).into_iter().next();
+        let owner = self.lower_expr_path(owner_node.as_ref(), node.span());
+        let types = direct_child(node, SyntaxKind::TypeArgumentList)
+            .map(|types| self.lower_type_list_container(&types))
             .unwrap_or_default();
-        ExprKind::DTypeCall(DTypeCallExpr {
-            callee,
-            dtype,
-            arguments: arguments.into_boxed_slice(),
-        })
+        let member = self.lower_name_token(first_name_token(node), node.span());
+        let arguments = direct_child(node, SyntaxKind::ArgumentList);
+        let count = arguments
+            .as_ref()
+            .map_or(0, |list| direct_nodes(list).len());
+        traversal.push(
+            body,
+            Step::Call(CallStep::Catalog(
+                origin,
+                owner,
+                types.into_boxed_slice(),
+                member,
+                count,
+            )),
+        );
+        self.schedule_arguments(body, arguments, traversal);
+    }
+
+    pub(super) fn resume_call(&mut self, body: BodyId, step: CallStep, traversal: &mut Traversal) {
+        let (origin, kind) = match step {
+            CallStep::Callee(node) => {
+                let callee = traversal.value();
+                let types = direct_child(&node, SyntaxKind::TypeArgumentList)
+                    .map(|types| self.lower_type_list_container(&types))
+                    .unwrap_or_default();
+                let arguments = direct_child(&node, SyntaxKind::ArgumentList);
+                let trailing = direct_nodes(&node)
+                    .into_iter()
+                    .find(|child| child.kind() == SyntaxKind::LambdaExpr);
+                let count = arguments
+                    .as_ref()
+                    .map_or(0, |list| direct_nodes(list).len())
+                    + usize::from(trailing.is_some());
+                let syntax = if trailing.is_some() {
+                    CallSyntax::TrailingArgument
+                } else if direct_token(&node, SyntaxKind::ColonColon).is_some() {
+                    CallSyntax::ExplicitTypeArguments
+                } else {
+                    CallSyntax::Direct
+                };
+                let span = node.span();
+                traversal.push(
+                    body,
+                    Step::Call(CallStep::Finish(
+                        node,
+                        callee,
+                        types.into_boxed_slice(),
+                        count,
+                        syntax,
+                    )),
+                );
+                if let Some(lambda) = trailing {
+                    traversal.push(body, Step::Call(CallStep::TrailingArgument(lambda.span())));
+                    traversal.expression(body, Some(lambda), span);
+                }
+                self.schedule_arguments(body, arguments, traversal);
+                return;
+            }
+            CallStep::Argument(node, fallback) => {
+                let origin = self.written(node.span());
+                let (name, value, span) = match node.kind() {
+                    SyntaxKind::NamedArgument => (
+                        Some(self.lower_name_token(first_name_token(&node), node.span())),
+                        expression_children(&node).into_iter().next(),
+                        node.span(),
+                    ),
+                    kind if is_expression_kind(kind) => (None, Some(node), fallback),
+                    _ => (None, None, node.span()),
+                };
+                traversal.push(body, Step::Call(CallStep::ArgumentValue(origin, name)));
+                traversal.expression(body, value, span);
+                return;
+            }
+            CallStep::ArgumentValue(origin, name) => {
+                let value = traversal.value();
+                traversal.arguments.push(CallArgument {
+                    origin,
+                    name,
+                    value,
+                });
+                return;
+            }
+            CallStep::TrailingArgument(span) => {
+                let value = traversal.value();
+                let origin = self.derived(span, DesugaringKind::TrailingArgument);
+                traversal.arguments.push(CallArgument {
+                    name: None,
+                    value,
+                    origin,
+                });
+                return;
+            }
+            CallStep::Finish(node, callee, type_arguments, count, syntax) => {
+                let arguments = take_tail(&mut traversal.arguments, count);
+                let partial_application = arguments
+                    .iter()
+                    .any(|argument| self.expr_is_hole(argument.value));
+                let origin = if let Some(kind) = syntax.call_desugaring() {
+                    self.derived(node.span(), kind)
+                } else if partial_application {
+                    self.derived(node.span(), DesugaringKind::HolePartialApplication)
+                } else {
+                    self.written(node.span())
+                };
+                (
+                    origin,
+                    ExprKind::Call(CallExpr {
+                        callee,
+                        arguments,
+                        type_arguments,
+                        syntax,
+                        partial_application,
+                    }),
+                )
+            }
+            CallStep::DType(origin, callee, dtype, count) => (
+                origin,
+                ExprKind::DTypeCall(DTypeCallExpr {
+                    callee,
+                    dtype,
+                    arguments: take_tail(&mut traversal.arguments, count),
+                }),
+            ),
+            CallStep::Catalog(origin, owner, owner_arguments, member, count) => (
+                origin,
+                ExprKind::CatalogCall(CatalogCallExpr {
+                    owner,
+                    owner_arguments,
+                    member,
+                    arguments: take_tail(&mut traversal.arguments, count),
+                }),
+            ),
+        };
+        traversal
+            .values
+            .push(self.alloc_expr(body, Expr::new(origin, kind)));
     }
 }

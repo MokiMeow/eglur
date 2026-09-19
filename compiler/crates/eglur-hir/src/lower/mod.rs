@@ -1,9 +1,12 @@
+mod aggregate;
 mod body;
 mod calls;
+mod control;
 mod item;
 mod pattern;
 mod spine;
 mod tensor;
+mod traversal;
 mod ty;
 
 use eglur_source::{ByteRange, FileId, FileSpan};
