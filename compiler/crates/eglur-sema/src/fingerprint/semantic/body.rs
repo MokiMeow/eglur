@@ -23,6 +23,9 @@ use crate::{
 
 use super::SemanticFingerprintError;
 
+mod traversal;
+use traversal::BodyNode;
+
 pub(super) struct BodyProjection {
     modules: BTreeMap<ModuleAddress, BodyFingerprint>,
     declarations: BTreeMap<crate::DefId, FingerprintDigest>,
@@ -215,8 +218,6 @@ fn write_declaration_body(
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum NodeKey {
-    Expression(ExprId),
-    Statement(StmtId),
     Pattern(PatternId),
     Axis(AxisExprId),
     Type(TypeRefId),
@@ -243,64 +244,13 @@ struct NodeHasher<'a> {
 
 impl NodeHasher<'_> {
     fn expression(&mut self, id: ExprId) -> Result<FingerprintDigest, SemanticFingerprintError> {
-        if let Some(&digest) = self.expressions.get(&id) {
-            return Ok(digest);
-        }
-        let mut pending = vec![(id, false)];
-        let mut visiting = BTreeSet::new();
-        while let Some((current, visited)) = pending.pop() {
-            if self.expressions.contains_key(&current) {
-                continue;
-            }
-            if visited {
-                self.hash_expression_node(current)?;
-                visiting.remove(&current);
-                continue;
-            }
-            if !visiting.insert(current) {
-                return Err(SemanticFingerprintError::CyclicBodyNode);
-            }
-            pending.push((current, true));
-            match self
-                .hir
-                .body(current.body())
-                .expression(current)
-                .ok_or(SemanticFingerprintError::IncompleteBodyFact("expression"))?
-                .kind()
-            {
-                ExprKind::Binary { left, right, .. } => {
-                    pending.push((*right, false));
-                    pending.push((*left, false));
-                }
-                ExprKind::Unary { operand, .. }
-                | ExprKind::Reference { value: operand, .. }
-                | ExprKind::Try(operand)
-                | ExprKind::Group(operand)
-                | ExprKind::Unsafe(operand)
-                | ExprKind::Result(operand)
-                | ExprKind::Checked(operand) => pending.push((*operand, false)),
-                _ => {}
-            }
-        }
-        self.expressions
-            .get(&id)
-            .copied()
-            .ok_or(SemanticFingerprintError::IncompleteBodyFact(
-                "expression digest",
-            ))
+        self.hash_body_nodes(BodyNode::Expression(id))
     }
 
     fn hash_expression_node(
         &mut self,
         id: ExprId,
     ) -> Result<FingerprintDigest, SemanticFingerprintError> {
-        if let Some(&digest) = self.expressions.get(&id) {
-            return Ok(digest);
-        }
-        let key = NodeKey::Expression(id);
-        if !self.active.insert(key) {
-            return Err(SemanticFingerprintError::CyclicBodyNode);
-        }
         let kind = self
             .hir
             .body(id.body())
@@ -308,43 +258,35 @@ impl NodeHasher<'_> {
             .ok_or(SemanticFingerprintError::IncompleteBodyFact("expression"))?
             .kind()
             .clone();
-        let result: Result<FingerprintDigest, SemanticFingerprintError> = (|| {
-            let mut builder = CanonicalFingerprintBuilder::new(FingerprintDomain::Body);
-            builder.write_u8(2);
-            self.write_expression_kind(&mut builder, id, &kind)?;
-            if matches!(kind, ExprKind::Hole) {
-                let key = ExpressionKey::new(self.module, id);
-                match self.body_types.expression(key) {
-                    FactState::Known(_) => {
-                        builder.write_u8(1);
-                        self.write_expression_facts(&mut builder, id)?;
-                    }
-                    FactState::Unperformed | FactState::NotApplicable => builder.write_u8(0),
-                    FactState::Poisoned(_) => {
-                        return Err(SemanticFingerprintError::IncompleteBodyFact(
-                            "expression type",
-                        ));
-                    }
+        let mut builder = CanonicalFingerprintBuilder::new(FingerprintDomain::Body);
+        builder.write_u8(2);
+        self.write_expression_kind(&mut builder, id, &kind)?;
+        if matches!(kind, ExprKind::Hole) {
+            let key = ExpressionKey::new(self.module, id);
+            match self.body_types.expression(key) {
+                FactState::Known(_) => {
+                    builder.write_u8(1);
+                    self.write_expression_facts(&mut builder, id)?;
                 }
-            } else {
-                self.write_expression_facts(&mut builder, id)?;
+                FactState::Unperformed | FactState::NotApplicable => builder.write_u8(0),
+                FactState::Poisoned(_) => {
+                    return Err(SemanticFingerprintError::IncompleteBodyFact(
+                        "expression type",
+                    ));
+                }
             }
-            Ok(builder.finish())
-        })();
-        self.active.remove(&key);
-        let digest = result?;
+        } else {
+            self.write_expression_facts(&mut builder, id)?;
+        }
+        let digest = builder.finish();
         self.expressions.insert(id, digest);
         Ok(digest)
     }
 
-    fn statement(&mut self, id: StmtId) -> Result<FingerprintDigest, SemanticFingerprintError> {
-        if let Some(&digest) = self.statements.get(&id) {
-            return Ok(digest);
-        }
-        let key = NodeKey::Statement(id);
-        if !self.active.insert(key) {
-            return Err(SemanticFingerprintError::CyclicBodyNode);
-        }
+    fn hash_statement_node(
+        &mut self,
+        id: StmtId,
+    ) -> Result<FingerprintDigest, SemanticFingerprintError> {
         let kind = self
             .hir
             .body(id.body())
@@ -352,14 +294,10 @@ impl NodeHasher<'_> {
             .ok_or(SemanticFingerprintError::IncompleteBodyFact("statement"))?
             .kind()
             .clone();
-        let result: Result<FingerprintDigest, SemanticFingerprintError> = (|| {
-            let mut builder = CanonicalFingerprintBuilder::new(FingerprintDomain::Body);
-            builder.write_u8(3);
-            self.write_statement_kind(&mut builder, &kind)?;
-            Ok(builder.finish())
-        })();
-        self.active.remove(&key);
-        let digest = result?;
+        let mut builder = CanonicalFingerprintBuilder::new(FingerprintDomain::Body);
+        builder.write_u8(3);
+        self.write_statement_kind(&mut builder, &kind)?;
+        let digest = builder.finish();
         self.statements.insert(id, digest);
         Ok(digest)
     }
@@ -471,18 +409,18 @@ impl NodeHasher<'_> {
             } => {
                 builder.write_u8(1);
                 builder.write_u8(binary_operator_tag(*operator));
-                builder.write_digest(self.expression(*left)?);
-                builder.write_digest(self.expression(*right)?);
+                builder.write_digest(self.expression_digest(*left)?);
+                builder.write_digest(self.expression_digest(*right)?);
             }
             ExprKind::Unary { operator, operand } => {
                 builder.write_u8(2);
                 builder.write_u8(unary_operator_tag(*operator));
-                builder.write_digest(self.expression(*operand)?);
+                builder.write_digest(self.expression_digest(*operand)?);
             }
             ExprKind::Reference { mutability, value } => {
                 builder.write_u8(3);
                 write_mutability(builder, *mutability);
-                builder.write_digest(self.expression(*value)?);
+                builder.write_digest(self.expression_digest(*value)?);
             }
             ExprKind::Own(name) => {
                 builder.write_u8(4);
@@ -502,7 +440,7 @@ impl NodeHasher<'_> {
             }
             ExprKind::Call(call) => {
                 builder.write_u8(7);
-                builder.write_digest(self.expression(call.callee)?);
+                builder.write_digest(self.expression_digest(call.callee)?);
                 write_call_arguments(builder, &call.arguments, self)?;
                 write_type_digests(builder, &call.type_arguments, self)?;
                 builder.write_u8(call_syntax_tag(call.syntax));
@@ -517,21 +455,21 @@ impl NodeHasher<'_> {
             }
             ExprKind::Member { receiver, member } => {
                 builder.write_u8(9);
-                builder.write_digest(self.expression(*receiver)?);
+                builder.write_digest(self.expression_digest(*receiver)?);
                 write_hir_name(builder, member);
             }
             ExprKind::TupleProjection { receiver, index } => {
                 builder.write_u8(10);
-                builder.write_digest(self.expression(*receiver)?);
+                builder.write_digest(self.expression_digest(*receiver)?);
                 builder.write_str(index);
             }
             ExprKind::Try(operand) => {
                 builder.write_u8(11);
-                builder.write_digest(self.expression(*operand)?);
+                builder.write_digest(self.expression_digest(*operand)?);
             }
             ExprKind::DTypeCall(call) => {
                 builder.write_u8(12);
-                builder.write_digest(self.expression(call.callee)?);
+                builder.write_digest(self.expression_digest(call.callee)?);
                 builder.write_digest(self.ty(call.dtype)?);
                 write_call_arguments(builder, &call.arguments, self)?;
             }
@@ -545,14 +483,14 @@ impl NodeHasher<'_> {
                             .ordinary
                             .as_ref()
                             .expect("ordinary commitment retains an ordinary candidate");
-                        builder.write_digest(self.expression(ordinary.call.callee)?);
+                        builder.write_digest(self.expression_digest(ordinary.call.callee)?);
                         write_call_arguments(builder, &ordinary.call.arguments, self)?;
                         builder.write_u8(call_syntax_tag(ordinary.call.syntax));
                         builder.write_bool(ordinary.call.partial_application);
                     }
                     FactState::Known(ReduceByCommitment::TensorSingle) => {
                         builder.write_u8(1);
-                        builder.write_digest(self.expression(candidate.receiver)?);
+                        builder.write_digest(self.expression_digest(candidate.receiver)?);
                         let single = candidate
                             .single_reducer
                             .as_ref()
@@ -560,18 +498,18 @@ impl NodeHasher<'_> {
                         match &single.value {
                             ReduceBySingleValue::Expression(value) => {
                                 builder.write_u8(0);
-                                builder.write_digest(self.expression(*value)?);
+                                builder.write_digest(self.expression_digest(*value)?);
                             }
                             ReduceBySingleValue::PhasePair { axis, reducer, .. } => {
                                 builder.write_u8(1);
                                 write_hir_name(builder, axis);
-                                builder.write_digest(self.expression(*reducer)?);
+                                builder.write_digest(self.expression_digest(*reducer)?);
                             }
                         }
                     }
                     FactState::Known(ReduceByCommitment::TensorPhases) => {
                         builder.write_u8(2);
-                        builder.write_digest(self.expression(candidate.receiver)?);
+                        builder.write_digest(self.expression_digest(candidate.receiver)?);
                         let phases = candidate
                             .ordered_phases
                             .as_ref()
@@ -582,7 +520,7 @@ impl NodeHasher<'_> {
                             for axis in &phase.axes {
                                 write_hir_name(builder, axis);
                             }
-                            builder.write_digest(self.expression(phase.reducer)?);
+                            builder.write_digest(self.expression_digest(phase.reducer)?);
                         }
                     }
                     FactState::Poisoned(_) | FactState::Unperformed | FactState::NotApplicable => {
@@ -604,11 +542,11 @@ impl NodeHasher<'_> {
             ExprKind::Unit => builder.write_u8(17),
             ExprKind::Group(inner) => {
                 builder.write_u8(18);
-                builder.write_digest(self.expression(*inner)?);
+                builder.write_digest(self.expression_digest(*inner)?);
             }
             ExprKind::Unsafe(inner) => {
                 builder.write_u8(19);
-                builder.write_digest(self.expression(*inner)?);
+                builder.write_digest(self.expression_digest(*inner)?);
             }
             ExprKind::Tuple(values) => {
                 builder.write_u8(20);
@@ -622,8 +560,8 @@ impl NodeHasher<'_> {
                 builder.write_u8(22);
                 builder.write_len(entries.len());
                 for entry in entries {
-                    builder.write_digest(self.expression(entry.key)?);
-                    builder.write_digest(self.expression(entry.value)?);
+                    builder.write_digest(self.expression_digest(entry.key)?);
+                    builder.write_digest(self.expression_digest(entry.value)?);
                 }
             }
             ExprKind::StructLiteral { path, fields } => {
@@ -632,7 +570,7 @@ impl NodeHasher<'_> {
                 builder.write_len(fields.len());
                 for field in fields {
                     write_hir_name(builder, &field.name);
-                    builder.write_digest(self.expression(field.value)?);
+                    builder.write_digest(self.expression_digest(field.value)?);
                 }
             }
             ExprKind::VariantConstructor { path, payload } => {
@@ -649,7 +587,7 @@ impl NodeHasher<'_> {
                         builder.write_len(fields.len());
                         for field in fields {
                             write_hir_name(builder, &field.name);
-                            builder.write_digest(self.expression(field.value)?);
+                            builder.write_digest(self.expression_digest(field.value)?);
                         }
                     }
                 }
@@ -670,31 +608,31 @@ impl NodeHasher<'_> {
             }
             ExprKind::If(value) => {
                 builder.write_u8(26);
-                builder.write_digest(self.expression(value.condition)?);
-                builder.write_digest(self.expression(value.then_branch)?);
+                builder.write_digest(self.expression_digest(value.condition)?);
+                builder.write_digest(self.expression_digest(value.then_branch)?);
                 write_optional_expression(builder, value.else_branch, self)?;
                 write_optional_expression(builder, value.unknown_branch, self)?;
             }
             ExprKind::Match(value) => {
                 builder.write_u8(27);
-                builder.write_digest(self.expression(value.scrutinee)?);
+                builder.write_digest(self.expression_digest(value.scrutinee)?);
                 builder.write_len(value.arms.len());
                 for arm in &value.arms {
                     builder.write_digest(self.pattern(arm.pattern)?);
                     builder.write_bool(arm.guard.is_some());
                     if let Some(guard) = &arm.guard {
-                        builder.write_digest(self.expression(guard.condition)?);
+                        builder.write_digest(self.expression_digest(guard.condition)?);
                     }
-                    builder.write_digest(self.expression(arm.value)?);
+                    builder.write_digest(self.expression_digest(arm.value)?);
                 }
             }
             ExprKind::Result(inner) => {
                 builder.write_u8(28);
-                builder.write_digest(self.expression(*inner)?);
+                builder.write_digest(self.expression_digest(*inner)?);
             }
             ExprKind::Checked(inner) => {
                 builder.write_u8(29);
-                builder.write_digest(self.expression(*inner)?);
+                builder.write_digest(self.expression_digest(*inner)?);
             }
             ExprKind::TensorSchema(schema) => {
                 builder.write_u8(30);
@@ -738,13 +676,13 @@ impl NodeHasher<'_> {
             }
             StmtKind::Assign { target, value } => {
                 builder.write_u8(1);
-                builder.write_digest(self.expression(*target)?);
-                builder.write_digest(self.expression(*value)?);
+                builder.write_digest(self.expression_digest(*target)?);
+                builder.write_digest(self.expression_digest(*value)?);
             }
             StmtKind::While { condition, body } => {
                 builder.write_u8(2);
-                builder.write_digest(self.expression(*condition)?);
-                builder.write_digest(self.expression(*body)?);
+                builder.write_digest(self.expression_digest(*condition)?);
+                builder.write_digest(self.expression_digest(*body)?);
             }
             StmtKind::For {
                 binding,
@@ -753,8 +691,8 @@ impl NodeHasher<'_> {
             } => {
                 builder.write_u8(3);
                 write_hir_name(builder, binding);
-                builder.write_digest(self.expression(*iterable)?);
-                builder.write_digest(self.expression(*body)?);
+                builder.write_digest(self.expression_digest(*iterable)?);
+                builder.write_digest(self.expression_digest(*body)?);
             }
             StmtKind::Break => builder.write_u8(4),
             StmtKind::Continue => builder.write_u8(5),
@@ -764,11 +702,11 @@ impl NodeHasher<'_> {
             }
             StmtKind::Expression(value) => {
                 builder.write_u8(7);
-                builder.write_digest(self.expression(*value)?);
+                builder.write_digest(self.expression_digest(*value)?);
             }
             StmtKind::Yield(value) => {
                 builder.write_u8(8);
-                builder.write_digest(self.expression(*value)?);
+                builder.write_digest(self.expression_digest(*value)?);
             }
             StmtKind::Invalid => builder.write_u8(9),
         }
@@ -1028,7 +966,7 @@ impl NodeHasher<'_> {
             TypedPlaceKind::Local(_) => builder.write_u8(0),
             TypedPlaceKind::StoredField { receiver, field } => {
                 builder.write_u8(1);
-                builder.write_digest(self.expression(*receiver)?);
+                builder.write_digest(self.expression_digest(*receiver)?);
                 self.keys
                     .target(field)
                     .ok_or_else(|| stable_target_error(field))?
@@ -1036,12 +974,12 @@ impl NodeHasher<'_> {
             }
             TypedPlaceKind::TupleElement { receiver, index } => {
                 builder.write_u8(2);
-                builder.write_digest(self.expression(*receiver)?);
+                builder.write_digest(self.expression_digest(*receiver)?);
                 builder.write_len(*index);
             }
             TypedPlaceKind::Dereference { reference } => {
                 builder.write_u8(3);
-                builder.write_digest(self.expression(*reference)?);
+                builder.write_digest(self.expression_digest(*reference)?);
             }
         }
         Ok(())
@@ -1133,11 +1071,11 @@ impl NodeHasher<'_> {
         }
         builder.write_len(invocation.arguments().len());
         for &argument in invocation.arguments() {
-            builder.write_digest(self.expression(argument)?);
+            builder.write_digest(self.expression_digest(argument)?);
         }
         builder.write_len(invocation.evaluation_order().len());
         for &argument in invocation.evaluation_order() {
-            builder.write_digest(self.expression(argument)?);
+            builder.write_digest(self.expression_digest(argument)?);
         }
         Ok(())
     }
@@ -1510,7 +1448,7 @@ fn write_expression_digests(
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(expressions.len());
     for &expression in expressions {
-        builder.write_digest(nodes.expression(expression)?);
+        builder.write_digest(nodes.expression_digest(expression)?);
     }
     Ok(())
 }
@@ -1522,7 +1460,7 @@ fn write_statement_digests(
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(statements.len());
     for &statement in statements {
-        builder.write_digest(nodes.statement(statement)?);
+        builder.write_digest(nodes.statement_digest(statement)?);
     }
     Ok(())
 }
@@ -1570,7 +1508,7 @@ fn write_optional_expression(
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_bool(expression.is_some());
     if let Some(expression) = expression {
-        builder.write_digest(nodes.expression(expression)?);
+        builder.write_digest(nodes.expression_digest(expression)?);
     }
     Ok(())
 }
@@ -1608,7 +1546,7 @@ fn write_call_argument(
     if let Some(name) = &argument.name {
         write_hir_name(builder, name);
     }
-    builder.write_digest(nodes.expression(argument.value)?);
+    builder.write_digest(nodes.expression_digest(argument.value)?);
     Ok(())
 }
 

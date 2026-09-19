@@ -9,6 +9,9 @@ use eglur_sema::{
     SemanticFingerprints, TypecheckCapability,
 };
 
+#[path = "fingerprints/traversal.rs"]
+mod traversal;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FingerprintSnapshot {
     analysis: AnalysisFingerprints,
