@@ -9,6 +9,9 @@ use crate::{
     RawPointerMutability, ReferenceMutability, TraitRef, TypeId, TypeKind, TypeStoreError,
 };
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 enum StableDeclarationSegment {
     Named {
@@ -538,105 +541,151 @@ impl StableType {
             &CanonicalTarget,
         ) -> Result<StableTargetKey, StableDeclarationError>,
     ) -> Result<Self, StableDeclarationError> {
-        Ok(match types.kind(ty)? {
-            TypeKind::Never => Self::Never,
-            TypeKind::Primitive(primitive) => Self::Primitive(*primitive),
-            TypeKind::Nominal { head, substitution } => {
-                let head = match head {
-                    NominalHead::Intrinsic(head) => StableNominalHead::Intrinsic(*head),
-                    NominalHead::Declaration(target) => {
-                        StableNominalHead::Declaration(stable_target(target)?)
+        enum Step<'a> {
+            Enter(TypeId),
+            Nominal {
+                head: StableNominalHead,
+                start: usize,
+            },
+            Reference(ReferenceMutability),
+            RawPointer(RawPointerMutability),
+            Tuple(usize),
+            Callable(usize),
+            ErrorUnion(usize),
+            ProjectionBase(&'a crate::AssociatedProjection),
+            ProjectionArguments {
+                base: Box<StableType>,
+                declaration: StableTargetKey,
+                associated: &'a CanonicalTarget,
+                start: usize,
+            },
+        }
+
+        let mut pending = vec![Step::Enter(ty)];
+        let mut values = Vec::new();
+        while let Some(step) = pending.pop() {
+            match step {
+                Step::Enter(ty) => match types.kind(ty)? {
+                    TypeKind::Never => values.push(Self::Never),
+                    TypeKind::Primitive(primitive) => values.push(Self::Primitive(*primitive)),
+                    TypeKind::GenericParameter(parameter) => {
+                        values.push(Self::GenericParameter(*binders.get(parameter).ok_or_else(
+                            || StableDeclarationError::UnboundGenericParameter(parameter.clone()),
+                        )?));
                     }
-                };
-                let arguments = types
-                    .substitution(*substitution)?
-                    .iter()
-                    .map(|&argument| Self::from_type_with(argument, binders, types, stable_target))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Self::Nominal {
-                    head,
-                    arguments: arguments.into_boxed_slice(),
+                    TypeKind::SelfType(target) => {
+                        values.push(Self::SelfType(stable_target(target)?))
+                    }
+                    TypeKind::Nominal { head, substitution } => {
+                        let head = match head {
+                            NominalHead::Intrinsic(head) => StableNominalHead::Intrinsic(*head),
+                            NominalHead::Declaration(target) => {
+                                StableNominalHead::Declaration(stable_target(target)?)
+                            }
+                        };
+                        let arguments = types.substitution(*substitution)?;
+                        pending.push(Step::Nominal {
+                            head,
+                            start: values.len(),
+                        });
+                        pending.extend(arguments.iter().rev().copied().map(Step::Enter));
+                    }
+                    TypeKind::Reference {
+                        mutability,
+                        referent,
+                    } => {
+                        pending.push(Step::Reference(*mutability));
+                        pending.push(Step::Enter(*referent));
+                    }
+                    TypeKind::RawPointer {
+                        mutability,
+                        referent,
+                    } => {
+                        pending.push(Step::RawPointer(*mutability));
+                        pending.push(Step::Enter(*referent));
+                    }
+                    TypeKind::Tuple(elements) => {
+                        pending.push(Step::Tuple(values.len()));
+                        pending.extend(elements.iter().rev().copied().map(Step::Enter));
+                    }
+                    TypeKind::Callable { parameters, result } => {
+                        pending.push(Step::Callable(values.len()));
+                        pending.push(Step::Enter(*result));
+                        pending.extend(parameters.iter().rev().copied().map(Step::Enter));
+                    }
+                    TypeKind::ErrorUnion(members) => {
+                        pending.push(Step::ErrorUnion(values.len()));
+                        pending.extend(members.iter().rev().copied().map(Step::Enter));
+                    }
+                    TypeKind::AssociatedProjection(projection) => {
+                        pending.push(Step::ProjectionBase(projection));
+                        pending.push(Step::Enter(projection.base()));
+                    }
+                },
+                Step::Nominal { head, start } => {
+                    let arguments = values.split_off(start).into_boxed_slice();
+                    values.push(Self::Nominal { head, arguments });
                 }
-            }
-            TypeKind::GenericParameter(parameter) => {
-                Self::GenericParameter(*binders.get(parameter).ok_or_else(|| {
-                    StableDeclarationError::UnboundGenericParameter(parameter.clone())
-                })?)
-            }
-            TypeKind::SelfType(target) => Self::SelfType(stable_target(target)?),
-            TypeKind::Reference {
-                mutability,
-                referent,
-            } => Self::Reference {
-                mutability: *mutability,
-                referent: Box::new(Self::from_type_with(
-                    *referent,
-                    binders,
-                    types,
-                    stable_target,
-                )?),
-            },
-            TypeKind::RawPointer {
-                mutability,
-                referent,
-            } => Self::RawPointer {
-                mutability: *mutability,
-                referent: Box::new(Self::from_type_with(
-                    *referent,
-                    binders,
-                    types,
-                    stable_target,
-                )?),
-            },
-            TypeKind::Tuple(elements) => Self::Tuple(
-                elements
-                    .iter()
-                    .map(|&element| Self::from_type_with(element, binders, types, stable_target))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_boxed_slice(),
-            ),
-            TypeKind::Callable { parameters, result } => Self::Callable {
-                parameters: parameters
-                    .iter()
-                    .map(|&parameter| {
-                        Self::from_type_with(parameter, binders, types, stable_target)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_boxed_slice(),
-                result: Box::new(Self::from_type_with(
-                    *result,
-                    binders,
-                    types,
-                    stable_target,
-                )?),
-            },
-            TypeKind::ErrorUnion(members) => {
-                let mut members = members
-                    .iter()
-                    .map(|&member| Self::from_type_with(member, binders, types, stable_target))
-                    .collect::<Result<Vec<_>, _>>()?;
-                members.sort();
-                members.dedup();
-                Self::ErrorUnion(members.into_boxed_slice())
-            }
-            TypeKind::AssociatedProjection(projection) => {
-                let base = Self::from_type_with(projection.base(), binders, types, stable_target)?;
-                let declaration = stable_target(projection.trait_ref().declaration())?;
-                let arguments = types
-                    .substitution(projection.trait_ref().substitution())?
-                    .iter()
-                    .map(|&argument| Self::from_type_with(argument, binders, types, stable_target))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Self::AssociatedProjection {
-                    base: Box::new(base),
-                    trait_ref: StableTraitRef {
+                Step::Reference(mutability) => {
+                    let referent = Box::new(values.pop().expect("reference follows its referent"));
+                    values.push(Self::Reference {
+                        mutability,
+                        referent,
+                    });
+                }
+                Step::RawPointer(mutability) => {
+                    let referent = Box::new(values.pop().expect("pointer follows its referent"));
+                    values.push(Self::RawPointer {
+                        mutability,
+                        referent,
+                    });
+                }
+                Step::Tuple(start) => {
+                    let elements = values.split_off(start).into_boxed_slice();
+                    values.push(Self::Tuple(elements));
+                }
+                Step::Callable(start) => {
+                    let result = Box::new(values.pop().expect("callable follows its result"));
+                    let parameters = values.split_off(start).into_boxed_slice();
+                    values.push(Self::Callable { parameters, result });
+                }
+                Step::ErrorUnion(start) => {
+                    let mut members = values.split_off(start);
+                    members.sort();
+                    members.dedup();
+                    values.push(Self::ErrorUnion(members.into_boxed_slice()));
+                }
+                Step::ProjectionBase(projection) => {
+                    let base = Box::new(values.pop().expect("projection follows its base"));
+                    let declaration = stable_target(projection.trait_ref().declaration())?;
+                    let arguments = types.substitution(projection.trait_ref().substitution())?;
+                    pending.push(Step::ProjectionArguments {
+                        base,
                         declaration,
-                        arguments: arguments.into_boxed_slice(),
-                    },
-                    associated: stable_target(projection.associated())?,
+                        associated: projection.associated(),
+                        start: values.len(),
+                    });
+                    pending.extend(arguments.iter().rev().copied().map(Step::Enter));
+                }
+                Step::ProjectionArguments {
+                    base,
+                    declaration,
+                    associated,
+                    start,
+                } => {
+                    let arguments = values.split_off(start).into_boxed_slice();
+                    values.push(Self::AssociatedProjection {
+                        base,
+                        trait_ref: StableTraitRef {
+                            declaration,
+                            arguments,
+                        },
+                        associated: stable_target(associated)?,
+                    });
                 }
             }
-        })
+        }
+        Ok(values.pop().expect("type conversion produces its root"))
     }
 
     pub(crate) fn write_to(&self, builder: &mut CanonicalFingerprintBuilder) {
