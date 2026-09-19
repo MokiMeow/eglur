@@ -2,6 +2,8 @@ use super::application::{ApplicationContinuation, ApplicationPlan};
 use super::branching::{BranchContinuation, BranchPlan};
 use super::expression::ExpressionPlan;
 use super::invocation::{InvocationContinuation, InvocationFrame, InvocationPlan};
+use super::numeric::{NumericContinuation, NumericPlan};
+use super::numeric_tree::{NumericTreeFrame, NumericTreePlan};
 use super::statements::{BlockFrame, StatementContinuation, StatementPlan};
 use super::values::{ValueContinuation, ValuePlan};
 use super::*;
@@ -9,6 +11,7 @@ use super::*;
 enum Cleanup {
     Region(ControlRegionKey),
     BlockOverride(ExprId),
+    NumericPreparation(bool),
     PathBarrier(Option<usize>),
 }
 
@@ -31,6 +34,10 @@ enum Step {
     ResumeBranch(BranchContinuation),
     ResumeMatchArm,
     NormalCompletion(ControlRegionKey),
+    NumericTree(Box<NumericTreeFrame>),
+    ResumeNumericTree(Box<NumericTreeFrame>),
+    Numeric(Box<NumericPlan>),
+    ResumeNumeric(NumericContinuation),
     Cleanup(Cleanup),
 }
 
@@ -103,6 +110,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         ExpressionPlan::Branch { key, plan } => {
                             pending.push(Step::Publish(key));
                             pending.push(Step::Branch(plan));
+                        }
+                        ExpressionPlan::NumericTree(frame) => {
+                            let previous =
+                                std::mem::replace(&mut self.preparing_numeric_tree, true);
+                            pending.push(Step::Cleanup(Cleanup::NumericPreparation(previous)));
+                            pending.push(Step::NumericTree(frame));
+                        }
+                        ExpressionPlan::Numeric { key, plan } => {
+                            pending.push(Step::Publish(key));
+                            pending.push(Step::Numeric(plan));
                         }
                         ExpressionPlan::Invocation { key, plan } => {
                             pending.push(Step::Publish(key));
@@ -308,6 +325,52 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         )?;
                     }
                 }
+                Step::NumericTree(frame) => match self.advance_numeric_tree(context, frame)? {
+                    NumericTreePlan::Complete(outcome) => expression_value = Some(outcome),
+                    NumericTreePlan::Expression {
+                        expression,
+                        request,
+                        path,
+                        finishing,
+                        frame,
+                    } => {
+                        let previous =
+                            std::mem::replace(&mut self.preparing_numeric_tree, finishing);
+                        let barrier = self.push_control_path_barrier(path);
+                        pending.push(Step::ResumeNumericTree(frame));
+                        pending.push(Step::Cleanup(Cleanup::NumericPreparation(previous)));
+                        pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
+                        pending.push(Step::Expression(expression, request));
+                    }
+                },
+                Step::ResumeNumericTree(mut frame) => {
+                    let outcome = expression_value
+                        .take()
+                        .expect("numeric tree resumes after its child expression");
+                    frame.accept_child(outcome);
+                    pending.push(Step::NumericTree(frame));
+                }
+                Step::Numeric(plan) => match *plan {
+                    NumericPlan::Complete(outcome) => expression_value = Some(outcome),
+                    NumericPlan::Expression {
+                        expression,
+                        request,
+                        path,
+                        continuation,
+                    } => {
+                        let barrier = self.push_control_path_barrier(path);
+                        pending.push(Step::ResumeNumeric(continuation));
+                        pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
+                        pending.push(Step::Expression(expression, request));
+                    }
+                },
+                Step::ResumeNumeric(continuation) => {
+                    let outcome = expression_value
+                        .take()
+                        .expect("numeric operation resumes after its operand");
+                    let plan = self.resume_numeric(context.source, continuation, outcome)?;
+                    pending.push(Step::Numeric(Box::new(plan)));
+                }
                 Step::Cleanup(cleanup) => self.finish_typing_scope(cleanup)?,
             }
         }
@@ -368,6 +431,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
     fn finish_typing_scope(&mut self, cleanup: Cleanup) -> Result<(), BodyTypingError> {
         match cleanup {
+            Cleanup::NumericPreparation(previous) => {
+                self.preparing_numeric_tree = previous;
+                Ok(())
+            }
             Cleanup::Region(region) => self.leave_control_region(&region),
             Cleanup::BlockOverride(expression) => self.pop_block_region_override(expression),
             Cleanup::PathBarrier(barrier) => self.pop_control_path_barrier(barrier),

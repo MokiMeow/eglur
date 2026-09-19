@@ -45,6 +45,7 @@ mod expression;
 mod failure;
 mod invocation;
 mod numeric;
+mod numeric_tree;
 mod orchestration;
 mod ownership;
 mod patterns;

@@ -1,5 +1,7 @@
 use super::branching::BranchPlan;
 use super::invocation::InvocationPlan;
+use super::numeric::NumericPlan;
+use super::numeric_tree::NumericTreeFrame;
 use super::values::{ValueContinuation, ValuePlan};
 use super::*;
 
@@ -30,6 +32,11 @@ pub(super) enum ExpressionPlan {
     Branch {
         key: ExpressionKey,
         plan: Box<BranchPlan>,
+    },
+    NumericTree(Box<NumericTreeFrame>),
+    Numeric {
+        key: ExpressionKey,
+        plan: Box<NumericPlan>,
     },
 }
 
@@ -142,19 +149,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             request
         };
         let kind = expression.kind().clone();
-        if !self.preparing_numeric_tree
-            && matches!(
-                kind,
-                ExprKind::Binary { .. }
-                    | ExprKind::Unary {
-                        operator: UnaryOperator::Negate,
-                        ..
-                    }
-                    | ExprKind::Group(_)
-            )
-            && let Some(outcome) = self.type_numeric_tree(context, expression_id, request)?
-        {
-            return Ok(ExpressionPlan::Complete(outcome));
+        if !self.preparing_numeric_tree && NumericTreeFrame::accepts(&kind) {
+            return Ok(ExpressionPlan::NumericTree(Box::new(
+                NumericTreeFrame::new(expression_id, request),
+            )));
         }
         let outcome = match kind {
             ExprKind::Block { statements } => {
@@ -289,21 +287,37 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 operator,
                 left,
                 right,
-            } => self.type_checked_binary(
-                context,
-                CheckedBinaryRequest {
-                    expression: expression_id,
-                    origin,
-                    operator,
-                    left,
-                    right,
-                    ty: request,
-                },
-            )?,
+            } => {
+                return Ok(ExpressionPlan::Numeric {
+                    key,
+                    plan: Box::new(self.prepare_checked_binary(
+                        context,
+                        CheckedBinaryRequest {
+                            expression: expression_id,
+                            origin,
+                            operator,
+                            left,
+                            right,
+                            ty: request,
+                        },
+                    )?),
+                });
+            }
             ExprKind::Unary {
                 operator: UnaryOperator::Negate,
                 operand,
-            } => self.type_checked_negation(context, expression_id, origin, operand, request)?,
+            } => {
+                return Ok(ExpressionPlan::Numeric {
+                    key,
+                    plan: Box::new(self.prepare_checked_negation(
+                        context,
+                        expression_id,
+                        origin,
+                        operand,
+                        request,
+                    )?),
+                });
+            }
             ExprKind::Unary { .. } => {
                 self.unsupported(TypecheckCapability::CheckOperators, source, origin)
             }
