@@ -13,6 +13,9 @@ use eglur_sema::{
 #[path = "body_types/pattern_bindings.rs"]
 mod pattern_bindings;
 
+#[path = "body_types/statements.rs"]
+mod statements;
+
 fn body_capabilities() -> [CompileCapability; 14] {
     [
         CompileCapability::Resolve(ResolveCapability::CollectDeclarations),

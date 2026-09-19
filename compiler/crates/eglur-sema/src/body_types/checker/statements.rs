@@ -1,5 +1,44 @@
 use super::*;
 
+pub(super) enum StatementPlan {
+    Complete(Outcome<BlockStep>),
+    Expression {
+        expression: ExprId,
+        request: TypeRequest,
+        path: NormalContinuation,
+        continuation: StatementContinuation,
+    },
+}
+
+pub(super) enum StatementContinuation {
+    Let(PreparedLet),
+    AssignmentTarget {
+        origin: OriginId,
+        target: ExprId,
+        value: ExprId,
+    },
+    AssignmentValue {
+        origin: OriginId,
+        target: TypedExpression,
+        value_origin: OriginId,
+    },
+    Discard(OriginId),
+    Yield(StmtId),
+    Return {
+        statement: StmtId,
+        value: ExprId,
+        expected: TypeId,
+    },
+}
+
+pub(super) struct PreparedLet {
+    origin: OriginId,
+    mutability: Mutability,
+    pattern: PatternId,
+    initializer: ExprId,
+    expected: Option<TypeId>,
+}
+
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn type_block(
         &mut self,
@@ -68,12 +107,39 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         statement_id: StmtId,
         expected: Option<TypeId>,
     ) -> Result<Outcome<BlockStep>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
+        let mut plan = self.prepare_statement(context, statement_id, expected)?;
+        loop {
+            match plan {
+                StatementPlan::Complete(outcome) => return Ok(outcome),
+                StatementPlan::Expression {
+                    expression,
+                    request,
+                    path,
+                    continuation,
+                } => {
+                    let outcome = self.with_control_path(path, |checker| {
+                        checker.type_expression(
+                            context.module,
+                            context.source,
+                            context.hir,
+                            context.body,
+                            expression,
+                            request,
+                        )
+                    })?;
+                    plan = self.resume_statement(context, continuation, outcome)?;
+                }
+            }
+        }
+    }
+
+    pub(super) fn prepare_statement(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        statement_id: StmtId,
+        expected: Option<TypeId>,
+    ) -> Result<StatementPlan, BodyTypingError> {
+        let BodyContext { source, body, .. } = context;
         let statement = body
             .statement(statement_id)
             .ok_or(BodyTypingError::WrongBodyStatement(statement_id))?;
@@ -84,8 +150,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 pattern,
                 ty,
                 initializer,
-            } => self
-                .type_let_statement(
+            } => {
+                return self.prepare_let_statement(
                     context,
                     LetBindingRequest {
                         origin: statement.origin(),
@@ -95,76 +161,134 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         annotation: *ty,
                         initializer: *initializer,
                     },
-                )?
-                .map(BlockStep::continuing),
-            StmtKind::Assign { target, value } => self
-                .type_assignment(context, statement.origin(), *target, *value)?
-                .map(BlockStep::continuing),
-            StmtKind::Expression(value) => {
-                let value = self.type_expression(
-                    module,
-                    source,
-                    hir,
-                    body,
-                    *value,
-                    TypeRequest::discarded(),
-                )?;
-                self.check_discarded_value(source, statement.origin(), value)?
-                    .map(BlockStep::continuing)
+                );
             }
-            StmtKind::Yield(value) => {
-                let value = self.type_expression(
-                    module,
-                    source,
-                    hir,
-                    body,
-                    *value,
-                    TypeRequest::definitive(expected),
-                )?;
-                if matches!(
-                    &value,
-                    Outcome::Known(value) if value.normal_continuation.is_present()
-                ) {
-                    self.record_control_transfer(
-                        ControlTransferSource::Statement(StatementKey::new(module, statement_id)),
-                        ControlTransferKind::Yield,
-                        self.innermost_yield_target()?,
-                    )?;
+            StmtKind::Assign { target, value } => {
+                let target_expression = body
+                    .expression(*target)
+                    .ok_or(BodyTypingError::WrongBodyExpression(*target))?;
+                if matches!(target_expression.kind(), ExprKind::Hole) {
+                    StatementPlan::Expression {
+                        expression: *value,
+                        request: TypeRequest::definitive(None),
+                        path: NormalContinuation::Present,
+                        continuation: StatementContinuation::Discard(statement.origin()),
+                    }
+                } else {
+                    StatementPlan::Expression {
+                        expression: *target,
+                        request: TypeRequest::definitive(None),
+                        path: NormalContinuation::Present,
+                        continuation: StatementContinuation::AssignmentTarget {
+                            origin: statement.origin(),
+                            target: *target,
+                            value: *value,
+                        },
+                    }
                 }
-                value.map(BlockStep::yielding)
             }
-            StmtKind::Return(value) => self
-                .type_return_statement(
+            StmtKind::Expression(value) => StatementPlan::Expression {
+                expression: *value,
+                request: TypeRequest::discarded(),
+                path: NormalContinuation::Present,
+                continuation: StatementContinuation::Discard(statement.origin()),
+            },
+            StmtKind::Yield(value) => StatementPlan::Expression {
+                expression: *value,
+                request: TypeRequest::definitive(expected),
+                path: NormalContinuation::Present,
+                continuation: StatementContinuation::Yield(statement_id),
+            },
+            StmtKind::Return(value) => {
+                return self.prepare_return_statement(
                     context,
                     ReturnStatementRequest {
                         statement: statement_id,
                         origin: statement.origin(),
                         value: *value,
                     },
-                )?
-                .map(|_| BlockStep::exit()),
+                );
+            }
             StmtKind::While { .. }
             | StmtKind::For { .. }
             | StmtKind::Break
-            | StmtKind::Continue => self
-                .unsupported::<()>(TypecheckCapability::CheckLoops, source, statement.origin())
-                .map(|_| BlockStep::exit()),
-            StmtKind::Invalid => {
-                Outcome::Poisoned(source.invalid_poison(statement.origin()).cloned().ok_or(
+            | StmtKind::Continue => StatementPlan::Complete(
+                self.unsupported::<()>(TypecheckCapability::CheckLoops, source, statement.origin())
+                    .map(|_| BlockStep::exit()),
+            ),
+            StmtKind::Invalid => StatementPlan::Complete(Outcome::Poisoned(
+                source.invalid_poison(statement.origin()).cloned().ok_or(
                     BodyTypingError::MissingOriginSpan {
                         file: source.file(),
                         origin: statement.origin(),
                     },
-                )?)
-            }
+                )?,
+            )),
         })
     }
 
-    pub(super) fn type_let_statement(
+    pub(super) fn resume_statement(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        continuation: StatementContinuation,
+        outcome: Outcome<TypedExpression>,
+    ) -> Result<StatementPlan, BodyTypingError> {
+        let BodyContext { module, source, .. } = context;
+        let result = match continuation {
+            StatementContinuation::Let(request) => self
+                .finish_let_statement(context, request, outcome)?
+                .map(BlockStep::continuing),
+            StatementContinuation::AssignmentTarget {
+                origin,
+                target,
+                value,
+            } => {
+                return self.prepare_assignment_value(context, origin, target, value, outcome);
+            }
+            StatementContinuation::AssignmentValue {
+                origin,
+                target,
+                value_origin,
+            } => self
+                .finish_assignment_value(source, origin, target, value_origin, outcome)?
+                .map(BlockStep::continuing),
+            StatementContinuation::Discard(origin) => self
+                .check_discarded_value(source, origin, outcome)?
+                .map(BlockStep::continuing),
+            StatementContinuation::Yield(statement) => {
+                if matches!(&outcome,
+                    Outcome::Known(value) if value.normal_continuation.is_present())
+                {
+                    self.record_control_transfer(
+                        ControlTransferSource::Statement(StatementKey::new(module, statement)),
+                        ControlTransferKind::Yield,
+                        self.innermost_yield_target()?,
+                    )?;
+                }
+                outcome.map(BlockStep::yielding)
+            }
+            StatementContinuation::Return {
+                statement,
+                value,
+                expected,
+            } => {
+                let outcome = self.check_return_value(source, value, expected, outcome)?;
+                if matches!(&outcome,
+                    Outcome::Known(value) if value.normal_continuation.is_present())
+                {
+                    self.record_return_transfer(module, statement)?;
+                }
+                outcome.map(|_| BlockStep::exit())
+            }
+        };
+        Ok(StatementPlan::Complete(result))
+    }
+
+    fn prepare_let_statement(
         &mut self,
         context: BodyContext<'_, '_>,
         request: LetBindingRequest,
-    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyTypingError> {
         let BodyContext {
             module,
             source,
@@ -182,44 +306,46 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         if let FactState::Poisoned(poison) =
             self.names.fact(ResolutionKey::Pattern { module, pattern })
         {
-            return Ok(Outcome::Poisoned(poison.clone()));
+            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison.clone())));
         }
         if syntax == eglur_hir::LetSyntax::Var {
-            return self
-                .type_error(
-                    source,
-                    origin,
-                    "VAR_DECL_FORBIDDEN",
-                    "var declarations are forbidden in v0.1",
-                    BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned);
+            let poison = self.type_error(
+                source,
+                origin,
+                "VAR_DECL_FORBIDDEN",
+                "var declarations are forbidden in v0.1",
+                BTreeMap::new(),
+            )?;
+            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
         }
         let Some(initializer) = initializer else {
-            return self
-                .type_error(
-                    source,
-                    origin,
-                    "BINDING_TYPE_UNDETERMINED",
-                    "binding type is underdetermined because its initializer is missing",
-                    BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned);
+            let poison = self.type_error(
+                source,
+                origin,
+                "BINDING_TYPE_UNDETERMINED",
+                "binding type is underdetermined because its initializer is missing",
+                BTreeMap::new(),
+            )?;
+            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
         };
         let expected = match annotation {
             Some(annotation) => match self.type_occurrence(source, annotation)? {
                 Outcome::Known(ty) => {
                     match self.normalize_type_at(source, hir.type_ref(annotation).origin(), ty)? {
                         Outcome::Known(ty) => Some(ty),
-                        Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
+                        Outcome::Poisoned(poison) => {
+                            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
+                        }
                         Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => {
-                            return Ok(Outcome::Unperformed);
+                            return Ok(StatementPlan::Complete(Outcome::Unperformed));
                         }
                     }
                 }
-                Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
+                Outcome::Poisoned(poison) => {
+                    return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
+                }
                 Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => {
-                    return Ok(Outcome::Unperformed);
+                    return Ok(StatementPlan::Complete(Outcome::Unperformed));
                 }
             },
             None => None,
@@ -236,7 +362,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 )]),
             )?;
             self.bind_pattern_poison(module, body, pattern, poison.clone())?;
-            return Ok(Outcome::Poisoned(poison));
+            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
         }
         if let Some(pattern_origin) = Self::unsupported_let_pattern(body, pattern)? {
             let poison = self.type_error(
@@ -247,17 +373,42 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 BTreeMap::new(),
             )?;
             self.bind_pattern_poison(module, body, pattern, poison.clone())?;
-            return Ok(Outcome::Poisoned(poison));
+            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
         }
-        let value = self.type_expression(
+        Ok(StatementPlan::Expression {
+            expression: initializer,
+            request: TypeRequest::definitive(expected),
+            path: NormalContinuation::Present,
+            continuation: StatementContinuation::Let(PreparedLet {
+                origin,
+                mutability,
+                pattern,
+                initializer,
+                expected,
+            }),
+        })
+    }
+
+    fn finish_let_statement(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        request: PreparedLet,
+        outcome: Outcome<TypedExpression>,
+    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+        let BodyContext {
             module,
             source,
-            hir,
             body,
+            ..
+        } = context;
+        let PreparedLet {
+            origin,
+            mutability,
+            pattern,
             initializer,
-            TypeRequest::definitive(expected),
-        )?;
-        let value = match value {
+            expected,
+        } = request;
+        let value = match outcome {
             Outcome::Deferred => {
                 return self
                     .type_error(
@@ -299,118 +450,95 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         .map(|outcome| outcome.map(|_| normal_continuation))
     }
 
-    pub(super) fn type_assignment(
+    fn prepare_assignment_value(
         &mut self,
         context: BodyContext<'_, '_>,
         origin: OriginId,
         target: ExprId,
         value: ExprId,
-    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+        outcome: Outcome<TypedExpression>,
+    ) -> Result<StatementPlan, BodyTypingError> {
         let BodyContext {
             module,
             source,
-            hir,
             body,
+            ..
         } = context;
-        let target_expression = body
-            .expression(target)
-            .ok_or(BodyTypingError::WrongBodyExpression(target))?;
-        if matches!(target_expression.kind(), ExprKind::Hole) {
-            let value = self.type_expression(
-                module,
-                source,
-                hir,
-                body,
-                value,
-                TypeRequest::definitive(None),
-            )?;
-            return self.check_discarded_value(source, origin, value);
-        }
-        let target_value = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
-            target,
-            TypeRequest::definitive(None),
-        )?;
-        let target_value = match target_value {
+        let target_value = match outcome {
             Outcome::Known(value) => value,
             Outcome::NotApplicable => {
-                return self
-                    .type_error(
-                        source,
-                        origin,
-                        "ASSIGN_TARGET_NOT_ASSIGNABLE",
-                        "assignment target is not assignable",
-                        BTreeMap::new(),
-                    )
-                    .map(Outcome::Poisoned);
-            }
-            other => return Ok(other.map(|_| NormalContinuation::Absent)),
-        };
-        if let FactState::Known(member) = self.members.state(&ExpressionKey::new(module, target))
-            && member.kind == MemberKind::Property
-        {
-            return self
-                .type_error(
-                    source,
-                    origin,
-                    "PROPERTY_ASSIGN_FORBIDDEN",
-                    "property assignment is forbidden; use its explicit setter",
-                    BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned);
-        }
-        let Some(place) = target_value.place.as_ref() else {
-            return self
-                .type_error(
+                let poison = self.type_error(
                     source,
                     origin,
                     "ASSIGN_TARGET_NOT_ASSIGNABLE",
                     "assignment target is not assignable",
                     BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned);
+                )?;
+                return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
+            }
+            other => return Ok(StatementPlan::Complete(other.map(|_| BlockStep::exit()))),
+        };
+        if let FactState::Known(member) = self.members.state(&ExpressionKey::new(module, target))
+            && member.kind == MemberKind::Property
+        {
+            let poison = self.type_error(
+                source,
+                origin,
+                "PROPERTY_ASSIGN_FORBIDDEN",
+                "property assignment is forbidden; use its explicit setter",
+                BTreeMap::new(),
+            )?;
+            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
+        }
+        let Some(place) = target_value.place.as_ref() else {
+            let poison = self.type_error(
+                source,
+                origin,
+                "ASSIGN_TARGET_NOT_ASSIGNABLE",
+                "assignment target is not assignable",
+                BTreeMap::new(),
+            )?;
+            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
         };
         if !place.writable {
-            return self
-                .type_error(
-                    source,
-                    origin,
-                    "IMMUTABLE_BINDING_ASSIGN",
-                    "immutable assignment target cannot be written",
-                    BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned);
+            let poison = self.type_error(
+                source,
+                origin,
+                "IMMUTABLE_BINDING_ASSIGN",
+                "immutable assignment target cannot be written",
+                BTreeMap::new(),
+            )?;
+            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
         }
         let value_origin = body
             .expression(value)
             .ok_or(BodyTypingError::WrongBodyExpression(value))?
             .origin();
-        let value = self.with_control_path(target_value.normal_continuation, |checker| {
-            checker.type_expression(
-                module,
-                source,
-                hir,
-                body,
-                value,
-                TypeRequest::definitive(Some(target_value.ty)),
-            )
-        })?;
-        match value {
+        Ok(StatementPlan::Expression {
+            expression: value,
+            request: TypeRequest::definitive(Some(target_value.ty)),
+            path: target_value.normal_continuation,
+            continuation: StatementContinuation::AssignmentValue {
+                origin,
+                target: target_value,
+                value_origin,
+            },
+        })
+    }
+
+    fn finish_assignment_value(
+        &mut self,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
+        target: TypedExpression,
+        value_origin: OriginId,
+        outcome: Outcome<TypedExpression>,
+    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+        match outcome {
             Outcome::Known(value)
-                if self
-                    .signatures
-                    .types()
-                    .is_assignable(value.ty, target_value.ty)? =>
+                if self.signatures.types().is_assignable(value.ty, target.ty)? =>
             {
-                if self
-                    .signatures
-                    .types()
-                    .ownership_root(target_value.ty)?
-                    .is_some()
-                {
+                if self.signatures.types().ownership_root(target.ty)?.is_some() {
                     return self
                         .type_error(
                             source,
@@ -422,38 +550,74 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .map(Outcome::Poisoned);
                 }
                 Ok(Outcome::Known(
-                    target_value
-                        .normal_continuation
-                        .strict(value.normal_continuation),
+                    target.normal_continuation.strict(value.normal_continuation),
                 ))
             }
             Outcome::Known(value) => self
-                .assignment_mismatch(source, value_origin, target_value.ty, value.ty)
+                .assignment_mismatch(source, value_origin, target.ty, value.ty)
                 .map(Outcome::Poisoned),
             other => Ok(other.map(|_| NormalContinuation::Absent)),
         }
     }
 
-    pub(super) fn type_exit_value(
+    fn prepare_return_statement(
         &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        value: ExprId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let expected = self
-            .current_return
-            .unwrap_or(self.primitive(PrimitiveType::Unit)?);
-        let outcome = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
+        context: BodyContext<'_, '_>,
+        request: ReturnStatementRequest,
+    ) -> Result<StatementPlan, BodyTypingError> {
+        let BodyContext { module, source, .. } = context;
+        let ReturnStatementRequest {
+            statement,
+            origin,
             value,
-            TypeRequest::definitive(Some(expected)),
-        )?;
-        self.check_return_value(source, value, expected, outcome)
+        } = request;
+        let Some(expected) = self.current_return else {
+            let poison = self.type_error(
+                source,
+                origin,
+                "RETURN_OUTSIDE_FUNCTION",
+                "return is outside a function body",
+                BTreeMap::new(),
+            )?;
+            return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
+        };
+        let unit = self.primitive(PrimitiveType::Unit)?;
+        match (value, expected == unit) {
+            (None, true) => {
+                self.record_return_transfer(module, statement)?;
+                Ok(StatementPlan::Complete(Outcome::Known(BlockStep::exit())))
+            }
+            (None, false) => {
+                let poison = self.type_error(
+                    source,
+                    origin,
+                    "RETURN_VALUE_REQUIRED",
+                    "return value is required by the function return type",
+                    BTreeMap::new(),
+                )?;
+                Ok(StatementPlan::Complete(Outcome::Poisoned(poison)))
+            }
+            (Some(_), true) => {
+                let poison = self.type_error(
+                    source,
+                    origin,
+                    "RETURN_VALUE_FORBIDDEN",
+                    "return value is forbidden for Unit return type",
+                    BTreeMap::new(),
+                )?;
+                Ok(StatementPlan::Complete(Outcome::Poisoned(poison)))
+            }
+            (Some(value), false) => Ok(StatementPlan::Expression {
+                expression: value,
+                request: TypeRequest::definitive(Some(expected)),
+                path: NormalContinuation::Present,
+                continuation: StatementContinuation::Return {
+                    statement,
+                    value,
+                    expected,
+                },
+            }),
+        }
     }
 
     pub(super) fn check_discarded_value(
@@ -480,70 +644,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Deferred => Ok(Outcome::Deferred),
             Outcome::Unperformed => Ok(Outcome::Unperformed),
             Outcome::NotApplicable => Ok(Outcome::NotApplicable),
-        }
-    }
-
-    pub(super) fn type_return_statement(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        request: ReturnStatementRequest,
-    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        let ReturnStatementRequest {
-            statement,
-            origin,
-            value,
-        } = request;
-        let Some(expected) = self.current_return else {
-            return self
-                .type_error(
-                    source,
-                    origin,
-                    "RETURN_OUTSIDE_FUNCTION",
-                    "return is outside a function body",
-                    BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned);
-        };
-        let unit = self.primitive(PrimitiveType::Unit)?;
-        match (value, expected == unit) {
-            (None, true) => {
-                self.record_return_transfer(module, statement)?;
-                Ok(Outcome::Known(NormalContinuation::Absent))
-            }
-            (None, false) => self
-                .type_error(
-                    source,
-                    origin,
-                    "RETURN_VALUE_REQUIRED",
-                    "return value is required by the function return type",
-                    BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned),
-            (Some(_), true) => self
-                .type_error(
-                    source,
-                    origin,
-                    "RETURN_VALUE_FORBIDDEN",
-                    "return value is forbidden for Unit return type",
-                    BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned),
-            (Some(value), false) => {
-                let outcome = self.type_exit_value(module, source, hir, body, value)?;
-                if matches!(
-                    &outcome,
-                    Outcome::Known(value) if value.normal_continuation.is_present()
-                ) {
-                    self.record_return_transfer(module, statement)?;
-                }
-                Ok(outcome.map(|_| NormalContinuation::Absent))
-            }
         }
     }
 
