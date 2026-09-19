@@ -8,6 +8,9 @@ use eglur_sema::{
     TypedOwnershipOperationKind,
 };
 
+#[path = "ownership/traversal.rs"]
+mod traversal;
+
 fn body_capabilities() -> [CompileCapability; 14] {
     [
         CompileCapability::Resolve(ResolveCapability::CollectDeclarations),
