@@ -8,11 +8,17 @@ fn check_invocations(source: &str, profile: &SupportProfile, expected: usize) {
     let analysis = session.resolve(profile, Some(&catalog)).unwrap();
     let resolution = analysis.resolution().unwrap();
 
-    assert_eq!(resolution.body_types().invocations().len(), expected);
+    let count = resolution.body_types().invocations().len();
     assert!(!analysis.trace().entries().iter().any(|entry| {
         entry.capability() == CompileCapability::Typecheck(TypecheckCapability::AnalyzeTensorSource)
     }));
-    assert!(diagnostic_codes(&session.into_diagnostics(None)).is_empty());
+    let diagnostics = session.into_diagnostics(None);
+    assert!(
+        diagnostic_codes(&diagnostics).is_empty(),
+        "{:?}",
+        diagnostics.diagnostics()
+    );
+    assert_eq!(count, expected);
 }
 
 #[test]
@@ -122,4 +128,122 @@ fn deep_unsupported_argument_does_not_become_a_known_call_result() {
     ));
     assert_eq!(resolution.body_types().invocations().len(), 0);
     assert!(diagnostic_codes(&session.into_diagnostics(None)).is_empty());
+}
+
+#[test]
+fn nested_inherent_method_receivers_typecheck_on_the_default_stack() {
+    let depth = 255;
+    let source = format!(
+        "struct Counter {{\n\
+           overload fn hop(self: Self) -> Self = self\n\
+           overload fn hop(self: Self, unused: i64) -> Self = self\n\
+         }}\nfn f(counter: Counter) -> Counter = counter{}\n",
+        ".hop()".repeat(depth),
+    );
+    check_invocations(&source, &SupportProfile::semantic_core_v1(), depth);
+}
+
+#[test]
+fn nested_inherent_method_arguments_typecheck_on_the_default_stack() {
+    let depth = 255;
+    let source = format!(
+        "struct Counter {{ fn relay(self: Self, value: i64) -> i64 = value }}\n\
+         fn f(counter: Counter, x: i64) -> i64 = {}x{}\n",
+        "counter.relay(".repeat(depth),
+        ")".repeat(depth),
+    );
+    check_invocations(&source, &SupportProfile::semantic_core_v1(), depth);
+}
+
+#[test]
+fn nested_trait_method_receivers_typecheck_on_the_default_stack() {
+    let depth = 255;
+    let source = format!(
+        "trait Hop {{ fn hop(self: Self) -> Self }}\n\
+         struct Counter {{}}\n\
+         impl Hop for Counter {{ fn hop(self: Self) -> Self = self }}\n\
+         fn f(counter: Counter) -> Counter = counter{}\n",
+        ".hop()".repeat(depth),
+    );
+    check_invocations(&source, &SupportProfile::semantic_core_v1(), depth);
+}
+
+#[test]
+fn nested_overload_arguments_typecheck_on_the_default_stack() {
+    let depth = 255;
+    let source = format!(
+        "overload fn pick(value: i64) -> i64 = value\n\
+         overload fn pick(value: Str) -> Str = value\n\
+         fn f(x: i64) -> i64 = {}x{}\n",
+        "pick(".repeat(depth),
+        ")".repeat(depth),
+    );
+    check_invocations(&source, &SupportProfile::semantic_core_v1(), depth);
+}
+
+#[test]
+fn nested_generic_overloads_preserve_explicit_and_inferred_selection() {
+    let depth = 255;
+    for call in ["pick(", "pick::[i64]("] {
+        let source = format!(
+            "struct Wrap[T] {{}}\n\
+             overload fn pick[T](value: Wrap[T]) -> Wrap[T] = value\n\
+             overload fn pick(value: Str) -> Str = value\n\
+             fn f(x: Wrap[i64]) -> Wrap[i64] = {}x{}\n",
+            call.repeat(depth),
+            ")".repeat(depth),
+        );
+        check_invocations(&source, &SupportProfile::semantic_core_v1(), depth);
+    }
+}
+
+#[test]
+fn mixed_method_overload_and_ordinary_calls_share_the_work_stack() {
+    let depth = 100;
+    let mut expression = "x".to_owned();
+    for index in 0..depth {
+        expression = match index % 3 {
+            0 => format!("id({{ yield {expression} }})"),
+            1 => format!("counter.relay({{ yield {expression} }})"),
+            _ => format!("pick({{ yield {expression} }})"),
+        };
+    }
+    let source = format!(
+        "fn id[T](value: T) -> T = value\n\
+         struct Counter {{ fn relay(self: Self, value: i64) -> i64 = value }}\n\
+         overload fn pick(value: i64) -> i64 = value\n\
+         overload fn pick(value: Str) -> Str = value\n\
+         fn f(counter: Counter, x: i64) -> i64 = {expression}\n"
+    );
+    check_invocations(&source, &SupportProfile::semantic_core_v1(), depth);
+}
+
+#[test]
+fn deep_overload_failure_keeps_one_error_and_no_invocation_facts() {
+    let source = format!(
+        "overload fn pick(value: i64) -> i64 = value\n\
+         overload fn pick(value: Str) -> Str = value\n\
+         fn f() -> i64 = {}true{}\n",
+        "pick(".repeat(255),
+        ")".repeat(255),
+    );
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let mut session = session(&source);
+    let analysis = session
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+
+    assert_eq!(
+        analysis
+            .resolution()
+            .unwrap()
+            .body_types()
+            .invocations()
+            .len(),
+        0
+    );
+    assert_eq!(
+        diagnostic_codes(&session.into_diagnostics(None)),
+        ["CALL_ARG_TYPE_MISMATCH"]
+    );
 }

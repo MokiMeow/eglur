@@ -1,4 +1,5 @@
 use super::application::ApplicationPlan;
+use super::dispatch::DispatchContinuation;
 use super::*;
 
 pub(super) enum InvocationPlan {
@@ -7,10 +8,17 @@ pub(super) enum InvocationPlan {
         plan: ApplicationPlan,
         continuation: Box<InvocationFrame>,
     },
-    Receiver {
+    Expression {
         expression: ExprId,
-        continuation: Box<ReduceByFrame>,
+        request: TypeRequest,
+        path: NormalContinuation,
+        continuation: InvocationContinuation,
     },
+}
+
+pub(super) enum InvocationContinuation {
+    ReduceBy(Box<ReduceByFrame>),
+    Dispatch(DispatchContinuation),
 }
 
 pub(super) struct InvocationFrame {
@@ -23,6 +31,10 @@ pub(super) struct InvocationFrame {
 
 enum InvocationContract {
     Callable(CallableSignature),
+    Method {
+        candidate: Box<MethodCandidate>,
+        member_origin: OriginId,
+    },
     Constructor {
         target: CanonicalTarget,
         parameters: Box<[GenericParameterId]>,
@@ -33,6 +45,7 @@ impl InvocationContract {
     fn generic_parameters(&self) -> &[GenericParameterId] {
         match self {
             Self::Callable(callable) => callable.generic_parameters(),
+            Self::Method { candidate, .. } => &candidate.explicit_parameters,
             Self::Constructor { parameters, .. } => parameters,
         }
     }
@@ -68,11 +81,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .expression(call.callee)
             .ok_or(BodyTypingError::WrongBodyExpression(call.callee))?;
         if let ExprKind::Member { receiver, member } = callee.kind() {
-            return self
-                .type_method_call(
-                    context, expression, origin, call, request, *receiver, member,
-                )
-                .map(InvocationPlan::Complete);
+            return self.prepare_method_call(
+                context,
+                MethodCallRequest {
+                    expression,
+                    origin,
+                    call,
+                    receiver: *receiver,
+                    member,
+                    ty: request,
+                },
+            );
         }
 
         let callee_key = ResolutionKey::Expression {
@@ -95,8 +114,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
         if targets.len() > 1 {
             return self
-                .type_overloaded_call(context, expression, origin, call, request, targets)
-                .map(InvocationPlan::Complete);
+                .prepare_overloaded_call(context, expression, origin, call, request, targets);
         }
         let target = targets
             .first()
@@ -333,6 +351,76 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         })
     }
 
+    pub(super) fn prepare_selected_method(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        request: MethodCallRequest<'_>,
+        candidate: MethodCandidate,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
+        let bindings =
+            Self::bind_method_argument_indices(&candidate.callable, &request.call.arguments)
+                .map_err(|_| BodyTypingError::InconsistentMethodBinding)?;
+        let receiver_parameter = candidate.callable.parameters().first().ok_or(
+            BodyTypingError::MissingMethodReceiver(candidate.callable.id()),
+        )?;
+        let mut slots = Vec::with_capacity(candidate.callable.parameters().len());
+        slots.push(ApplicationSlot {
+            name: receiver_parameter.name().unwrap_or("self").into(),
+            template: receiver_parameter.ty(),
+            value: request.receiver,
+            origin: self.expression_origin(source, request.receiver)?,
+            related: self.parameter_span(&candidate.callable, receiver_parameter)?,
+            evaluation_order: 0,
+            receiver_adjustment: true,
+        });
+        for (parameter_index, parameter) in candidate.callable.parameters()[1..].iter().enumerate()
+        {
+            let argument_index = bindings[parameter_index];
+            let argument = &request.call.arguments[argument_index];
+            slots.push(ApplicationSlot {
+                name: parameter.name().map_or_else(
+                    || format!("#{}", parameter_index + 1).into_boxed_str(),
+                    Box::<str>::from,
+                ),
+                template: parameter.ty(),
+                value: argument.value,
+                origin: argument.origin,
+                related: self.parameter_span(&candidate.callable, parameter)?,
+                evaluation_order: argument_index + 1,
+                receiver_adjustment: false,
+            });
+        }
+        let plan = self.prepare_application(
+            source,
+            ApplicationRequest {
+                origin: request.origin,
+                generic_parameters: candidate.callable.generic_parameters(),
+                slots: &slots,
+                result_template: candidate.callable.result(),
+                explicit_arguments: &request.call.type_arguments,
+                explicit_parameters: Some(&candidate.explicit_parameters),
+                preset_replacements: Some(&candidate.preset_replacements),
+                allowed_ownership_parameter: None,
+                ty: request.ty,
+                defer_underconstrained: false,
+            },
+        )?;
+        Ok(InvocationPlan::Application {
+            plan,
+            continuation: Box::new(InvocationFrame {
+                expression: request.expression,
+                origin: request.origin,
+                callee: request.call.callee,
+                slots,
+                contract: InvocationContract::Method {
+                    candidate: Box::new(candidate),
+                    member_origin: request.member.origin(),
+                },
+            }),
+        })
+    }
+
     pub(super) fn finish_invocation(
         &mut self,
         context: BodyContext<'_, '_>,
@@ -363,12 +451,31 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             frame.contract.generic_parameters(),
             &application.replacements,
         )?;
-        let target = match frame.contract {
+        let target = match &frame.contract {
             InvocationContract::Callable(callable) => InvocationTarget::Callable(
                 self.intern_callable_instance(callable.id(), application.substitution)?,
             ),
+            InvocationContract::Method { candidate, .. } => {
+                let arguments = candidate
+                    .explicit_parameters
+                    .iter()
+                    .map(|parameter| {
+                        application
+                            .replacements
+                            .get(parameter)
+                            .copied()
+                            .ok_or_else(|| {
+                                BodyTypingError::UnavailableGenericParameter(parameter.clone())
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let substitution = self.signatures.types_mut().intern_substitution(arguments)?;
+                InvocationTarget::Callable(
+                    self.intern_callable_instance(candidate.callable.id(), substitution)?,
+                )
+            }
             InvocationContract::Constructor { target, .. } => InvocationTarget::Constructor {
-                declaration: target,
+                declaration: target.clone(),
                 substitution: application.substitution,
             },
         };
@@ -376,6 +483,30 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             key,
             SemanticFact::Known(invocation_fact(target, &frame.slots)),
         )?;
+
+        if let InvocationContract::Method {
+            candidate,
+            member_origin,
+        } = &frame.contract
+            && let MethodDispatchTemplate::Trait {
+                subject,
+                trait_ref,
+                method,
+            } = &candidate.dispatch
+        {
+            let trait_ref = self.specialize_trait_ref(trait_ref, &application.replacements)?;
+            let owner = self
+                .current_owner
+                .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
+            self.method_dispatches.push(PendingMethodDispatch {
+                invocation: key,
+                owner,
+                location: SemanticLocation::origin(source.file(), *member_origin),
+                subject: *subject,
+                trait_ref,
+                method: method.clone(),
+            });
+        }
 
         let callee_ty = self.signatures.types_mut().callable(
             application.specialized_slots.iter().copied(),
@@ -446,18 +577,36 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin,
             )));
         }
-        Ok(InvocationPlan::Receiver {
+        Ok(InvocationPlan::Expression {
             expression: candidate.receiver,
-            continuation: Box::new(ReduceByFrame {
+            request: TypeRequest::definitive(None),
+            path: NormalContinuation::Present,
+            continuation: InvocationContinuation::ReduceBy(Box::new(ReduceByFrame {
                 expression,
                 origin,
                 candidate,
                 request,
-            }),
+            })),
         })
     }
 
-    pub(super) fn resume_reduce_by_receiver(
+    pub(super) fn resume_invocation(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        continuation: InvocationContinuation,
+        outcome: Outcome<TypedExpression>,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        match continuation {
+            InvocationContinuation::ReduceBy(frame) => {
+                self.resume_reduce_by_receiver(context, *frame, outcome)
+            }
+            InvocationContinuation::Dispatch(continuation) => {
+                self.resume_dispatch(context, continuation, outcome)
+            }
+        }
+    }
+
+    fn resume_reduce_by_receiver(
         &mut self,
         context: BodyContext<'_, '_>,
         frame: ReduceByFrame,

@@ -39,6 +39,7 @@ mod calls;
 mod constants;
 mod construction;
 mod control;
+mod dispatch;
 mod expression;
 mod failure;
 mod invocation;
