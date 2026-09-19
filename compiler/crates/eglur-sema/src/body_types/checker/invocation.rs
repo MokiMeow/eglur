@@ -24,29 +24,61 @@ pub(super) enum InvocationContinuation {
 pub(super) struct InvocationFrame {
     expression: ExprId,
     origin: OriginId,
-    callee: ExprId,
     slots: Vec<ApplicationSlot>,
     contract: InvocationContract,
 }
 
+impl InvocationFrame {
+    pub(super) fn construction(
+        expression: ExprId,
+        origin: OriginId,
+        slots: Vec<ApplicationSlot>,
+        target: CanonicalTarget,
+        parameters: Box<[GenericParameterId]>,
+    ) -> Self {
+        Self {
+            expression,
+            origin,
+            slots,
+            contract: InvocationContract::Constructor {
+                target,
+                parameters,
+                callee: None,
+            },
+        }
+    }
+}
+
 enum InvocationContract {
-    Callable(CallableSignature),
+    Callable {
+        callable: CallableSignature,
+        callee: ExprId,
+    },
     Method {
         candidate: Box<MethodCandidate>,
         member_origin: OriginId,
+        callee: ExprId,
     },
     Constructor {
         target: CanonicalTarget,
         parameters: Box<[GenericParameterId]>,
+        callee: Option<ExprId>,
     },
 }
 
 impl InvocationContract {
     fn generic_parameters(&self) -> &[GenericParameterId] {
         match self {
-            Self::Callable(callable) => callable.generic_parameters(),
+            Self::Callable { callable, .. } => callable.generic_parameters(),
             Self::Method { candidate, .. } => &candidate.explicit_parameters,
             Self::Constructor { parameters, .. } => parameters,
+        }
+    }
+
+    fn callee(&self) -> Option<ExprId> {
+        match self {
+            Self::Callable { callee, .. } | Self::Method { callee, .. } => Some(*callee),
+            Self::Constructor { callee, .. } => *callee,
         }
     }
 }
@@ -201,9 +233,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             continuation: Box::new(InvocationFrame {
                 expression,
                 origin,
-                callee: call.callee,
                 slots,
-                contract: InvocationContract::Callable(callable),
+                contract: InvocationContract::Callable {
+                    callable,
+                    callee: call.callee,
+                },
             }),
         })
     }
@@ -341,9 +375,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             continuation: Box::new(InvocationFrame {
                 expression,
                 origin,
-                callee: call.callee,
                 slots,
                 contract: InvocationContract::Constructor {
+                    callee: Some(call.callee),
                     target: target.clone(),
                     parameters: constructor.generic_parameters().into(),
                 },
@@ -411,9 +445,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             continuation: Box::new(InvocationFrame {
                 expression: request.expression,
                 origin: request.origin,
-                callee: request.call.callee,
                 slots,
                 contract: InvocationContract::Method {
+                    callee: request.call.callee,
                     candidate: Box::new(candidate),
                     member_origin: request.member.origin(),
                 },
@@ -432,7 +466,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
 
         let BodyContext { module, source, .. } = context;
-        if let InvocationContract::Callable(callable) = &frame.contract
+        if let InvocationContract::Callable { callable, .. } = &frame.contract
             && let Some(poison) = self.check_callable_requirements(
                 source,
                 frame.origin,
@@ -452,7 +486,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             &application.replacements,
         )?;
         let target = match &frame.contract {
-            InvocationContract::Callable(callable) => InvocationTarget::Callable(
+            InvocationContract::Callable { callable, .. } => InvocationTarget::Callable(
                 self.intern_callable_instance(callable.id(), application.substitution)?,
             ),
             InvocationContract::Method { candidate, .. } => {
@@ -487,6 +521,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         if let InvocationContract::Method {
             candidate,
             member_origin,
+            ..
         } = &frame.contract
             && let MethodDispatchTemplate::Trait {
                 subject,
@@ -508,14 +543,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             });
         }
 
-        let callee_ty = self.signatures.types_mut().callable(
-            application.specialized_slots.iter().copied(),
-            application.result,
-        )?;
-        self.record_expression(
-            ExpressionKey::new(module, frame.callee),
-            Outcome::Known(self.value_expression(callee_ty)),
-        )?;
+        if let Some(callee) = frame.contract.callee() {
+            let callee_ty = self.signatures.types_mut().callable(
+                application.specialized_slots.iter().copied(),
+                application.result,
+            )?;
+            self.record_expression(
+                ExpressionKey::new(module, callee),
+                Outcome::Known(self.value_expression(callee_ty)),
+            )?;
+        }
         Ok(Outcome::Known(self.value_expression_with_continuation(
             application.result,
             application.normal_continuation,

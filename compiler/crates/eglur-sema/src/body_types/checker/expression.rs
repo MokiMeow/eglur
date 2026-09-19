@@ -272,27 +272,37 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     )),
                 });
             }
-            ExprKind::StructLiteral { path, fields } => self.type_struct_literal(
-                context,
-                StructLiteralRequest {
-                    expression: expression_id,
-                    origin,
-                    head_origin: path.origin(),
-                    fields: &fields,
-                    ty: request,
-                },
-            )?,
-            ExprKind::VariantConstructor { path, payload } => self.type_variant_constructor(
-                context,
-                VariantConstructorRequest {
-                    expression: expression_id,
-                    origin,
-                    head_origin: path.origin(),
-                    qualified: path.is_qualified(),
-                    payload: &payload,
-                    ty: request,
-                },
-            )?,
+            ExprKind::StructLiteral { path, fields } => {
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_struct_literal(
+                        context,
+                        StructLiteralRequest {
+                            expression: expression_id,
+                            origin,
+                            head_origin: path.origin(),
+                            fields: &fields,
+                            ty: request,
+                        },
+                    )?),
+                });
+            }
+            ExprKind::VariantConstructor { path, payload } => {
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_variant_constructor(
+                        context,
+                        VariantConstructorRequest {
+                            expression: expression_id,
+                            origin,
+                            head_origin: path.origin(),
+                            qualified: path.is_qualified(),
+                            payload: &payload,
+                            ty: request,
+                        },
+                    )?),
+                });
+            }
             ExprKind::Invalid => Outcome::Poisoned(source.invalid_poison(origin).cloned().ok_or(
                 BodyTypingError::MissingOriginSpan {
                     file: source.file(),

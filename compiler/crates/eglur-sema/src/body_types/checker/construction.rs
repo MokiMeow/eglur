@@ -1,31 +1,34 @@
+use super::invocation::{InvocationFrame, InvocationPlan};
 use super::*;
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn type_struct_literal(
+    pub(super) fn prepare_struct_literal(
         &mut self,
         context: BodyContext<'_, '_>,
         request: StructLiteralRequest<'_>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyTypingError> {
         let BodyContext { module, source, .. } = context;
         let expression = request.expression;
         let origin = request.origin;
         let target = match self.constructor_target(module, source, expression, origin)? {
             Outcome::Known(target) => target,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
+            Outcome::Poisoned(poison) => {
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
+            }
+            Outcome::Unperformed => return Ok(InvocationPlan::Complete(Outcome::Unperformed)),
+            Outcome::Deferred => return Ok(InvocationPlan::Complete(Outcome::Deferred)),
+            Outcome::NotApplicable => return Ok(InvocationPlan::Complete(Outcome::NotApplicable)),
         };
-        self.type_resolved_struct_literal(context, request, target)
+        self.prepare_resolved_struct_literal(context, request, target)
     }
 
-    pub(super) fn type_resolved_struct_literal(
+    pub(super) fn prepare_resolved_struct_literal(
         &mut self,
         context: BodyContext<'_, '_>,
         request: StructLiteralRequest<'_>,
         target: ConstructorTarget,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext { module, source, .. } = context;
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
         let StructLiteralRequest {
             expression,
             origin,
@@ -39,7 +42,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             &target,
             ResolvedTargetKind::Struct,
         )? {
-            return Ok(Outcome::Poisoned(poison));
+            return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
         }
         let ConstructorTarget {
             declaration: target,
@@ -64,20 +67,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             CompileCapability::Typecheck(TypecheckCapability::ResolveMembers),
             SemanticLocation::origin(source.file(), origin),
         ) {
-            return Ok(Outcome::Unperformed);
+            return Ok(InvocationPlan::Complete(Outcome::Unperformed));
         }
         let owner_name = self.target_label(&target);
         let mut initializers = BTreeMap::<CanonicalTarget, usize>::new();
         for (index, field) in fields.iter().enumerate() {
             let Some(name) = field.name.text() else {
-                return Ok(Outcome::Poisoned(
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(
                     source.invalid_poison(field.name.origin()).cloned().ok_or(
                         BodyTypingError::MissingOriginSpan {
                             file: source.file(),
                             origin: field.name.origin(),
                         },
                     )?,
-                ));
+                )));
             };
             if self.find_named_target(&properties, name).is_some() {
                 return self
@@ -89,7 +92,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         &owner_name,
                         ("property", name),
                     )
-                    .map(Outcome::Poisoned);
+                    .map(Outcome::Poisoned)
+                    .map(InvocationPlan::Complete);
             }
             let Some(declaration) = self.find_named_target(&storage_fields, name) else {
                 return self
@@ -101,7 +105,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         &owner_name,
                         ("field", name),
                     )
-                    .map(Outcome::Poisoned);
+                    .map(Outcome::Poisoned)
+                    .map(InvocationPlan::Complete);
             };
             if initializers.insert(declaration, index).is_some() {
                 return self
@@ -113,7 +118,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         &owner_name,
                         ("field", name),
                     )
-                    .map(Outcome::Poisoned);
+                    .map(Outcome::Poisoned)
+                    .map(InvocationPlan::Complete);
             }
         }
         if let Some(missing) = storage_fields
@@ -130,15 +136,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     &owner_name,
                     ("field", &name),
                 )
-                .map(Outcome::Poisoned);
+                .map(Outcome::Poisoned)
+                .map(InvocationPlan::Complete);
         }
 
         let mut slots = Vec::with_capacity(storage_fields.len());
         for field_target in &storage_fields {
             let template = match self.signatures.declaration(field_target) {
                 FactState::Known(DeclarationSignature::Field { ty }) => *ty,
-                FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
-                FactState::Unperformed => return Ok(Outcome::Unperformed),
+                FactState::Poisoned(poison) => {
+                    return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
+                }
+                FactState::Unperformed => {
+                    return Ok(InvocationPlan::Complete(Outcome::Unperformed));
+                }
                 FactState::Known(_) | FactState::NotApplicable => {
                     return Err(BodyTypingError::UnexpectedSignatureKind {
                         target: field_target.clone(),
@@ -158,8 +169,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             });
         }
         let result_template = self.nominal_template(target.clone(), &generic_parameters)?;
-        let application = match self.resolve_application(
-            context,
+        let plan = self.prepare_application(
+            source,
             ApplicationRequest {
                 origin,
                 generic_parameters: &generic_parameters,
@@ -172,41 +183,24 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 ty: request,
                 defer_underconstrained: false,
             },
-        )? {
-            Outcome::Known(application) => application,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
-        };
-        self.record_trait_obligations(
-            ExpressionKey::new(module, expression),
-            source,
-            origin,
-            &generic_parameters,
-            &application.replacements,
         )?;
-        self.invocations.insert(
-            ExpressionKey::new(module, expression),
-            SemanticFact::Known(invocation_fact(
-                InvocationTarget::Constructor {
-                    declaration: target,
-                    substitution: application.substitution,
-                },
-                &slots,
+        Ok(InvocationPlan::Application {
+            plan,
+            continuation: Box::new(InvocationFrame::construction(
+                expression,
+                origin,
+                slots,
+                target,
+                generic_parameters.into_boxed_slice(),
             )),
-        )?;
-        Ok(Outcome::Known(self.value_expression_with_continuation(
-            application.result,
-            application.normal_continuation,
-        )))
+        })
     }
 
-    pub(super) fn type_variant_constructor(
+    pub(super) fn prepare_variant_constructor(
         &mut self,
         context: BodyContext<'_, '_>,
         request: VariantConstructorRequest<'_>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyTypingError> {
         let BodyContext { module, source, .. } = context;
         let VariantConstructorRequest {
             expression,
@@ -218,15 +212,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         } = request;
         let target = match self.constructor_target(module, source, expression, origin)? {
             Outcome::Known(target) => target,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
+            Outcome::Poisoned(poison) => {
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
+            }
+            Outcome::Unperformed => return Ok(InvocationPlan::Complete(Outcome::Unperformed)),
+            Outcome::Deferred => return Ok(InvocationPlan::Complete(Outcome::Deferred)),
+            Outcome::NotApplicable => return Ok(InvocationPlan::Complete(Outcome::NotApplicable)),
         };
         if let ConstructorPayload::Named(fields) = payload
             && target.kind.is_type_namespace_target()
         {
-            return self.type_resolved_struct_literal(
+            return self.prepare_resolved_struct_literal(
                 context,
                 StructLiteralRequest {
                     expression,
@@ -244,7 +240,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             &target,
             ResolvedTargetKind::VariantConstructor,
         )? {
-            return Ok(Outcome::Poisoned(poison));
+            return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
         };
         let ConstructorTarget {
             declaration: target,
@@ -279,9 +275,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         generic_parameters, ..
                     }) => generic_parameters.to_vec(),
                     FactState::Poisoned(poison) => {
-                        return Ok(Outcome::Poisoned(poison.clone()));
+                        return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
                     }
-                    FactState::Unperformed => return Ok(Outcome::Unperformed),
+                    FactState::Unperformed => {
+                        return Ok(InvocationPlan::Complete(Outcome::Unperformed));
+                    }
                     FactState::Known(_) | FactState::NotApplicable => {
                         return Err(BodyTypingError::UnexpectedSignatureKind {
                             target: CanonicalTarget::Source(owner),
@@ -311,14 +309,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
         let slots = match self.bind_constructor_slots(source, origin, &target, &shape, payload)? {
             Outcome::Known(slots) => slots,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
+            Outcome::Poisoned(poison) => {
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
+            }
+            Outcome::Unperformed => return Ok(InvocationPlan::Complete(Outcome::Unperformed)),
+            Outcome::Deferred => return Ok(InvocationPlan::Complete(Outcome::Deferred)),
+            Outcome::NotApplicable => return Ok(InvocationPlan::Complete(Outcome::NotApplicable)),
         };
         let deferred_reserved = !qualified && self.is_reserved_constructor(&target);
-        let application = match self.resolve_application(
-            context,
+        let plan = self.prepare_application(
+            source,
             ApplicationRequest {
                 origin,
                 generic_parameters: &generic_parameters,
@@ -332,34 +332,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 ty,
                 defer_underconstrained: deferred_reserved,
             },
-        )? {
-            Outcome::Known(application) => application,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
-        };
-        self.record_trait_obligations(
-            ExpressionKey::new(module, expression),
-            source,
-            origin,
-            &generic_parameters,
-            &application.replacements,
         )?;
-        self.invocations.insert(
-            ExpressionKey::new(module, expression),
-            SemanticFact::Known(invocation_fact(
-                InvocationTarget::Constructor {
-                    declaration: target,
-                    substitution: application.substitution,
-                },
-                &slots,
+        Ok(InvocationPlan::Application {
+            plan,
+            continuation: Box::new(InvocationFrame::construction(
+                expression,
+                origin,
+                slots,
+                target,
+                generic_parameters.into_boxed_slice(),
             )),
-        )?;
-        Ok(Outcome::Known(self.value_expression_with_continuation(
-            application.result,
-            application.normal_continuation,
-        )))
+        })
     }
 
     pub(super) fn bind_constructor_slots(

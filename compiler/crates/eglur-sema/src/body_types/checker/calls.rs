@@ -1,3 +1,5 @@
+use super::application::ApplicationPlan;
+use super::invocation::InvocationFrame;
 use super::*;
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
@@ -711,12 +713,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         constructor: &crate::ConstructorSignature,
         request: TypeRequest,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            body,
-            ..
-        } = context;
+        let BodyContext { source, body, .. } = context;
         let qualified = body
             .expression(expression)
             .and_then(|value| match value.kind() {
@@ -724,8 +721,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 _ => None,
             })
             .unwrap_or(false);
-        let application = match self.resolve_application(
-            context,
+        let ApplicationPlan::Complete(outcome) = self.prepare_application(
+            source,
             ApplicationRequest {
                 origin,
                 generic_parameters: constructor.generic_parameters(),
@@ -739,34 +736,21 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 ty: request,
                 defer_underconstrained: !qualified && self.is_reserved_constructor(target),
             },
-        )? {
-            Outcome::Known(application) => application,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
+        )?
+        else {
+            unreachable!("unit constructors have no child expressions");
         };
-        self.record_trait_obligations(
-            ExpressionKey::new(module, expression),
-            source,
-            origin,
-            constructor.generic_parameters(),
-            &application.replacements,
-        )?;
-        self.invocations.insert(
-            ExpressionKey::new(module, expression),
-            SemanticFact::Known(invocation_fact(
-                InvocationTarget::Constructor {
-                    declaration: target.clone(),
-                    substitution: application.substitution,
-                },
-                &[],
-            )),
-        )?;
-        Ok(Outcome::Known(self.value_expression_with_continuation(
-            application.result,
-            application.normal_continuation,
-        )))
+        self.finish_invocation(
+            context,
+            InvocationFrame::construction(
+                expression,
+                origin,
+                Vec::new(),
+                target.clone(),
+                constructor.generic_parameters().into(),
+            ),
+            outcome,
+        )
     }
 
     pub(super) fn bind_call_slots(

@@ -80,37 +80,6 @@ pub(super) struct CheckingFrame {
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn resolve_application(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        request: ApplicationRequest<'_>,
-    ) -> Result<Outcome<ResolvedApplication>, BodyTypingError> {
-        let mut plan = self.prepare_application(context.source, request)?;
-        loop {
-            match plan {
-                ApplicationPlan::Complete(outcome) => return Ok(outcome),
-                ApplicationPlan::Expression {
-                    expression,
-                    request,
-                    path,
-                    continuation,
-                } => {
-                    let outcome = self.with_control_path(path, |checker| {
-                        checker.type_expression(
-                            context.module,
-                            context.source,
-                            context.hir,
-                            context.body,
-                            expression,
-                            request,
-                        )
-                    })?;
-                    plan = self.resume_application(context.source, continuation, outcome)?;
-                }
-            }
-        }
-    }
-
     pub(super) fn prepare_application(
         &mut self,
         source: &SemanticSource<'_>,
