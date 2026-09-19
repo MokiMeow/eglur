@@ -1,3 +1,4 @@
+use super::branching::BranchPlan;
 use super::invocation::InvocationPlan;
 use super::values::{ValueContinuation, ValuePlan};
 use super::*;
@@ -26,29 +27,13 @@ pub(super) enum ExpressionPlan {
         key: ExpressionKey,
         plan: Box<InvocationPlan>,
     },
+    Branch {
+        key: ExpressionKey,
+        plan: Box<BranchPlan>,
+    },
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn type_expression_in_region(
-        &mut self,
-        region: ControlRegionKey,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        self.enter_control_region(region.clone())?;
-        let outcome =
-            self.type_expression_in_current_region(module, source, hir, body, expression, request);
-        self.leave_control_region(&region)?;
-        outcome
-    }
-
     pub(super) fn type_expression_in_current_region(
         &mut self,
         module: ModuleId,
@@ -69,16 +54,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
         let outcome = self.type_expression(module, source, hir, body, expression, request);
         if is_block {
-            let removed = self
-                .block_region_overrides
-                .pop()
-                .ok_or(BodyTypingError::MissingBlockRegionOverride)?;
-            if removed != expression {
-                return Err(BodyTypingError::BlockRegionOverrideMismatch {
-                    expected: expression,
-                    actual: removed,
-                });
-            }
+            self.pop_block_region_override(expression)?;
         }
         let outcome = outcome?;
         if !is_block
@@ -331,14 +307,23 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ExprKind::Unary { .. } => {
                 self.unsupported(TypecheckCapability::CheckOperators, source, origin)
             }
-            ExprKind::Match(match_expression) if match_expression.arms.is_empty() => {
-                self.type_empty_match(context, origin, match_expression.scrutinee)?
-            }
             ExprKind::If(if_expression) => {
-                self.type_if(context, expression_id, origin, &if_expression, request)?
+                return Ok(ExpressionPlan::Branch {
+                    key,
+                    plan: Box::new(self.prepare_if(source, key, origin, if_expression, request)),
+                });
             }
             ExprKind::Match(match_expression) => {
-                self.type_match(context, expression_id, origin, &match_expression, request)?
+                return Ok(ExpressionPlan::Branch {
+                    key,
+                    plan: Box::new(self.prepare_match(
+                        source,
+                        key,
+                        origin,
+                        match_expression,
+                        request,
+                    )),
+                });
             }
             ExprKind::Try(operand) => {
                 self.type_question(context, expression_id, origin, operand)?

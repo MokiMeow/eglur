@@ -1,4 +1,5 @@
 use super::application::{ApplicationContinuation, ApplicationPlan};
+use super::branching::{BranchContinuation, BranchPlan};
 use super::expression::ExpressionPlan;
 use super::invocation::{InvocationContinuation, InvocationFrame, InvocationPlan};
 use super::statements::{BlockFrame, StatementContinuation, StatementPlan};
@@ -7,6 +8,7 @@ use super::*;
 
 enum Cleanup {
     Region(ControlRegionKey),
+    BlockOverride(ExprId),
     PathBarrier(Option<usize>),
 }
 
@@ -25,6 +27,10 @@ enum Step {
         invocation: Box<InvocationFrame>,
     },
     ResumeInvocation(InvocationContinuation),
+    Branch(Box<BranchPlan>),
+    ResumeBranch(BranchContinuation),
+    ResumeMatchArm,
+    NormalCompletion(ControlRegionKey),
     Cleanup(Cleanup),
 }
 
@@ -59,6 +65,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
         let mut expression_value = None;
         let mut statement_value = None;
+        let mut completed_match_arm = None;
         while let Some(step) = pending.pop() {
             match step {
                 Step::Expression(expression, request) => {
@@ -92,6 +99,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         ExpressionPlan::Value { key, plan } => {
                             pending.push(Step::Publish(key));
                             pending.push(Step::Value(plan));
+                        }
+                        ExpressionPlan::Branch { key, plan } => {
+                            pending.push(Step::Publish(key));
+                            pending.push(Step::Branch(plan));
                         }
                         ExpressionPlan::Invocation { key, plan } => {
                             pending.push(Step::Publish(key));
@@ -199,6 +210,104 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     let plan = self.resume_invocation(context, continuation, outcome)?;
                     pending.push(Step::Invocation(Box::new(plan)));
                 }
+                Step::Branch(plan) => match *plan {
+                    BranchPlan::Complete(outcome) => expression_value = Some(outcome),
+                    BranchPlan::Expression {
+                        expression,
+                        request,
+                        continuation,
+                    } => {
+                        pending.push(Step::ResumeBranch(continuation));
+                        pending.push(Step::Expression(expression, request));
+                    }
+                    BranchPlan::IfBranch {
+                        region,
+                        path,
+                        expression,
+                        request,
+                        frame,
+                    } => {
+                        let barrier = self.push_control_path_barrier(path);
+                        pending.push(Step::ResumeBranch(BranchContinuation::IfBranch(frame)));
+                        pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
+                        self.enter_control_region(region.clone())?;
+                        pending.push(Step::Cleanup(Cleanup::Region(region.clone())));
+
+                        let is_block = matches!(
+                            context
+                                .body
+                                .expression(expression)
+                                .ok_or(BodyTypingError::WrongBodyExpression(expression))?
+                                .kind(),
+                            ExprKind::Block { .. }
+                        );
+                        if is_block {
+                            self.block_region_overrides.push(expression);
+                            pending.push(Step::Cleanup(Cleanup::BlockOverride(expression)));
+                        } else {
+                            pending.push(Step::NormalCompletion(region));
+                        }
+                        pending.push(Step::Expression(expression, request));
+                    }
+                    BranchPlan::MatchArm {
+                        region,
+                        path,
+                        frame,
+                    } => {
+                        let barrier = self.push_control_path_barrier(path);
+                        pending.push(Step::ResumeMatchArm);
+                        pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
+                        self.enter_control_region(region.clone())?;
+                        pending.push(Step::Cleanup(Cleanup::Region(region)));
+                        let plan = self.prepare_match_arm(context, frame)?;
+                        pending.push(Step::Branch(Box::new(plan)));
+                    }
+                    BranchPlan::MatchBody {
+                        region,
+                        path,
+                        expression,
+                        request,
+                        frame,
+                    } => {
+                        let barrier = self.push_control_path_barrier(path);
+                        pending.push(Step::ResumeBranch(BranchContinuation::MatchValue {
+                            frame,
+                            guard_continuation: path,
+                        }));
+                        pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
+                        pending.push(Step::NormalCompletion(region));
+                        pending.push(Step::Expression(expression, request));
+                    }
+                    BranchPlan::CompleteMatchArm(frame) => {
+                        assert!(completed_match_arm.replace(frame).is_none());
+                    }
+                },
+                Step::ResumeBranch(continuation) => {
+                    let outcome = expression_value
+                        .take()
+                        .expect("branch continuation follows its child expression");
+                    let plan = self.resume_branch(context, continuation, outcome)?;
+                    pending.push(Step::Branch(Box::new(plan)));
+                }
+                Step::ResumeMatchArm => {
+                    let frame = completed_match_arm
+                        .take()
+                        .expect("match advances after arm completion and scope cleanup");
+                    let plan = self.advance_match(context.source, frame)?;
+                    pending.push(Step::Branch(Box::new(plan)));
+                }
+                Step::NormalCompletion(region) => {
+                    if matches!(
+                        expression_value.as_ref(),
+                        Some(Outcome::Known(value)) if value.normal_continuation.is_present()
+                    ) {
+                        self.record_control_transfer(
+                            ControlTransferSource::RegionCompletion(region.clone()),
+                            ControlTransferKind::NormalCompletion,
+                            region,
+                        )?;
+                    }
+                }
                 Step::Cleanup(cleanup) => self.finish_typing_scope(cleanup)?,
             }
         }
@@ -260,6 +369,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     fn finish_typing_scope(&mut self, cleanup: Cleanup) -> Result<(), BodyTypingError> {
         match cleanup {
             Cleanup::Region(region) => self.leave_control_region(&region),
+            Cleanup::BlockOverride(expression) => self.pop_block_region_override(expression),
             Cleanup::PathBarrier(barrier) => self.pop_control_path_barrier(barrier),
         }
     }

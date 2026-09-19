@@ -13,6 +13,9 @@ use eglur_sema::{
 #[path = "body_types/application.rs"]
 mod application;
 
+#[path = "body_types/branch_traversal.rs"]
+mod branch_traversal;
+
 #[path = "body_types/construction_traversal.rs"]
 mod construction_traversal;
 
