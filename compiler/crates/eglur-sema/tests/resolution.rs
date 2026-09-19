@@ -16,6 +16,9 @@ use eglur_syntax::parse_validated;
 #[path = "resolution/traversal.rs"]
 mod traversal;
 
+#[path = "resolution/pattern_bindings.rs"]
+mod pattern_bindings;
+
 struct PreparedSource {
     file: FileId,
     module: ModuleAddress,

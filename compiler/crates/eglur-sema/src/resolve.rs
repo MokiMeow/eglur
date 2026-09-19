@@ -1753,17 +1753,7 @@ impl Resolver<'_, '_> {
                 ));
             }
         }
-        let mut canonical = Vec::<BindingIntroduction>::new();
-        let mut positions = BTreeMap::<NameKey, usize>::new();
-        for introduction in introductions {
-            if let Some(&index) = positions.get(&introduction.name) {
-                canonical[index].origins.extend(introduction.origins);
-            } else {
-                positions.insert(introduction.name.clone(), canonical.len());
-                canonical.push(introduction);
-            }
-        }
-        Ok(BindingGroup::Known(canonical))
+        Ok(BindingGroup::known(introductions))
     }
 
     fn single_name_group(
@@ -1772,7 +1762,7 @@ impl Resolver<'_, '_> {
         name: &Name,
     ) -> Result<BindingGroup, NameResolutionError> {
         Ok(match self.binding_introduction(source, name)? {
-            BindingName::Known(introduction) => BindingGroup::Known(vec![introduction]),
+            BindingName::Known(introduction) => BindingGroup::known(vec![introduction]),
             BindingName::Poisoned(poison) => BindingGroup::Poisoned(poison),
         })
     }
@@ -2151,11 +2141,27 @@ enum BindingGroup {
 }
 
 impl BindingGroup {
+    fn known(introductions: Vec<BindingIntroduction>) -> Self {
+        // Name resolution shares one identity; typed pattern validation decides
+        // whether repeated occurrences are alternatives or illegal duplicates.
+        let mut canonical = Vec::<BindingIntroduction>::new();
+        let mut positions = BTreeMap::<NameKey, usize>::new();
+        for introduction in introductions {
+            if let Some(&index) = positions.get(&introduction.name) {
+                canonical[index].origins.extend(introduction.origins);
+            } else {
+                positions.insert(introduction.name.clone(), canonical.len());
+                canonical.push(introduction);
+            }
+        }
+        Self::Known(canonical)
+    }
+
     fn prepend(self, mut prefix: Vec<BindingIntroduction>) -> Self {
         match self {
             Self::Known(mut values) => {
                 prefix.append(&mut values);
-                Self::Known(prefix)
+                Self::known(prefix)
             }
             other => other,
         }
