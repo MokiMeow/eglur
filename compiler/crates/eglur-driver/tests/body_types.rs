@@ -10,6 +10,9 @@ use eglur_sema::{
     ResolveCapability, TypeKind, TypecheckCapability,
 };
 
+#[path = "body_types/application.rs"]
+mod application;
+
 #[path = "body_types/pattern_bindings.rs"]
 mod pattern_bindings;
 

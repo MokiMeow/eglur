@@ -34,6 +34,7 @@ use crate::{
 
 use super::{BodyTypes, BodyTypingError, *};
 
+mod application;
 mod calls;
 mod constants;
 mod construction;
