@@ -13,6 +13,9 @@ use eglur_sema::{
 use eglur_source::{FileId, LineIndex, SourceFile};
 use eglur_syntax::parse_validated;
 
+#[path = "resolution/traversal.rs"]
+mod traversal;
+
 struct PreparedSource {
     file: FileId,
     module: ModuleAddress,
