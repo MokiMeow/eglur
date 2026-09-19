@@ -1,6 +1,7 @@
 use super::application::{ApplicationContinuation, ApplicationPlan};
 use super::branching::{BranchContinuation, BranchPlan};
 use super::expression::ExpressionPlan;
+use super::failure::{CheckedFrame, FailurePlan, QuestionFrame, ResultFrame};
 use super::invocation::{InvocationContinuation, InvocationFrame, InvocationPlan};
 use super::numeric::{NumericContinuation, NumericPlan};
 use super::numeric_tree::{NumericTreeFrame, NumericTreePlan};
@@ -10,6 +11,9 @@ use super::*;
 
 enum Cleanup {
     Region(ControlRegionKey),
+    ResultContext,
+    CheckedContext,
+    QuestionFloor,
     BlockOverride(ExprId),
     NumericPreparation(bool),
     PathBarrier(Option<usize>),
@@ -17,6 +21,7 @@ enum Cleanup {
 
 enum Step {
     Expression(ExprId, TypeRequest),
+    InCurrentRegion(ExprId, TypeRequest),
     Publish(ExpressionKey),
     Block(BlockFrame),
     Statement(StmtId, Option<TypeId>),
@@ -38,6 +43,10 @@ enum Step {
     ResumeNumericTree(Box<NumericTreeFrame>),
     Numeric(Box<NumericPlan>),
     ResumeNumeric(NumericContinuation),
+    Failure(Box<FailurePlan>),
+    FinishResult(ResultFrame),
+    FinishChecked(CheckedFrame),
+    FinishQuestion(QuestionFrame),
     Cleanup(Cleanup),
 }
 
@@ -48,7 +57,34 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         request: TypeRequest,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let mut pending = vec![Step::Expression(expression, request)];
+        self.execute_body_steps(context, vec![Step::Expression(expression, request)])
+    }
+
+    pub(super) fn type_expression_in_current_region(
+        &mut self,
+        module: ModuleId,
+        source: &SemanticSource<'_>,
+        hir: &HirFile,
+        body: &Body,
+        expression: ExprId,
+        request: TypeRequest,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        self.execute_body_steps(
+            BodyContext {
+                module,
+                source,
+                hir,
+                body,
+            },
+            vec![Step::InCurrentRegion(expression, request)],
+        )
+    }
+
+    fn execute_body_steps(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        mut pending: Vec<Step>,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
         let result = self.run_body_steps(context, &mut pending);
         let Err(mut error) = result else {
             return result;
@@ -73,6 +109,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let mut expression_value = None;
         let mut statement_value = None;
         let mut completed_match_arm = None;
+        let mut completed_result_context = None;
         while let Some(step) = pending.pop() {
             match step {
                 Step::Expression(expression, request) => {
@@ -121,11 +158,34 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             pending.push(Step::Publish(key));
                             pending.push(Step::Numeric(plan));
                         }
+                        ExpressionPlan::Failure { key, plan } => {
+                            pending.push(Step::Publish(key));
+                            pending.push(Step::Failure(plan));
+                        }
                         ExpressionPlan::Invocation { key, plan } => {
                             pending.push(Step::Publish(key));
                             pending.push(Step::Invocation(plan));
                         }
                     }
+                }
+                Step::InCurrentRegion(expression, request) => {
+                    let is_block = matches!(
+                        context
+                            .body
+                            .expression(expression)
+                            .ok_or(BodyTypingError::WrongBodyExpression(expression))?
+                            .kind(),
+                        ExprKind::Block { .. }
+                    );
+                    if is_block {
+                        self.block_region_overrides.push(expression);
+                        pending.push(Step::Cleanup(Cleanup::BlockOverride(expression)));
+                    } else {
+                        pending.push(Step::NormalCompletion(
+                            self.current_control_region()?.clone(),
+                        ));
+                    }
+                    pending.push(Step::Expression(expression, request));
                 }
                 Step::Publish(key) => {
                     let outcome = expression_value
@@ -248,23 +308,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         pending.push(Step::ResumeBranch(BranchContinuation::IfBranch(frame)));
                         pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
                         self.enter_control_region(region.clone())?;
-                        pending.push(Step::Cleanup(Cleanup::Region(region.clone())));
+                        pending.push(Step::Cleanup(Cleanup::Region(region)));
 
-                        let is_block = matches!(
-                            context
-                                .body
-                                .expression(expression)
-                                .ok_or(BodyTypingError::WrongBodyExpression(expression))?
-                                .kind(),
-                            ExprKind::Block { .. }
-                        );
-                        if is_block {
-                            self.block_region_overrides.push(expression);
-                            pending.push(Step::Cleanup(Cleanup::BlockOverride(expression)));
-                        } else {
-                            pending.push(Step::NormalCompletion(region));
-                        }
-                        pending.push(Step::Expression(expression, request));
+                        pending.push(Step::InCurrentRegion(expression, request));
                     }
                     BranchPlan::MatchArm {
                         region,
@@ -371,7 +417,75 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     let plan = self.resume_numeric(context.source, continuation, outcome)?;
                     pending.push(Step::Numeric(Box::new(plan)));
                 }
-                Step::Cleanup(cleanup) => self.finish_typing_scope(cleanup)?,
+                Step::Failure(plan) => match *plan {
+                    FailurePlan::Complete(outcome) => expression_value = Some(outcome),
+                    FailurePlan::ResultBlock {
+                        block,
+                        request,
+                        context: result_context,
+                        frame,
+                    } => {
+                        pending.push(Step::FinishResult(frame));
+                        let region = result_context.region.clone();
+                        self.enter_control_region(region.clone())?;
+                        pending.push(Step::Cleanup(Cleanup::Region(region)));
+                        self.result_contexts.push(result_context);
+                        pending.push(Step::Cleanup(Cleanup::ResultContext));
+                        pending.push(Step::InCurrentRegion(block, request));
+                    }
+                    FailurePlan::CheckedBlock {
+                        block,
+                        request,
+                        context: checked_context,
+                        frame,
+                    } => {
+                        pending.push(Step::FinishChecked(frame));
+                        let region = checked_context.region.clone();
+                        self.enter_control_region(region.clone())?;
+                        pending.push(Step::Cleanup(Cleanup::Region(region)));
+                        self.question_floors.push(self.result_contexts.len());
+                        pending.push(Step::Cleanup(Cleanup::QuestionFloor));
+                        self.checked_contexts.push(checked_context);
+                        pending.push(Step::Cleanup(Cleanup::CheckedContext));
+                        pending.push(Step::InCurrentRegion(block, request));
+                    }
+                    FailurePlan::QuestionOperand {
+                        operand,
+                        request,
+                        frame,
+                    } => {
+                        pending.push(Step::FinishQuestion(frame));
+                        pending.push(Step::Expression(operand, request));
+                    }
+                },
+                Step::FinishResult(frame) => {
+                    let result_context = completed_result_context
+                        .take()
+                        .expect("result finalization follows context exit");
+                    let outcome = expression_value
+                        .take()
+                        .expect("result finalization follows its body");
+                    expression_value =
+                        Some(self.finish_result(context, frame, result_context, outcome)?);
+                }
+                Step::FinishChecked(frame) => {
+                    let outcome = expression_value
+                        .take()
+                        .expect("checked finalization follows its body");
+                    expression_value = Some(self.finish_checked(context, frame, outcome)?);
+                }
+                Step::FinishQuestion(frame) => {
+                    let outcome = expression_value
+                        .take()
+                        .expect("question finalization follows its operand");
+                    expression_value =
+                        Some(self.finish_question(context.source, frame, outcome)?);
+                }
+                Step::Cleanup(cleanup) => {
+                    if let Some(result_context) = self.finish_typing_scope(cleanup)? {
+                        assert!(completed_result_context.replace(result_context).is_none());
+                    }
+                }
             }
         }
         Ok(expression_value.expect("expression work produces its final result"))
@@ -429,8 +543,29 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
     }
 
-    fn finish_typing_scope(&mut self, cleanup: Cleanup) -> Result<(), BodyTypingError> {
+    fn finish_typing_scope(
+        &mut self,
+        cleanup: Cleanup,
+    ) -> Result<Option<ResultContext>, BodyTypingError> {
         match cleanup {
+            Cleanup::ResultContext => {
+                return self
+                    .result_contexts
+                    .pop()
+                    .map(Some)
+                    .ok_or(BodyTypingError::MissingResultContext);
+            }
+            Cleanup::CheckedContext => self
+                .checked_contexts
+                .pop()
+                .map(|_| ())
+                .ok_or(BodyTypingError::MissingCheckedContext),
+            Cleanup::QuestionFloor => self
+                .question_floors
+                .pop()
+                .map(|_| ())
+                .ok_or(BodyTypingError::MissingQuestionBoundary),
+
             Cleanup::NumericPreparation(previous) => {
                 self.preparing_numeric_tree = previous;
                 Ok(())
@@ -438,6 +573,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Cleanup::Region(region) => self.leave_control_region(&region),
             Cleanup::BlockOverride(expression) => self.pop_block_region_override(expression),
             Cleanup::PathBarrier(barrier) => self.pop_control_path_barrier(barrier),
-        }
+        }?;
+        Ok(None)
     }
 }

@@ -1,4 +1,5 @@
 use super::branching::BranchPlan;
+use super::failure::FailurePlan;
 use super::invocation::InvocationPlan;
 use super::numeric::NumericPlan;
 use super::numeric_tree::NumericTreeFrame;
@@ -38,48 +39,13 @@ pub(super) enum ExpressionPlan {
         key: ExpressionKey,
         plan: Box<NumericPlan>,
     },
+    Failure {
+        key: ExpressionKey,
+        plan: Box<FailurePlan>,
+    },
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn type_expression_in_current_region(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        expression: ExprId,
-        request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let is_block = matches!(
-            body.expression(expression)
-                .ok_or(BodyTypingError::WrongBodyExpression(expression))?
-                .kind(),
-            ExprKind::Block { .. }
-        );
-        if is_block {
-            self.block_region_overrides.push(expression);
-        }
-        let outcome = self.type_expression(module, source, hir, body, expression, request);
-        if is_block {
-            self.pop_block_region_override(expression)?;
-        }
-        let outcome = outcome?;
-        if !is_block
-            && matches!(
-                &outcome,
-                Outcome::Known(value) if value.normal_continuation.is_present()
-            )
-        {
-            let region = self.current_control_region()?.clone();
-            self.record_control_transfer(
-                ControlTransferSource::RegionCompletion(region.clone()),
-                ControlTransferKind::NormalCompletion,
-                region,
-            )?;
-        }
-        Ok(outcome)
-    }
-
     pub(super) fn type_expression(
         &mut self,
         module: ModuleId,
@@ -340,13 +306,39 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
             ExprKind::Try(operand) => {
-                self.type_question(context, expression_id, origin, operand)?
+                return Ok(ExpressionPlan::Failure {
+                    key,
+                    plan: Box::new(self.prepare_question(
+                        context,
+                        expression_id,
+                        origin,
+                        operand,
+                    )?),
+                });
             }
             ExprKind::Result(block) => {
-                self.type_result(context, expression_id, origin, block, request)?
+                return Ok(ExpressionPlan::Failure {
+                    key,
+                    plan: Box::new(self.prepare_result(
+                        context,
+                        expression_id,
+                        origin,
+                        block,
+                        request,
+                    )?),
+                });
             }
             ExprKind::Checked(block) => {
-                self.type_checked(context, expression_id, origin, block, request)?
+                return Ok(ExpressionPlan::Failure {
+                    key,
+                    plan: Box::new(self.prepare_checked(
+                        context,
+                        expression_id,
+                        origin,
+                        block,
+                        request,
+                    )?),
+                });
             }
             ExprKind::Hole | ExprKind::Lambda(_) => {
                 self.unsupported(TypecheckCapability::CheckClosures, source, origin)
