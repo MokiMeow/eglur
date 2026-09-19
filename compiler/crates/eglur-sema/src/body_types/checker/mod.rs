@@ -51,6 +51,7 @@ mod statements;
 mod support;
 mod tensor;
 mod traversal;
+mod values;
 
 /// Checks source bodies once against canonical declaration signatures.
 #[allow(
@@ -319,12 +320,6 @@ struct ApplicationRequest<'a> {
     allowed_ownership_parameter: Option<&'a GenericParameterId>,
     ty: TypeRequest,
     defer_underconstrained: bool,
-}
-
-#[derive(Clone, Copy)]
-struct TupleProjectionRequest<'a> {
-    index: &'a str,
-    origin: OriginId,
 }
 
 #[derive(Clone, Copy)]

@@ -1,4 +1,5 @@
 use super::invocation::InvocationPlan;
+use super::values::{ValueContinuation, ValuePlan};
 use super::*;
 
 pub(super) enum ExpressionPlan {
@@ -16,6 +17,10 @@ pub(super) enum ExpressionPlan {
         key: ExpressionKey,
         expression: ExprId,
         request: TypeRequest,
+    },
+    Value {
+        key: ExpressionKey,
+        plan: Box<ValuePlan>,
     },
     Invocation {
         key: ExpressionKey,
@@ -122,8 +127,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let BodyContext {
             module,
             source,
-            hir,
             body,
+            ..
         } = context;
         let key = ExpressionKey::new(module, expression_id);
         match self.expressions.state(&key) {
@@ -202,15 +207,32 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
             ExprKind::Tuple(values) => {
-                self.type_tuple(module, source, hir, body, &values, request)?
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(self.prepare_tuple(values, request)?),
+                });
             }
             ExprKind::Reference { mutability, value } => {
-                self.type_reference(module, source, hir, body, value, mutability)?
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(ValuePlan::single(
+                        value,
+                        ValueContinuation::Reference { value, mutability },
+                    )),
+                });
             }
             ExprKind::Unary {
                 operator: UnaryOperator::Dereference,
                 operand,
-            } => self.type_dereference(module, source, hir, body, operand)?,
+            } => {
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(ValuePlan::single(
+                        operand,
+                        ValueContinuation::Dereference { operand },
+                    )),
+                });
+            }
             ExprKind::Call(call) => {
                 return Ok(ExpressionPlan::Invocation {
                     key,
@@ -227,19 +249,29 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.type_dtype_call(context, expression_id, origin, &call)?
             }
             ExprKind::Member { receiver, member } => {
-                self.type_member(context, expression_id, receiver, &member)?
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(self.prepare_member(
+                        context,
+                        expression_id,
+                        receiver,
+                        member,
+                    )?),
+                });
             }
-            ExprKind::TupleProjection { receiver, index } => self.type_tuple_projection(
-                module,
-                source,
-                hir,
-                body,
-                receiver,
-                TupleProjectionRequest {
-                    index: &index,
-                    origin,
-                },
-            )?,
+            ExprKind::TupleProjection { receiver, index } => {
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(ValuePlan::single(
+                        receiver,
+                        ValueContinuation::TupleProjection {
+                            receiver,
+                            index,
+                            origin,
+                        },
+                    )),
+                });
+            }
             ExprKind::StructLiteral { path, fields } => self.type_struct_literal(
                 context,
                 StructLiteralRequest {

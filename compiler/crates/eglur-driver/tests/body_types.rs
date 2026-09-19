@@ -25,6 +25,9 @@ mod statements;
 #[path = "body_types/traversal.rs"]
 mod traversal;
 
+#[path = "body_types/value_traversal.rs"]
+mod value_traversal;
+
 fn body_capabilities() -> [CompileCapability; 14] {
     [
         CompileCapability::Resolve(ResolveCapability::CollectDeclarations),

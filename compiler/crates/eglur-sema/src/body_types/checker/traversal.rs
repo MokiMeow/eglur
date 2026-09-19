@@ -2,6 +2,7 @@ use super::application::{ApplicationContinuation, ApplicationPlan};
 use super::expression::ExpressionPlan;
 use super::invocation::{InvocationContinuation, InvocationFrame, InvocationPlan};
 use super::statements::{BlockFrame, StatementContinuation, StatementPlan};
+use super::values::{ValueContinuation, ValuePlan};
 use super::*;
 
 enum Cleanup {
@@ -16,6 +17,8 @@ enum Step {
     Statement(StmtId, Option<TypeId>),
     ResumeStatement(StatementContinuation),
     ResumeBlock(BlockFrame),
+    Value(Box<ValuePlan>),
+    ResumeValue(ValueContinuation),
     Invocation(Box<InvocationPlan>),
     ResumeApplication {
         continuation: ApplicationContinuation,
@@ -86,6 +89,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             pending.push(Step::Publish(key));
                             pending.push(Step::Expression(expression, request));
                         }
+                        ExpressionPlan::Value { key, plan } => {
+                            pending.push(Step::Publish(key));
+                            pending.push(Step::Value(plan));
+                        }
                         ExpressionPlan::Invocation { key, plan } => {
                             pending.push(Step::Publish(key));
                             pending.push(Step::Invocation(plan));
@@ -124,6 +131,27 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .take()
                         .expect("block continuation follows its statement");
                     pending.push(Step::Block(self.resume_block(block, value)?));
+                }
+                Step::Value(plan) => match *plan {
+                    ValuePlan::Complete(outcome) => expression_value = Some(outcome),
+                    ValuePlan::Expression {
+                        expression,
+                        request,
+                        path,
+                        continuation,
+                    } => {
+                        let barrier = self.push_control_path_barrier(path);
+                        pending.push(Step::ResumeValue(continuation));
+                        pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
+                        pending.push(Step::Expression(expression, request));
+                    }
+                },
+                Step::ResumeValue(continuation) => {
+                    let outcome = expression_value
+                        .take()
+                        .expect("value continuation follows its child expression");
+                    let plan = self.resume_value(context, continuation, outcome)?;
+                    pending.push(Step::Value(Box::new(plan)));
                 }
                 Step::Invocation(plan) => match *plan {
                     InvocationPlan::Complete(outcome) => expression_value = Some(outcome),
