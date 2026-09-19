@@ -1,5 +1,23 @@
 use super::*;
 
+pub(super) enum ExpressionPlan {
+    Complete(Outcome<TypedExpression>),
+    Publish {
+        key: ExpressionKey,
+        outcome: Outcome<TypedExpression>,
+    },
+    Block {
+        key: ExpressionKey,
+        statements: Box<[StmtId]>,
+        expected: Option<TypeId>,
+    },
+    Forward {
+        key: ExpressionKey,
+        expression: ExprId,
+        request: TypeRequest,
+    },
+}
+
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn type_expression_in_region(
         &mut self,
@@ -69,43 +87,50 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Ok(outcome)
     }
 
-    pub(super) fn type_block_expression(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        statements: &[StmtId],
-        expected: Option<TypeId>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        if self.block_region_overrides.last() == Some(&expression) {
-            return self.type_block(module, source, hir, body, statements, expected);
-        }
-        let region = ControlRegionKey::Block(ExpressionKey::new(module, expression));
-        self.enter_control_region(region.clone())?;
-        let outcome = self.type_block(module, source, hir, body, statements, expected);
-        self.leave_control_region(&region)?;
-        outcome
-    }
-
     pub(super) fn type_expression(
         &mut self,
         module: ModuleId,
         source: &SemanticSource<'_>,
         hir: &HirFile,
         body: &Body,
-        expression_id: ExprId,
+        expression: ExprId,
         request: TypeRequest,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        self.type_expression_steps(
+            BodyContext {
+                module,
+                source,
+                hir,
+                body,
+            },
+            expression,
+            request,
+        )
+    }
+
+    pub(super) fn prepare_expression(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        expression_id: ExprId,
+        request: TypeRequest,
+    ) -> Result<ExpressionPlan, BodyTypingError> {
+        let BodyContext {
+            module,
+            source,
+            hir,
+            body,
+        } = context;
         let key = ExpressionKey::new(module, expression_id);
         match self.expressions.state(&key) {
-            FactState::Known(expression) => return Ok(Outcome::Known(expression.clone())),
-            FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
-            FactState::NotApplicable => return Ok(Outcome::NotApplicable),
+            FactState::Known(expression) => {
+                return Ok(ExpressionPlan::Complete(Outcome::Known(expression.clone())));
+            }
+            FactState::Poisoned(poison) => {
+                return Ok(ExpressionPlan::Complete(Outcome::Poisoned(poison.clone())));
+            }
+            FactState::NotApplicable => {
+                return Ok(ExpressionPlan::Complete(Outcome::NotApplicable));
+            }
             FactState::Unperformed => {}
         }
         let expression = body
@@ -120,24 +145,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 },
                 Outcome::Poisoned(poison) => {
                     let outcome = Outcome::Poisoned(poison);
-                    self.record_expression(key, outcome.clone())?;
-                    return Ok(outcome);
+                    return Ok(ExpressionPlan::Publish { key, outcome });
                 }
-                Outcome::Deferred => return Ok(Outcome::Deferred),
+                Outcome::Deferred => return Ok(ExpressionPlan::Complete(Outcome::Deferred)),
                 Outcome::Unperformed | Outcome::NotApplicable => {
-                    return Ok(Outcome::Unperformed);
+                    return Ok(ExpressionPlan::Complete(Outcome::Unperformed));
                 }
             }
         } else {
             request
         };
         let kind = expression.kind().clone();
-        let context = BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        };
         if !self.preparing_numeric_tree
             && matches!(
                 kind,
@@ -150,11 +168,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             )
             && let Some(outcome) = self.type_numeric_tree(context, expression_id, request)?
         {
-            return Ok(outcome);
+            return Ok(ExpressionPlan::Complete(outcome));
         }
         let outcome = match kind {
             ExprKind::Block { statements } => {
-                self.type_block_expression(context, expression_id, &statements, request.expected)?
+                return Ok(ExpressionPlan::Block {
+                    key,
+                    statements,
+                    expected: request.expected,
+                });
             }
             ExprKind::Literal(literal) => self.type_literal(source, &literal, request)?,
             ExprKind::Name(_) => self.type_name(context, expression_id, request)?,
@@ -168,7 +190,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Outcome::Known(self.value_expression(unit))
             }
             ExprKind::Group(inner) => {
-                self.type_expression(module, source, hir, body, inner, request)?
+                return Ok(ExpressionPlan::Forward {
+                    key,
+                    expression: inner,
+                    request,
+                });
             }
             ExprKind::Tuple(values) => {
                 self.type_tuple(module, source, hir, body, &values, request)?
@@ -283,8 +309,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.unsupported(TypecheckCapability::AnalyzeTensorSource, source, origin)
             }
         };
-        self.record_expression(key, outcome.clone())?;
-        Ok(outcome)
+        Ok(ExpressionPlan::Publish { key, outcome })
     }
 
     fn type_reduce_by_candidate(

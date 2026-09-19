@@ -39,45 +39,63 @@ pub(super) struct PreparedLet {
     expected: Option<TypeId>,
 }
 
-impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn type_block(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        statements: &[eglur_hir::StmtId],
-        expected: Option<TypeId>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let context = BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        };
-        let mut state = Outcome::Known(());
-        let mut result = None;
-        let mut reachable = true;
-        for &statement_id in statements {
-            let continuation = if reachable {
-                NormalContinuation::Present
-            } else {
-                NormalContinuation::Absent
-            };
-            let next = self.with_control_path(continuation, |checker| {
-                checker.type_block_statement(context, statement_id, expected)
-            })?;
-            if reachable && let Outcome::Known(step) = &next {
-                if let Some(ty) = step.yield_type {
-                    result = Some(ty);
-                }
-                reachable = step.normal_continuation.is_present();
-            }
-            state = self.merge_unit(state, next.map_unit())?;
+pub(super) struct BlockFrame {
+    remaining: std::vec::IntoIter<StmtId>,
+    expected: Option<TypeId>,
+    state: Outcome<()>,
+    result: Option<TypeId>,
+    reachable: bool,
+}
+
+impl BlockFrame {
+    pub(super) fn new(statements: Box<[StmtId]>, expected: Option<TypeId>) -> Self {
+        Self {
+            remaining: statements.into_vec().into_iter(),
+            expected,
+            state: Outcome::Known(()),
+            result: None,
+            reachable: true,
         }
-        match state {
+    }
+
+    pub(super) fn next_statement(
+        &mut self,
+    ) -> Option<(StmtId, Option<TypeId>, NormalContinuation)> {
+        let statement = self.remaining.next()?;
+        let path = if self.reachable {
+            NormalContinuation::Present
+        } else {
+            NormalContinuation::Absent
+        };
+        Some((statement, self.expected, path))
+    }
+}
+
+impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
+    pub(super) fn resume_block(
+        &mut self,
+        mut block: BlockFrame,
+        next: Outcome<BlockStep>,
+    ) -> Result<BlockFrame, BodyTypingError> {
+        if block.reachable
+            && let Outcome::Known(step) = &next
+        {
+            if let Some(ty) = step.yield_type {
+                block.result = Some(ty);
+            }
+            block.reachable = step.normal_continuation.is_present();
+        }
+        block.state = self.merge_unit(block.state, next.map_unit())?;
+        Ok(block)
+    }
+
+    pub(super) fn finish_block(
+        &mut self,
+        block: BlockFrame,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        match block.state {
             Outcome::Known(()) => {
-                if reachable {
+                if block.reachable {
                     let region = self.current_control_region()?.clone();
                     self.record_control_transfer(
                         ControlTransferSource::RegionCompletion(region.clone()),
@@ -85,9 +103,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         region,
                     )?;
                 }
-                let result = if let Some(result) = result {
+                let result = if let Some(result) = block.result {
                     result
-                } else if reachable {
+                } else if block.reachable {
                     self.primitive(PrimitiveType::Unit)?
                 } else {
                     self.signatures.types().never()
@@ -98,38 +116,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Unperformed => Ok(Outcome::Unperformed),
             Outcome::Deferred => Ok(Outcome::Deferred),
             Outcome::NotApplicable => Ok(Outcome::NotApplicable),
-        }
-    }
-
-    pub(super) fn type_block_statement(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        statement_id: StmtId,
-        expected: Option<TypeId>,
-    ) -> Result<Outcome<BlockStep>, BodyTypingError> {
-        let mut plan = self.prepare_statement(context, statement_id, expected)?;
-        loop {
-            match plan {
-                StatementPlan::Complete(outcome) => return Ok(outcome),
-                StatementPlan::Expression {
-                    expression,
-                    request,
-                    path,
-                    continuation,
-                } => {
-                    let outcome = self.with_control_path(path, |checker| {
-                        checker.type_expression(
-                            context.module,
-                            context.source,
-                            context.hir,
-                            context.body,
-                            expression,
-                            request,
-                        )
-                    })?;
-                    plan = self.resume_statement(context, continuation, outcome)?;
-                }
-            }
         }
     }
 

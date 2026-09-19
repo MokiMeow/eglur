@@ -47,6 +47,7 @@ mod patterns;
 mod statements;
 mod support;
 mod tensor;
+mod traversal;
 
 /// Checks source bodies once against canonical declaration signatures.
 #[allow(
