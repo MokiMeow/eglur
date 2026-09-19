@@ -1,5 +1,6 @@
 use super::application::ApplicationPlan;
 use super::dispatch::DispatchContinuation;
+use super::tensor::TensorConstructorFrame;
 use super::*;
 
 pub(super) enum InvocationPlan {
@@ -18,6 +19,7 @@ pub(super) enum InvocationPlan {
 
 pub(super) enum InvocationContinuation {
     ReduceBy(Box<ReduceByFrame>),
+    TensorConstructor(Box<TensorConstructorFrame>),
     Dispatch(DispatchContinuation),
 }
 
@@ -634,6 +636,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         outcome: Outcome<TypedExpression>,
     ) -> Result<InvocationPlan, BodyTypingError> {
         match continuation {
+            InvocationContinuation::TensorConstructor(frame) => {
+                self.resume_tensor_constructor(context, frame, outcome)
+            }
             InvocationContinuation::ReduceBy(frame) => {
                 self.resume_reduce_by_receiver(context, *frame, outcome)
             }

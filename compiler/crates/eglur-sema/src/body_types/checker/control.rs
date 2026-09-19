@@ -86,17 +86,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Ok(())
     }
 
-    pub(super) fn with_control_path<T>(
-        &mut self,
-        continuation: NormalContinuation,
-        analyze: impl FnOnce(&mut Self) -> Result<T, BodyTypingError>,
-    ) -> Result<T, BodyTypingError> {
-        let barrier = self.push_control_path_barrier(continuation);
-        let outcome = analyze(self);
-        self.pop_control_path_barrier(barrier)?;
-        outcome
-    }
-
     pub(super) fn innermost_yield_target(&self) -> Result<ControlRegionKey, BodyTypingError> {
         self.current_control_region().cloned()
     }

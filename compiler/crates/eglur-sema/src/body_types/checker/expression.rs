@@ -186,7 +186,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
             ExprKind::DTypeCall(call) => {
-                self.type_dtype_call(context, expression_id, origin, &call)?
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_dtype_call(
+                        context,
+                        expression_id,
+                        origin,
+                        call,
+                    )?),
+                });
             }
             ExprKind::Member { receiver, member } => {
                 return Ok(ExpressionPlan::Value {
@@ -645,58 +653,5 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.expression_origin(source, expression)?,
             )),
         }
-    }
-
-    fn type_dtype_call(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        origin: OriginId,
-        call: &eglur_hir::DTypeCallExpr,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext { module, source, .. } = context;
-        let key = ResolutionKey::Expression {
-            module,
-            expression: call.callee,
-        };
-        match self.names.fact(key) {
-            FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1 => {
-                if let Some(ExternalSemanticOwner::TensorSource(constructor)) =
-                    self.external_semantic_owner(&targets[0])
-                {
-                    let target = targets[0].clone();
-                    self.type_tensor_constructor(
-                        context,
-                        expression,
-                        origin,
-                        call,
-                        target,
-                        constructor,
-                    )
-                } else {
-                    self.dtype_bracket_forbidden(source, origin)
-                }
-            }
-            FactState::Known(ResolvedName::Local(_))
-            | FactState::Known(ResolvedName::Declarations(_))
-            | FactState::NotApplicable => self.dtype_bracket_forbidden(source, origin),
-            FactState::Poisoned(poison) => Ok(Outcome::Poisoned(poison.clone())),
-            FactState::Unperformed => Ok(Outcome::Unperformed),
-        }
-    }
-
-    fn dtype_bracket_forbidden(
-        &mut self,
-        source: &SemanticSource<'_>,
-        origin: OriginId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        self.type_error(
-            source,
-            origin,
-            "TYPE_ARG_BRACKET_SYNTAX_FORBIDDEN",
-            "type argument bracket syntax is forbidden for this callee",
-            BTreeMap::new(),
-        )
-        .map(Outcome::Poisoned)
     }
 }
