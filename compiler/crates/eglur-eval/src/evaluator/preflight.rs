@@ -197,6 +197,9 @@ impl<'a> Planner<'a> {
                     UnsupportedFeature::InvalidCheckedProgram,
                 )),
             },
+            ExprKind::Name(_) if self.view.invocation(module, expression).is_some() => {
+                self.plan_invocation(module, expression, witnesses)
+            }
             ExprKind::Name(_) => {
                 let key = ResolutionKey::Expression { module, expression };
                 match self.view.program.resolution().names().fact(key) {

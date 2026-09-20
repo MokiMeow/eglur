@@ -149,6 +149,9 @@ impl<'a> Evaluator<'a> {
             }
             ExprKind::Literal(literal) => self.eval_literal(frame.module, expression, &literal),
             ExprKind::Unit => Flow::Value(RuntimeValue::Value(Value::Unit)),
+            ExprKind::Name(_) if self.view.invocation(frame.module, expression).is_some() => {
+                self.eval_invocation(frame, expression)
+            }
             ExprKind::Name(_) => self.eval_name(frame, expression),
             ExprKind::Group(inner) | ExprKind::Unsafe(inner) => self.eval_expr(frame, inner),
             ExprKind::Tuple(values) => {
