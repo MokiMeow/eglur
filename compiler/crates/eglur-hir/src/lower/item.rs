@@ -206,6 +206,7 @@ impl Builder {
             name: self.lower_name_token(name_token, node.span()),
             closed: direct_tokens(node)
                 .iter()
+                .take_while(|token| token.kind() != SyntaxKind::TraitKw)
                 .any(|token| token.kind() == SyntaxKind::Identifier && token.text() == "closed"),
             generic_parameters: direct_child(node, SyntaxKind::GenericParameterList)
                 .map(|parameters| self.lower_generic_parameters(&parameters))

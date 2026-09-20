@@ -99,6 +99,38 @@ fn session(source: &str) -> CompilerSession {
     CompilerSession::build(request, SessionOptions::default()).unwrap()
 }
 
+#[test]
+fn trait_signatures_distinguish_closed_names_from_closed_modifiers() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for (source, expected_closed) in [
+        ("trait closed {}\n", false),
+        ("pub trait closed[T] {}\n", false),
+        ("closed trait closed {}\n", true),
+        ("pub closed trait closed[T] {}\n", true),
+    ] {
+        let mut session = session(source);
+        let analysis = session.resolve(&trait_profile(), Some(&catalog)).unwrap();
+        let resolution = analysis.resolution().expect("trait profile resolves");
+        let declaration = resolution
+            .declarations()
+            .modules()
+            .flat_map(|module| module.declarations())
+            .find(|declaration| declaration.kind() == DeclarationKind::Trait)
+            .expect("source declares one trait");
+        let FactState::Known(eglur_sema::DeclarationSignature::Trait { closed, .. }) =
+            resolution.signatures().source_declaration(declaration.id())
+        else {
+            panic!("source trait signature should be known");
+        };
+
+        assert_eq!(*closed, expected_closed, "{source}");
+        assert!(matches!(
+            session.into_diagnostics(None),
+            DiagnosticSnapshot::Accepted(_)
+        ));
+    }
+}
+
 fn file(path: &str, source: &str) -> FileInput {
     FileInput::new(path, source.as_bytes().to_vec())
 }
