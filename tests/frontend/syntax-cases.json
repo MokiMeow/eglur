@@ -414,6 +414,69 @@
         "kind": "success",
         "diagnostic_code": null
       }
+    },
+    {
+      "id": "pathless-named-pattern-leading-rest",
+      "entrypoint": "expression",
+      "source": "match input { { .., value } => value }",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "struct-pattern-leading-rest",
+      "entrypoint": "expression",
+      "source": "match input { Record { .., value } => value }",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "named-variant-pattern-leading-rest",
+      "entrypoint": "expression",
+      "source": "match input { Owner::Case { .., value } => value }",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "struct-pattern-interior-rest",
+      "entrypoint": "expression",
+      "source": "match input { Record { first, .., last: renamed } => renamed }",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "nested-pattern-payloads-have-independent-rests",
+      "entrypoint": "expression",
+      "source": "match input { Owner::Case { .., child: { .., leaf }, pair: (first, ..) } => leaf }",
+      "expectation": {
+        "kind": "success",
+        "diagnostic_code": null
+      }
+    },
+    {
+      "id": "named-pattern-separated-rests-are-rejected",
+      "entrypoint": "expression",
+      "source": "match input { Record { .., first, .. } => first }",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_INVALID_REST_POSITION"
+      }
+    },
+    {
+      "id": "nested-named-pattern-duplicate-rest-is-rejected",
+      "entrypoint": "expression",
+      "source": "match input { Outer { .., child: Inner { .., leaf, .. } } => leaf }",
+      "expectation": {
+        "kind": "parse_failure",
+        "diagnostic_code": "PARSE_INVALID_REST_POSITION"
+      }
     }
   ]
 }

@@ -47,7 +47,7 @@ fn projected_corpus_has_exact_lexical_outcomes() {
     let corpus = read_corpus();
     assert_eq!(corpus.schema_version, "0.1");
     assert!(corpus.input_digest.starts_with("sha256:"));
-    assert_eq!(corpus.cases.len(), 2133);
+    assert_eq!(corpus.cases.len(), 2140);
 
     let mut lexical_failures = 0;
     for (index, case) in corpus.cases.into_iter().enumerate() {
@@ -230,7 +230,7 @@ fn projected_corpus_has_exact_parser_outcomes_and_lossless_trees() {
     }
 
     assert_eq!(lexical_failures, 26);
-    assert_eq!(parse_failures, 76);
+    assert_eq!(parse_failures, 78);
 }
 
 #[test]

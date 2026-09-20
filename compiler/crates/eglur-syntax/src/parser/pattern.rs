@@ -176,9 +176,6 @@ impl Parser<'_> {
                     }
                     saw_rest = true;
                 } else {
-                    if saw_rest {
-                        self.error_current(SyntaxDiagnosticKind::ParseInvalidRestPosition);
-                    }
                     self.expect_identifier();
                     if self.eat(TokenKind::Colon) {
                         self.parse_pattern();

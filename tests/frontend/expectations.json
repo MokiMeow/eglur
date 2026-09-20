@@ -38388,6 +38388,40 @@
     {
       "entrypoint": "expression",
       "expectation": {
+        "diagnostic_code": "PARSE_INVALID_REST_POSITION",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "named-pattern-separated-rests-are-rejected",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Record { .., first, .. } => first }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "named-variant-pattern-leading-rest",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Owner::Case { .., value } => value }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
         "diagnostic_code": null,
         "kind": "success",
         "primary_span": null
@@ -38400,6 +38434,40 @@
       "source": {
         "kind": "utf8",
         "text": "add((1\n+ 2), 3)"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": "PARSE_INVALID_REST_POSITION",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "nested-named-pattern-duplicate-rest-is-rejected",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Outer { .., child: Inner { .., leaf, .. } } => leaf }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "nested-pattern-payloads-have-independent-rests",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Owner::Case { .., child: { .., leaf }, pair: (first, ..) } => leaf }"
       }
     },
     {
@@ -38580,6 +38648,23 @@
         "primary_span": null
       },
       "origin": {
+        "case_id": "pathless-named-pattern-leading-rest",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { { .., value } => value }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
         "case_id": "reduce-canonical-axis-set-selects-phase",
         "kind": "syntax_case"
       },
@@ -38709,6 +38794,40 @@
       }
     },
     {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "struct-pattern-interior-rest",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Record { first, .., last: renamed } => renamed }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "struct-pattern-leading-rest",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Record { .., value } => value }"
+      }
+    },
+    {
       "entrypoint": "expression_sequence",
       "expectation": {
         "diagnostic_code": null,
@@ -38777,6 +38896,6 @@
       }
     }
   ],
-  "input_digest": "sha256:0b2be25928b0234cfe6b73be442349e7dfc18414bb74d3305a77f602209caf54",
+  "input_digest": "sha256:f9e180719089e4ea54c9a684858a63b0accda427ad68cbcf4c8194068dd01bb4",
   "schema_version": "0.1"
 }
