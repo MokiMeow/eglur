@@ -236,6 +236,61 @@ fn diagnostic_codes(snapshot: &DiagnosticSnapshot) -> Vec<&str> {
 }
 
 #[test]
+fn explicit_variant_visibility_is_rejected_without_poisoning_valid_siblings() {
+    let external = empty_external();
+    for enum_visibility in ["", "pub "] {
+        for payload in ["", "()", "(Missing)", "{ value: Missing }"] {
+            let text = format!(
+                "{enum_visibility}enum Token {{\n pub /* modifier */ Hidden{payload}\n Good(i64)\n}}\n"
+            );
+            let prepared = prepare("main.eglur", &text);
+            let expected_span = prepared
+                .hir
+                .items()
+                .find_map(|(_, item)| {
+                    let eglur_hir::ItemKind::Enum(declaration) = item.kind() else {
+                        return None;
+                    };
+                    Some(prepared.hir.origin(declaration.variants[0].origin).source())
+                })
+                .unwrap();
+            let analysis = analyze(&text, &CapabilitySet::signatures(), Some(&external), None);
+            assert_eq!(
+                diagnostic_codes(&analysis.diagnostics),
+                ["ENUM_VARIANT_VISIBILITY_FORBIDDEN"],
+                "{text}"
+            );
+            assert_eq!(
+                analysis.diagnostics.diagnostics()[0]
+                    .primary_span()
+                    .as_source()
+                    .unwrap()
+                    .file_span(),
+                expected_span
+            );
+
+            let hidden = source_def(
+                &analysis.declarations,
+                "Hidden",
+                DeclarationKind::EnumVariant,
+            );
+            let good = source_def(&analysis.declarations, "Good", DeclarationKind::EnumVariant);
+            let signatures = analysis.signatures.unwrap();
+            assert!(matches!(
+                signatures.source_declaration(hidden),
+                FactState::Poisoned(_)
+            ));
+            assert!(matches!(
+                signatures.source_declaration(good),
+                FactState::Known(DeclarationSignature::EnumVariant {
+                    payload: EnumVariantPayloadSignature::Tuple(fields),
+                }) if fields.len() == 1
+            ));
+        }
+    }
+}
+
+#[test]
 fn type_lookup_diagnostics_select_the_name_path_without_its_arguments() {
     for (prefix, spelling, name) in [
         ("", "Missing[i64]", "Missing"),

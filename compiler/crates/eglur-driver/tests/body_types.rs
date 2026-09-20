@@ -19,6 +19,9 @@ mod branch_traversal;
 #[path = "body_types/construction_traversal.rs"]
 mod construction_traversal;
 
+#[path = "body_types/enum_declarations.rs"]
+mod enum_declarations;
+
 #[path = "body_types/failure_traversal.rs"]
 mod failure_traversal;
 

@@ -1215,6 +1215,15 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         if !variant.name.is_valid() {
             return self.invalid_resolution(source, variant.name.origin());
         }
+        if variant.visibility == eglur_hir::Visibility::Public {
+            return Ok(Resolution::Poisoned(self.source_error(
+                source,
+                variant.origin,
+                "ENUM_VARIANT_VISIBILITY_FORBIDDEN",
+                "enum variant visibility modifiers are forbidden in v0.1",
+                BTreeMap::new(),
+            )?));
+        }
         let context = self.source_context(parent, false)?;
         match &variant.payload {
             EnumVariantPayload::Absent => {
