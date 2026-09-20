@@ -8,6 +8,79 @@ fn written(text: &str, span: FileSpan) -> &str {
 }
 
 #[test]
+fn inline_bounds_keep_ordered_path_arguments_and_written_origins() {
+    for declaration in [
+        "fn sample[PARAMS]() -> Unit = ()",
+        "struct Container[PARAMS] {}",
+        "enum Choice[PARAMS] {}",
+        "trait Contract[PARAMS] {}",
+        "impl[PARAMS] Contract for Container[T] {}",
+        "type Alias[PARAMS] = T",
+    ] {
+        let parameters = "T: pkg::First[Left, Right] + Other, U: Final[T]";
+        let text = format!("{}\n", declaration.replace("PARAMS", parameters));
+        let source = SourceFile::new(FileId::new(0), text.as_bytes().to_vec());
+        let FrontendOutcome::Parsed(parse) = parse(&source) else {
+            panic!("source should reach the parser");
+        };
+        assert!(parse.is_success(), "{text}: {:?}", parse.diagnostics());
+        let hir = lower(&parse);
+        assert!(hir.invalid_occurrences().is_empty(), "{text}");
+        assert_eq!(hir.roots().len(), 1);
+        let parameters = match hir.item(hir.roots()[0]).kind() {
+            ItemKind::Function(item) => &item.generic_parameters,
+            ItemKind::Struct(item) => &item.generic_parameters,
+            ItemKind::Enum(item) => &item.generic_parameters,
+            ItemKind::Trait(item) => &item.generic_parameters,
+            ItemKind::Impl(item) => &item.generic_parameters,
+            ItemKind::TypeAlias(item) => &item.generic_parameters,
+            _ => panic!("source should contain a generic declaration"),
+        };
+        assert_eq!(
+            parameters
+                .iter()
+                .map(|parameter| (parameter.name.text().unwrap(), parameter.bounds.len()))
+                .collect::<Vec<_>>(),
+            [("T", 2), ("U", 1)]
+        );
+
+        let expected: [(&str, &str, &[&str]); 3] = [
+            ("pkg::First[Left, Right]", "pkg::First", &["Left", "Right"]),
+            ("Other", "Other", &[]),
+            ("Final[T]", "Final", &["T"]),
+        ];
+        let bounds = parameters.iter().flat_map(|parameter| &parameter.bounds);
+        for (&bound, (spelling, path_spelling, argument_names)) in bounds.zip(expected) {
+            let ty = hir.type_ref(bound);
+            let TypeRefKind::Path { path, arguments } = ty.kind() else {
+                panic!("a nominal bound must retain its path type");
+            };
+            let origin = hir.origin(ty.origin()).source();
+            assert_eq!(origin.file(), source.id());
+            assert_eq!(written(&text, origin).trim(), spelling);
+            assert_eq!(
+                written(&text, hir.origin(path.origin()).source()),
+                path_spelling
+            );
+            assert_eq!(arguments.len(), argument_names.len());
+            for (&argument, &name) in arguments.iter().zip(argument_names) {
+                let ty = hir.type_ref(argument);
+                let TypeRefKind::Path { path, arguments } = ty.kind() else {
+                    panic!("the bound argument should retain its path type");
+                };
+                assert!(arguments.is_empty());
+                assert_eq!(path.segments().len(), 1);
+                assert_eq!(path.last().unwrap().text(), Some(name));
+                assert_eq!(
+                    written(&text, hir.origin(ty.origin()).source()).trim(),
+                    name
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn type_paths_exclude_arguments_but_type_occurrences_retain_their_complete_spans() {
     let cases: &[(&str, &[&str])] = &[
         ("i64", &["i64"]),

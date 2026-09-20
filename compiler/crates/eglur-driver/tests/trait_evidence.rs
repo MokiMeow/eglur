@@ -3,6 +3,7 @@ use eglur_driver::{
     CompilerSession, FileInput, FileSetRequest, SessionOptions, SupportProfile, SupportProfileId,
     SupportSchemaVersion, TrustedCatalog,
 };
+use eglur_hir::ItemKind;
 use eglur_sema::{
     CanonicalTarget, CheckedDispatch, CompileCapability, DeclarationKind, EvidenceSource,
     FactState, InvocationTarget, PhaseProduct, ResolveCapability, TypecheckCapability,
@@ -97,6 +98,80 @@ fn unselected_evidence_phase_preserves_body_facts_without_claiming_dispatch() {
 fn session(source: &str) -> CompilerSession {
     let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
     CompilerSession::build(request, SessionOptions::default()).unwrap()
+}
+
+#[test]
+fn malformed_inline_bounds_keep_their_syntax_root_through_semantic_analysis() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for (bound, head) in [
+        ("&Show", "&"),
+        ("&mut Show", "&"),
+        ("*const Show", "*"),
+        ("*mut Show", "*"),
+        ("(Show)", "("),
+        ("(Show, Other)", "("),
+        ("Fn(i64) -> Unit", "Fn"),
+        ("dyn Show", "dyn"),
+    ] {
+        let text = format!(
+            "trait Show {{}}\ntrait Other {{}}\nfn broken[T: {bound}]() -> Unit = ()\nfn following() -> Unit = ()\n"
+        );
+        let mut session = session(&text);
+        let source = &session.sources()[0];
+        assert!(!source.parse().unwrap().is_success(), "{text}");
+        let hir = source.hir().unwrap();
+        assert!(!hir.invalid_occurrences().is_empty(), "{text}");
+        assert_eq!(
+            source.invalid_facts().len(),
+            hir.invalid_occurrences().len()
+        );
+        assert!(
+            source
+                .invalid_facts()
+                .all(|fact| !fact.occurrence().syntax_causes().is_empty())
+        );
+        for (cause, _) in hir.syntax_causes() {
+            assert!(source.syntax_poison(cause).is_some());
+        }
+        let ItemKind::Function(following) = hir.item(*hir.roots().last().unwrap()).kind() else {
+            panic!("the following function must survive recovery: {text}");
+        };
+        assert_eq!(following.name.text(), Some("following"));
+
+        session.resolve(&trait_profile(), Some(&catalog)).unwrap();
+        let snapshot = session.into_diagnostics(None);
+        let diagnostics = snapshot.diagnostics();
+        assert_eq!(diagnostics.len(), 1, "{text}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code().as_str(), "PARSE_UNEXPECTED_TOKEN");
+        let span = diagnostics[0]
+            .primary_span()
+            .as_source()
+            .unwrap()
+            .file_span()
+            .range();
+        assert_eq!(span.start().as_usize(), text.find(bound).unwrap());
+        assert_eq!(&text[span.start().as_usize()..span.end().as_usize()], head);
+    }
+}
+
+#[test]
+fn non_trait_and_duplicate_bound_paths_remain_semantic_errors() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for text in [
+        "struct Plain {}\nfn sample[T: Plain](value: T) -> T = value\n",
+        "trait Show {}\nfn sample[T: Show + Show](value: T) -> T = value\n",
+    ] {
+        let mut session = session(text);
+        let source = &session.sources()[0];
+        assert!(source.parse().unwrap().is_success(), "{text}");
+        assert!(source.hir().unwrap().invalid_occurrences().is_empty());
+
+        session.resolve(&trait_profile(), Some(&catalog)).unwrap();
+        let snapshot = session.into_diagnostics(None);
+        let diagnostics = snapshot.diagnostics();
+        assert_eq!(diagnostics.len(), 1, "{text}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code().as_str(), "TRAIT_BOUND_INVALID");
+    }
 }
 
 #[test]
