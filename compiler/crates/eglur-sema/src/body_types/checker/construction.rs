@@ -165,7 +165,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: initializer.origin,
                 related: self.target_span(field_target),
                 evaluation_order: initializers[field_target],
-                receiver_adjustment: false,
+                passing: ArgumentPassing::Value,
             });
         }
         let result_template = self.nominal_template(target.clone(), &generic_parameters)?;
@@ -402,7 +402,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         origin: self.expression_origin(source, value)?,
                         related: None,
                         evaluation_order: index,
-                        receiver_adjustment: false,
+                        passing: ArgumentPassing::Value,
                     });
                 }
                 Ok(Outcome::Known(slots))
@@ -490,7 +490,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         origin: initializer.origin,
                         related: self.target_span(declaration),
                         evaluation_order: initializers[declaration],
-                        receiver_adjustment: false,
+                        passing: ArgumentPassing::Value,
                     });
                 }
                 Ok(Outcome::Known(slots))

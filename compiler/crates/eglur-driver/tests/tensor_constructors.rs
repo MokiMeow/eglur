@@ -317,7 +317,10 @@ fn dimension_invocations_preserve_source_order_and_divergence() {
         })
         .unwrap();
     assert_eq!(invocation.arguments().len(), 2);
-    assert_eq!(invocation.arguments(), invocation.evaluation_order());
+    assert_eq!(
+        invocation.arguments().iter().collect::<Vec<_>>(),
+        invocation.evaluation_order().collect::<Vec<_>>()
+    );
     accept(
         "import std::tensor::ones\nimport std::tensor::Tensor\nfn stop() -> Never = stop()\nfn make() -> Tensor[f32] = ones[f32](stop(), { return ones[f32](2) })\n",
     );

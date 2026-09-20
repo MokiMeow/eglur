@@ -354,7 +354,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: index,
-                receiver_adjustment: false,
+                passing: ArgumentPassing::Value,
             })
             .collect::<Vec<_>>();
         let qualified = body
@@ -401,6 +401,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         request: MethodCallRequest<'_>,
         candidate: MethodCandidate,
+        passing: ArgumentPassing,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let source = context.source;
         let bindings =
@@ -417,7 +418,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             origin: self.expression_origin(source, request.receiver)?,
             related: self.parameter_span(&candidate.callable, receiver_parameter)?,
             evaluation_order: 0,
-            receiver_adjustment: true,
+            passing,
         });
         for (parameter_index, parameter) in candidate.callable.parameters()[1..].iter().enumerate()
         {
@@ -433,7 +434,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: self.parameter_span(&candidate.callable, parameter)?,
                 evaluation_order: argument_index + 1,
-                receiver_adjustment: false,
+                passing: ArgumentPassing::Value,
             });
         }
         let plan = self.prepare_application(

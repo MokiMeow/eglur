@@ -5,12 +5,12 @@ use eglur_hir::{
     PatternElement, PatternId, PatternKind, PatternPayload, StmtId, StmtKind, UnaryOperator,
 };
 use eglur_sema::{
-    CallableSignature, CanonicalTarget, CheckedDispatch, CheckedEntryResult,
+    ArgumentPassing, CallableSignature, CanonicalTarget, CheckedDispatch, CheckedEntryResult,
     CheckedNumericOperator, CheckedProgram, DeclarationSignature, DefId, EvidenceEnvironment,
-    EvidenceSource, ExpressionKey, ExternalDefId, FactState, IntegerEvaluation, InvocationFact,
-    InvocationTarget, LanguageItem, LocalBindingId, MemberKind, ModuleId, NumericFaultCause,
-    PhaseProduct, PrimitiveType, ResolutionKey, ResolvedName, SubstId, TraitEvidence, TypeId,
-    TypeKind, TypedPlaceKind, WitnessSlotId,
+    EvidenceSource, ExpressionKey, ExternalDefId, FactState, IntegerEvaluation, InvocationArgument,
+    InvocationFact, InvocationTarget, LanguageItem, LocalBindingId, MemberKind, ModuleId,
+    NumericFaultCause, PhaseProduct, PrimitiveType, ResolutionKey, ResolvedName, SubstId,
+    TraitEvidence, TypeId, TypeKind, TypedPlaceKind, WitnessSlotId,
 };
 
 use crate::{

@@ -407,7 +407,7 @@ impl BodyCollector<'_> {
                                 ..
                             })
                         )
-                        .then_some(argument)
+                        .then_some(argument.expression())
                     })
                     .map(|argument| self.expression_roots(argument, state).map(MutablePath::new))
                     .collect::<Result<Vec<_>, _>>()?

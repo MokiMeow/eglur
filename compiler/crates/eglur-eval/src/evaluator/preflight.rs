@@ -530,7 +530,10 @@ impl<'a> Planner<'a> {
                     UnsupportedFeature::InvalidCheckedProgram,
                 ))?;
         for argument in invocation.evaluation_order() {
-            self.plan_expr(module, *argument, witnesses)?;
+            if argument.passing() != ArgumentPassing::Value {
+                self.require(ExecutionCapability::ReferencesAndMutation)?;
+            }
+            self.plan_expr(module, argument.expression(), witnesses)?;
         }
         let evidence = self.view.trait_evidence().ok_or(SupportReason::Feature(
             UnsupportedFeature::InvalidCheckedProgram,
@@ -553,28 +556,31 @@ impl<'a> Planner<'a> {
             }
             InvocationTarget::Callable(_) => {
                 let direct_target = self.dispatch_target(checked.dispatch(), witnesses)?;
-                let target = self
+                let adapter = self
                     .view
-                    .trait_adapter_target(
+                    .trait_adapter_dispatch(
                         &direct_target,
                         module,
                         invocation.arguments(),
                         environment,
                         witnesses,
                     )
-                    .map_err(|_| SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram))?
-                    .unwrap_or(direct_target);
+                    .map_err(|_| {
+                        SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram)
+                    })?;
+                let target = if let Some(adapter) = adapter {
+                    if adapter.borrow_argument.is_some() {
+                        self.require(ExecutionCapability::ReferencesAndMutation)?;
+                    }
+                    adapter.target
+                } else {
+                    direct_target
+                };
                 match target {
                     CanonicalTarget::Source(declaration) => self.plan_callable(declaration, &child),
                     CanonicalTarget::External(declaration) => {
                         let hook = self.plan_hook(&declaration)?;
-                        self.plan_hook_arguments(
-                            hook,
-                            module,
-                            invocation.arguments(),
-                            environment,
-                            witnesses,
-                        )
+                        self.plan_hook_arguments(hook, &declaration, invocation.arguments())
                     }
                 }
             }
@@ -609,67 +615,32 @@ impl<'a> Planner<'a> {
     fn plan_hook_arguments(
         &self,
         hook: RuntimeHook,
-        module: ModuleId,
-        arguments: &[ExprId],
-        environment: &EvidenceEnvironment,
-        witnesses: &Witnesses,
+        declaration: &ExternalDefId,
+        arguments: &[InvocationArgument],
     ) -> Result<(), SupportReason> {
         if hook != RuntimeHook::ToStr {
             return Ok(());
         }
-        let [argument] = arguments else {
+        if arguments.len() != 1 {
             return Err(SupportReason::Feature(
                 UnsupportedFeature::InvalidCheckedProgram,
             ));
-        };
-        let key = ExpressionKey::new(module, *argument);
-        let FactState::Known(typed) = self.view.program.resolution().body_types().expression(key)
-        else {
-            return Err(SupportReason::Feature(
-                UnsupportedFeature::InvalidCheckedProgram,
-            ));
-        };
-        let primitive = match self
+        }
+        let signature = self
             .view
-            .program
-            .resolution()
-            .signatures()
-            .types()
-            .kind(typed.ty())
-        {
-            Ok(TypeKind::Primitive(primitive)) => Some(*primitive),
-            Ok(_) => environment
-                .entries()
-                .iter()
-                .find(|entry| entry.subject() == typed.ty())
-                .and_then(|entry| match entry.source() {
-                    EvidenceSource::Bound(witness) => {
-                        Some(witnesses.get(witness)?.implementation.clone())
-                    }
-                    EvidenceSource::Implementation { implementation, .. } => {
-                        Some(implementation.clone())
-                    }
-                })
-                .and_then(|implementation| {
-                    self.view
-                        .program
-                        .resolution()
-                        .trait_environment()
-                        .checked_impl_target(&implementation)
-                })
-                .and_then(|target| {
-                    match self
-                        .view
-                        .program
-                        .resolution()
-                        .signatures()
-                        .types()
-                        .kind(target)
-                    {
-                        Ok(TypeKind::Primitive(primitive)) => Some(*primitive),
-                        Ok(_) | Err(_) => None,
-                    }
-                }),
+            .callable_signature(&CanonicalTarget::External(declaration.clone()))
+            .ok_or(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ))?;
+        let [parameter] = signature.parameters() else {
+            return Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ));
+        };
+        let types = self.view.program.resolution().signatures().types();
+        let subject = match types.kind(parameter.ty()) {
+            Ok(TypeKind::Reference { referent, .. }) => *referent,
+            Ok(_) => parameter.ty(),
             Err(_) => {
                 return Err(SupportReason::Feature(
                     UnsupportedFeature::InvalidCheckedProgram,
@@ -677,8 +648,8 @@ impl<'a> Planner<'a> {
             }
         };
         if matches!(
-            primitive,
-            Some(
+            types.kind(subject),
+            Ok(TypeKind::Primitive(
                 PrimitiveType::Bool
                     | PrimitiveType::I8
                     | PrimitiveType::I16
@@ -691,7 +662,7 @@ impl<'a> Planner<'a> {
                     | PrimitiveType::Nat
                     | PrimitiveType::PositiveNat
                     | PrimitiveType::Str
-            )
+            ))
         ) {
             Ok(())
         } else {

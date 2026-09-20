@@ -43,6 +43,9 @@ mod pattern_bindings;
 #[path = "body_types/residual_patterns.rs"]
 mod residual_patterns;
 
+#[path = "body_types/receiver_adjustment.rs"]
+mod receiver_adjustment;
+
 #[path = "body_types/statements.rs"]
 mod statements;
 

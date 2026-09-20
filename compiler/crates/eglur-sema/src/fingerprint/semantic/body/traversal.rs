@@ -94,9 +94,7 @@ impl NodeHasher<'_> {
                         invocation
                             .arguments()
                             .iter()
-                            .chain(invocation.evaluation_order())
-                            .copied()
-                            .map(BodyNode::Expression),
+                            .map(|argument| BodyNode::Expression(argument.expression())),
                     );
                 }
             }

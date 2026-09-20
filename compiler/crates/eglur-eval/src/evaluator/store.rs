@@ -75,6 +75,13 @@ pub(super) struct Store {
 }
 
 impl Store {
+    pub(super) fn borrow_temporary(&mut self, value: RuntimeValue) -> RuntimeValue {
+        RuntimeValue::Reference(Place {
+            root: self.allocate(value),
+            projections: Vec::new(),
+        })
+    }
+
     pub(super) fn allocate(&mut self, value: RuntimeValue) -> usize {
         let slot = self.slots.len();
         self.slots.push(value);

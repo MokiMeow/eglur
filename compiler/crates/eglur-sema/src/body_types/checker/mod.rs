@@ -433,35 +433,19 @@ struct ApplicationSlot {
     origin: OriginId,
     related: Option<SourceSpan>,
     evaluation_order: usize,
-    receiver_adjustment: bool,
+    passing: ArgumentPassing,
 }
 
 fn invocation_fact(target: InvocationTarget, slots: &[ApplicationSlot]) -> InvocationFact {
-    let arguments = slots
-        .iter()
-        .map(|slot| slot.value)
-        .collect::<Vec<_>>()
-        .into_boxed_slice();
-    let mut evaluation_order = slots
-        .iter()
-        .map(|slot| (slot.evaluation_order, slot.value))
-        .collect::<Vec<_>>();
-    evaluation_order.sort_by_key(|(order, _)| *order);
-    debug_assert!(
-        evaluation_order
-            .windows(2)
-            .all(|pair| pair[0].0 != pair[1].0),
-        "checked invocation slots must have distinct evaluation order"
-    );
-    InvocationFact {
+    InvocationFact::new(
         target,
-        arguments,
-        evaluation_order: evaluation_order
-            .into_iter()
-            .map(|(_, value)| value)
-            .collect::<Vec<_>>()
-            .into_boxed_slice(),
-    }
+        slots.iter().map(|slot| {
+            (
+                slot.evaluation_order,
+                InvocationArgument::new(slot.value, slot.passing),
+            )
+        }),
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

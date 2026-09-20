@@ -165,6 +165,49 @@ fn shuffled_source_insertion_and_observation_do_not_change_fingerprints() {
 }
 
 #[test]
+fn receiver_passing_fingerprints_ignore_labels_and_trivia_but_retain_call_semantics() {
+    let declarations =
+        "struct Counter { field value: i64\nfn read(self: &Self) -> i64 = self.value\n}\n";
+    let source = format!("{declarations}pub fn inspect(value: Counter) -> i64 = value.read()\n");
+    let base = resolve([file("main.eglur", &source)], "main.eglur", false);
+    let labeled = resolve(
+        [FileInput::with_source_label(
+            "main.eglur",
+            "generated:receiver",
+            source.as_bytes().to_vec(),
+        )],
+        "main.eglur",
+        true,
+    );
+    assert_eq!(base, labeled);
+
+    let spaced = resolve(
+        [file(
+            "main.eglur",
+            &format!(
+                "{declarations}\npub fn inspect(value: Counter) -> i64 = value /* borrow */ .read()\n"
+            ),
+        )],
+        "main.eglur",
+        false,
+    );
+    assert_eq!(base.semantics, spaced.semantics);
+    assert_ne!(base.analysis, spaced.analysis);
+
+    let temporary = resolve(
+        [file(
+            "main.eglur",
+            &format!(
+                "{declarations}pub fn inspect(value: Counter) -> i64 = (Counter {{ value: value.value }}).read()\n"
+            ),
+        )],
+        "main.eglur",
+        false,
+    );
+    assert_ne!(outputs(&base, "main"), outputs(&temporary, "main"));
+}
+
+#[test]
 fn diagnostic_source_labels_do_not_change_semantic_fingerprints() {
     let source = "pub fn value() -> i64 = 1\n";
     let default = resolve([file("main.eglur", source)], "main.eglur", false);
