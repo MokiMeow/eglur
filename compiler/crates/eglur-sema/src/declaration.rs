@@ -39,6 +39,10 @@ pub enum DeclarationKind {
 }
 
 impl DeclarationKind {
+    pub(crate) const fn is_variant_constructor(self) -> bool {
+        matches!(self, Self::EnumVariant | Self::IntrinsicConstructor)
+    }
+
     #[must_use]
     pub const fn namespace(self) -> Option<Namespace> {
         match self {

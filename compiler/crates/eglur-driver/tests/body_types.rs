@@ -16,6 +16,9 @@ mod application;
 #[path = "body_types/branch_traversal.rs"]
 mod branch_traversal;
 
+#[path = "body_types/braced_patterns.rs"]
+mod braced_patterns;
+
 #[path = "body_types/construction_traversal.rs"]
 mod construction_traversal;
 

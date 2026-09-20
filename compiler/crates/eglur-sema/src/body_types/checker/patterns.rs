@@ -166,6 +166,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Deferred => return Ok(Outcome::Deferred),
             Outcome::Unperformed | Outcome::NotApplicable => return Ok(Outcome::Unperformed),
         };
+        if matches!(payload, eglur_hir::PatternPayload::Named(_))
+            && target.kind.is_type_namespace_target()
+        {
+            return Ok(self.unsupported(
+                TypecheckCapability::CheckAdvancedPatterns,
+                source,
+                pattern.origin(),
+            ));
+        }
         if target.kind != ResolvedTargetKind::VariantConstructor {
             return self
                 .pattern_type_mismatch(source, pattern.origin(), "variant", expected, None)
