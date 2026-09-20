@@ -116,6 +116,13 @@ including unary minus and fractional division. Diagnostics retain canonical
 operand types before promotion and suppress errors derived from poisoned operands.
 Constant initializers cannot execute general function calls.
 
+The bounded ownership pass checks straight-line code, `if` branches, and
+`result`/`checked` exits. A typed body that this pass cannot finish reports
+`typecheck.complete_ownership_flow` at its callable; ownership-relevant `match`
+is one such case. It cannot produce a checked program, but checked sibling
+bodies and their diagnostics are retained. Loops and closures currently stop
+during body typing and keep their own missing-capability reports.
+
 `SupportProfile::tensor_constructors_v1()` adds static checks for positional
 `zeros[T](...)`, `ones[T](...)`, `nan[f32](...)`, and `rand![f32](...)` calls.
 It resolves dtype aliases, checks dimensions against `Nat`, and records the

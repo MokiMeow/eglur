@@ -152,6 +152,17 @@ fn capability_trace_deduplicates_locations_and_rejects_profile_drift() {
 }
 
 #[test]
+fn complete_ownership_flow_cannot_be_enabled_before_it_is_implemented() {
+    let full =
+        CompileCapability::Typecheck(eglur_sema::TypecheckCapability::CheckCompleteOwnershipFlow);
+    let core = SupportProfile::semantic_core_v1();
+    assert!(matches!(
+        profile(core.compile_capabilities().chain([full])),
+        Err(SupportProfileError::UnimplementedCapability(capability)) if capability == full
+    ));
+}
+
+#[test]
 fn semantic_core_profile_and_unsupported_inventory_partition_closed_vocabularies() {
     let profile = SupportProfile::semantic_core_v1();
     let manifest = SupportManifest::from_profile(&profile);

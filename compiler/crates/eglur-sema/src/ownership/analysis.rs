@@ -50,6 +50,20 @@ pub fn analyze_ownership(
 
     let (facts, failures) =
         build_ownership_facts(collection, names, sources, signatures, body_types)?;
+
+    for module in collection.modules() {
+        for declaration in module.declarations() {
+            if let FactState::Known(summary) = facts.body(declaration.id())
+                && summary.status() == super::OwnershipBodyStatus::Unperformed
+            {
+                recorder.require(
+                    CompileCapability::Typecheck(TypecheckCapability::CheckCompleteOwnershipFlow),
+                    SemanticLocation::origin(module.file(), declaration.origin()),
+                );
+            }
+        }
+    }
+
     emit_ownership_diagnostics(&failures, collection, names, sources, diagnostics)?;
     Ok(recorder.finish(PhaseProduct::Performed(facts)))
 }

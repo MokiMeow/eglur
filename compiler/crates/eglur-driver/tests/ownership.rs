@@ -11,6 +11,9 @@ use eglur_sema::{
 #[path = "ownership/traversal.rs"]
 mod traversal;
 
+#[path = "ownership/unsupported.rs"]
+mod unsupported;
+
 fn body_capabilities() -> [CompileCapability; 14] {
     [
         CompileCapability::Resolve(ResolveCapability::CollectDeclarations),
@@ -754,12 +757,12 @@ fn ownership_phase_is_unperformed_when_the_capability_is_not_selected() {
 #[test]
 fn unsupported_ownership_control_flow_keeps_checked_body_results() {
     let mut session = session(concat!(
-        "fn deferred(x: Own[i64], flag: Bool) -> i64 = match flag {\n",
-        "  true => {\n",
+        "fn deferred(x: Own[i64], input: Opt[i64]) -> i64 = match input {\n",
+        "  None => {\n",
         "    drop_own move x\n",
         "    yield 1\n",
         "  },\n",
-        "  false => {\n",
+        "  Some(_) => {\n",
         "    drop_own move x\n",
         "    yield 0\n",
         "  },\n",
@@ -777,6 +780,10 @@ fn unsupported_ownership_control_flow_keeps_checked_body_results() {
         panic!("checked ownership facts must remain observable");
     };
     assert!(!facts.is_complete());
+    assert!(analysis.trace().missing().any(|entry| {
+        entry.capability()
+            == CompileCapability::Typecheck(TypecheckCapability::CheckCompleteOwnershipFlow)
+    }));
     assert_eq!(
         diagnostic_codes(&session.into_diagnostics(None)),
         ["OWNERSHIP_PATH_UNBALANCED"]
@@ -787,9 +794,9 @@ fn unsupported_ownership_control_flow_keeps_checked_body_results() {
 fn unsupported_match_returning_an_ownership_value_is_not_vacuously_checked() {
     let mut session = session(concat!(
         "fn make(n: i64) -> Own[i64] { return own n }\n",
-        "fn choose(flag: Bool) -> Own[i64] = match flag {\n",
-        "  true => make(1),\n",
-        "  false => make(2),\n",
+        "fn choose(input: Opt[i64]) -> Own[i64] = match input {\n",
+        "  None => make(1),\n",
+        "  Some(value) => make(value),\n",
         "}\n",
     ));
     let catalog = TrustedCatalog::first_slice().unwrap();
@@ -803,6 +810,10 @@ fn unsupported_match_returning_an_ownership_value_is_not_vacuously_checked() {
     };
 
     assert!(!facts.is_complete());
+    assert!(analysis.trace().missing().any(|entry| {
+        entry.capability()
+            == CompileCapability::Typecheck(TypecheckCapability::CheckCompleteOwnershipFlow)
+    }));
     assert!(diagnostic_codes(&session.into_diagnostics(None)).is_empty());
 }
 

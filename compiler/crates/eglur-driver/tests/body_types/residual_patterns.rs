@@ -1,8 +1,6 @@
 use super::{branching_profile, diagnostic_codes, session};
-use eglur_driver::{SessionError, SupportProfile, SupportProfileId, TrustedCatalog};
-use eglur_sema::{
-    CompileCapability, PhaseProduct, ProgramSealError, ResolveCapability, TypecheckCapability,
-};
+use eglur_driver::{SupportProfile, SupportProfileId, TrustedCatalog};
+use eglur_sema::{CompileCapability, PhaseProduct, ResolveCapability, TypecheckCapability};
 
 #[test]
 fn residual_heads_contribute_variant_coverage_not_irrefutable_bindings() {
@@ -158,12 +156,13 @@ fn residual_match_arms_retain_the_existing_ownership_flow_gap() {
             .iter()
             .all(|local| local.name().text() != "None")
     );
-    assert!(matches!(
-        session.seal(None),
-        Err(SessionError::ProgramSeal(
-            ProgramSealError::IncompleteSemanticFacts
-        ))
-    ));
+    assert!(analysis.trace().missing().any(|entry| {
+        entry.capability()
+            == CompileCapability::Typecheck(TypecheckCapability::CheckCompleteOwnershipFlow)
+    }));
+    let sealed = session.seal(None).unwrap();
+    assert!(sealed.checked_program().is_none());
+    assert!(diagnostic_codes(sealed.diagnostics()).is_empty());
 }
 
 #[test]
