@@ -1,8 +1,6 @@
 use eglur_syntax::{SyntaxKind, SyntaxNode};
 
-use super::{
-    Builder, direct_child, direct_children, direct_nodes, direct_token, direct_tokens, is_type_kind,
-};
+use super::{Builder, direct_child, direct_children, direct_nodes, direct_token, is_type_kind};
 use crate::{InvalidCategory, Mutability, PointerMutability, TypeRef, TypeRefId, TypeRefKind};
 
 impl Builder {
@@ -59,7 +57,7 @@ impl Builder {
                 }
             }
             SyntaxKind::PathType => {
-                let path = self.lower_path_type_path(&node);
+                let path = self.lower_path(Some(node.clone()), node.span());
                 let arguments = direct_child(&node, SyntaxKind::TypeArgumentList)
                     .map(|arguments| self.lower_type_list_container(&arguments))
                     .unwrap_or_default();
@@ -113,19 +111,6 @@ impl Builder {
                 .find(|child| is_type_kind(child.kind())),
             node.span(),
         )
-    }
-
-    fn lower_path_type_path(&mut self, node: &SyntaxNode) -> crate::Path {
-        let origin = self.written(node.span());
-        let mut names = direct_tokens(node)
-            .into_iter()
-            .filter(|token| token.kind() == SyntaxKind::Identifier)
-            .map(|token| self.lower_name_token(Some(token), node.span()))
-            .collect::<Vec<_>>();
-        if names.is_empty() {
-            names.push(self.invalid_name(node.span()));
-        }
-        crate::Path::new(names.into_boxed_slice(), origin)
     }
 
     pub(super) fn lower_type_list_container(&mut self, node: &SyntaxNode) -> Vec<TypeRefId> {

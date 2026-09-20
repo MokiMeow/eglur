@@ -431,6 +431,7 @@ struct SourceTypeSite<'source, 'hir> {
     source: &'source SemanticSource<'hir>,
     hir: &'source HirFile,
     context: &'source SourceTypeContext,
+    type_origin: OriginId,
 }
 
 #[derive(Clone)]

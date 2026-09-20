@@ -236,6 +236,117 @@ fn diagnostic_codes(snapshot: &DiagnosticSnapshot) -> Vec<&str> {
 }
 
 #[test]
+fn type_lookup_diagnostics_select_the_name_path_without_its_arguments() {
+    for (prefix, spelling, name) in [
+        ("", "Missing[i64]", "Missing"),
+        ("", "pkg::Missing[i64]", "pkg::Missing"),
+        (
+            "",
+            "pkg /* path */ :: Missing[i64]",
+            "pkg /* path */ :: Missing",
+        ),
+        ("struct Parcel[T] {}\n", "Parcel[Missing[i64]]", "Missing"),
+    ] {
+        let text = format!("{prefix}type Target = {spelling}\n");
+        let external = empty_external();
+        let analysis = analyze(&text, &CapabilitySet::signatures(), Some(&external), None);
+        assert_eq!(diagnostic_codes(&analysis.diagnostics), ["NAME_NOT_FOUND"]);
+        let range = analysis.diagnostics.diagnostics()[0]
+            .primary_span()
+            .as_source()
+            .unwrap()
+            .file_span()
+            .range();
+        assert_eq!(
+            &text[range.start().as_usize()..range.end().as_usize()],
+            name
+        );
+    }
+}
+
+#[test]
+fn applied_type_diagnostics_keep_the_complete_type_occurrence() {
+    let arity = "TYPE_ARG_ARITY_MISMATCH";
+    let cases = [
+        ("type Target = Never[i64]\n", "Never[i64]", arity),
+        ("type Target = i64[i64]\n", "i64[i64]", arity),
+        ("type Target = Opt[i64, i64]\n", "Opt[i64, i64]", arity),
+        (
+            "struct Parcel[T] {}\ntype Target = Parcel[i64, i64]\n",
+            "Parcel[i64, i64]",
+            arity,
+        ),
+        (
+            "type Id[T] = T\ntype Target = Id[i64, i64]\n",
+            "Id[i64, i64]",
+            arity,
+        ),
+        (
+            "trait Read[T] {}\ntrait Target[X: Read[i64, i64]] {}\n",
+            "Read[i64, i64]",
+            arity,
+        ),
+        ("fn value[T]() -> T[i64] = 0\n", "T[i64]", arity),
+        (
+            "struct S { fn value() -> Self[i64] = 0\n}\n",
+            "Self[i64]",
+            arity,
+        ),
+        (
+            "trait Read { type Item\n}\nfn value[T: Read](x: T::Item[i64]) -> Unit {}\n",
+            "T::Item[i64]",
+            arity,
+        ),
+        (
+            "type Target = Union[i64]\n",
+            "Union[i64]",
+            "UNION_TYPE_ARITY_MISMATCH",
+        ),
+        (
+            "type Target = Union[i64, Bool]\n",
+            "Union[i64, Bool]",
+            "UNION_TYPE_UNSUPPORTED",
+        ),
+        (
+            "trait Read[T] {}\ntype Target = Read[i64]\n",
+            "Read[i64]",
+            "DYN_MUST_BE_EXPLICIT",
+        ),
+        (
+            "fn value[T](x: T::Item[i64]) -> Unit {}\n",
+            "T::Item[i64]",
+            "ASSOCIATED_TYPE_PROJECTION_INVALID",
+        ),
+    ];
+    for (text, spelling, code) in cases {
+        let prepared = prepare("main.eglur", text);
+        let expected = prepared
+            .hir
+            .type_refs()
+            .find_map(|(_, ty)| {
+                let span = prepared.hir.origin(ty.origin()).source();
+                let range = span.range();
+                (text[range.start().as_usize()..range.end().as_usize()].trim() == spelling)
+                    .then_some(span)
+            })
+            .expect("the source contains the tested type occurrence");
+
+        let external = empty_external();
+        let analysis = analyze(text, &CapabilitySet::signatures(), Some(&external), None);
+        assert_eq!(diagnostic_codes(&analysis.diagnostics), [code], "{text}");
+        assert_eq!(
+            analysis.diagnostics.diagnostics()[0]
+                .primary_span()
+                .as_source()
+                .unwrap()
+                .file_span(),
+            expected,
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn source_signatures_expand_aliases_and_preserve_symbolic_projection_identity() {
     let external = empty_external();
     let analysis = analyze(
