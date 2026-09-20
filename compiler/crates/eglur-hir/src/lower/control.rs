@@ -1,6 +1,7 @@
 use eglur_syntax::{SyntaxKind, SyntaxNode};
 
 use super::body::{BodyStep, expression_children};
+use super::pattern::PatternContext;
 use super::traversal::{Step, Traversal, take_tail};
 use super::{
     Builder, direct_child, direct_children, direct_nodes, direct_token, direct_tokens,
@@ -165,8 +166,12 @@ impl Builder {
             }
             ControlStep::Arm(node) => {
                 let origin = self.written(node.span());
-                let pattern =
-                    self.lower_pattern(body, direct_child(&node, SyntaxKind::Pattern), node.span());
+                let pattern = self.lower_pattern(
+                    body,
+                    direct_child(&node, SyntaxKind::Pattern),
+                    node.span(),
+                    PatternContext::Match,
+                );
                 let guard = direct_child(&node, SyntaxKind::MatchGuard);
                 let guard_origin = guard.as_ref().map(|guard| self.written(guard.span()));
                 traversal.push(

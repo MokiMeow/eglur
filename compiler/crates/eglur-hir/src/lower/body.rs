@@ -1,5 +1,6 @@
 use eglur_syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
+use super::pattern::PatternContext;
 use super::traversal::{Step, Traversal, take_tail};
 use super::{
     Builder, direct_child, direct_nodes, direct_token, direct_tokens, first_name_token,
@@ -191,8 +192,12 @@ impl Builder {
         let mut expressions = expression_children(&node).into_iter();
         let (finish, children) = match node.kind() {
             SyntaxKind::LetStmt => {
-                let pattern =
-                    self.lower_pattern(body, direct_child(&node, SyntaxKind::Pattern), node.span());
+                let pattern = self.lower_pattern(
+                    body,
+                    direct_child(&node, SyntaxKind::Pattern),
+                    node.span(),
+                    PatternContext::Binding,
+                );
                 let ty = direct_child(&node, SyntaxKind::TypeExpr)
                     .map(|ty| self.lower_type(Some(ty), node.span()));
                 let initializer = expressions.next();

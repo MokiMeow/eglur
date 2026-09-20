@@ -199,6 +199,53 @@ fn match_and_question_short_circuit_preserve_carriers() {
 }
 
 #[test]
+fn residual_patterns_select_arms_independently_of_same_spelled_locals() {
+    for (input, pattern, expected) in [
+        ("Some(3)", "None", "3"),
+        ("Some(3)", "(None)", "3"),
+        ("Some(3)", "whole @ None", "3"),
+    ] {
+        let source = format!(
+            "fn choose(None: i64, Some: i64, input: Opt[i64]) -> i64 = match input {{ {pattern} => None, Some(value) => value }}\n\
+             fn main!() -> Res[Str, Str] = Ok(to_str(choose(7, 9, {input})))\n"
+        );
+        let (program, catalog, profile) = compile_single(&source);
+        assert_eq!(
+            ok_str(completed(&program, &catalog, &profile).value()),
+            expected,
+            "{source}"
+        );
+    }
+
+    for (input, expected) in [("Ok(3)", "7"), ("Err(4)", "9")] {
+        let source = format!(
+            "fn choose(Ok: i64, Err: i64, input: Res[i64, i64]) -> i64 = match input {{ Ok(value) => Ok, Err(error) => Err }}\n\
+             fn main!() -> Res[Str, Str] = Ok(to_str(choose(7, 9, {input})))\n"
+        );
+        let (program, catalog, profile) = compile_single(&source);
+        assert_eq!(
+            ok_str(completed(&program, &catalog, &profile).value()),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn bare_residual_value_reports_its_execution_gap_before_evaluation() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn choose(input: Opt[i64]) -> i64 = match input { None => 7, Some(v) => v }\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(choose(None)))\n",
+    ));
+    assert!(matches!(
+        execute(&program, &profile, &catalog, EvaluationLimits::default()),
+        ExecutionAttempt::Unsupported(SupportReason::Feature(
+            eglur_driver::UnsupportedFeature::NonlocalValue
+        ))
+    ));
+}
+
+#[test]
 fn checked_overflow_is_an_err_value_with_a_value_diagnostic() {
     let (program, catalog, profile) = compile_single(concat!(
         "fn double(x: i8) -> Res[i8, NumericError] = checked { yield x + x }\n",

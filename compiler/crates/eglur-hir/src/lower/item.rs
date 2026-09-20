@@ -2,6 +2,7 @@ use eglur_syntax::ast::{AstNode, SourceElement, SourceFile};
 use eglur_syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 
 use super::body::expression_children;
+use super::pattern::PatternContext;
 use super::{
     Builder, direct_child, direct_children, direct_nodes, direct_token, direct_tokens,
     first_name_token, is_trivia,
@@ -402,6 +403,7 @@ impl Builder {
                     body,
                     direct_child(&parameter, SyntaxKind::Pattern),
                     parameter.span(),
+                    PatternContext::Binding,
                 ),
                 ty: direct_child(&parameter, SyntaxKind::TypeExpr)
                     .map(|ty| self.lower_type(Some(ty), parameter.span())),

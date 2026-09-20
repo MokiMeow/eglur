@@ -6,7 +6,7 @@ use eglur_diagnostics::{
 use eglur_hir::{
     BodyId, EnumVariantPayload, ExprKind, FunctionBody, GenericParameter, HirFile, ItemKind,
     LiteralKind, Mutability, Name, OriginId, Parameter, PatternKind, PointerMutability, StmtKind,
-    TypeRefId, TypeRefKind,
+    TypeRefId, TypeRefKind, is_residual_constructor_name,
 };
 use eglur_source::FileId;
 
@@ -626,10 +626,6 @@ fn generic_target(parameter: &GenericParameterId) -> CanonicalTarget {
     }
 }
 
-fn is_reserved_value_constructor_name(name: &str) -> bool {
-    matches!(name, "Some" | "None" | "Ok" | "Err")
-}
-
 fn introduces_reserved_name(kind: DeclarationKind, name: &str) -> bool {
     (matches!(
         kind,
@@ -640,7 +636,7 @@ fn introduces_reserved_name(kind: DeclarationKind, name: &str) -> bool {
             | DeclarationKind::GenericParameter
     ) && is_reserved_type_name(name))
         || (matches!(kind, DeclarationKind::Struct | DeclarationKind::EnumVariant)
-            && is_reserved_value_constructor_name(name))
+            && is_residual_constructor_name(name))
 }
 
 fn target_label(target: &CanonicalTarget) -> String {
