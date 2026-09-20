@@ -232,6 +232,35 @@ fn private_body_changes_only_the_body_semantic_family() {
 }
 
 #[test]
+fn written_function_body_form_reaches_only_the_body_fingerprint() {
+    let block = resolve(
+        [file("main.eglur", "pub fn value() -> i64 { yield 7 }\n")],
+        "main.eglur",
+        false,
+    );
+    let expression = resolve(
+        [file("main.eglur", "pub fn value() -> i64 = { yield 7 }\n")],
+        "main.eglur",
+        false,
+    );
+    let with_trivia = resolve(
+        [file(
+            "main.eglur",
+            "pub fn value() -> i64 =\n/* body */ { yield 7 }\n",
+        )],
+        "main.eglur",
+        false,
+    );
+    let block = outputs(&block, "main");
+    let expression = outputs(&expression, "main");
+
+    assert_eq!(block.interface(), expression.interface());
+    assert_eq!(block.effect(), expression.effect());
+    assert_ne!(block.body(), expression.body());
+    assert_eq!(expression, outputs(&with_trivia, "main"));
+}
+
+#[test]
 fn private_struct_method_changes_do_not_escape_the_module_interface() {
     let before = resolve(
         [file(

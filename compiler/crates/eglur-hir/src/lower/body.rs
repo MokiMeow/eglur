@@ -270,9 +270,9 @@ impl Builder {
         let Some(expression) = expression_children(declaration).into_iter().next() else {
             return FunctionBody::Absent;
         };
-        let block = expression.kind() == SyntaxKind::BlockExpr;
+        let block_body = direct_token(declaration, SyntaxKind::Equal).is_none();
         let expression = self.lower_expr(body, Some(expression), declaration.span());
-        if block {
+        if block_body {
             FunctionBody::Block(expression)
         } else {
             FunctionBody::Expression(expression)
