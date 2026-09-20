@@ -23,9 +23,19 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         call: eglur_hir::DTypeCallExpr,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let BodyContext { module, source, .. } = context;
+        let (callee_id, callee) = context
+            .body
+            .grouping_chain(call.callee)
+            .last()
+            .ok_or(BodyTypingError::WrongBodyExpression(call.callee))?;
+        if !matches!(callee.kind(), ExprKind::Name(_)) {
+            return self
+                .dtype_bracket_forbidden(source, origin)
+                .map(InvocationPlan::Complete);
+        }
         let key = ResolutionKey::Expression {
             module,
-            expression: call.callee,
+            expression: callee_id,
         };
         match self.names.fact(key) {
             FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1 => {
@@ -179,10 +189,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             std::iter::repeat_n(frame.nat, frame.arguments.len()),
             frame.result,
         )?;
-        self.record_expression(
-            ExpressionKey::new(context.module, frame.callee),
-            Outcome::Known(self.value_expression(callee_ty)),
-        )?;
+        self.record_callee_type(context, frame.callee, callee_ty)?;
         let arguments = frame
             .arguments
             .iter()

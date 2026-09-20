@@ -153,6 +153,47 @@ fn development_projection_retains_profile_and_phase_observations() {
 }
 
 #[test]
+fn grouped_dynamic_callees_remain_explicitly_unsupported() {
+    for expression in [
+        "({ || () })()",
+        "(({ || () }))()",
+        "({ yield { || () } })()",
+    ] {
+        let unsupported = attempt(
+            &format!("fn main!() -> Unit = {expression}\n"),
+            &full_profile(),
+            None,
+        );
+        assert_eq!(
+            unsupported.disposition(),
+            CompileDisposition::Unsupported,
+            "{expression}"
+        );
+        assert!(matches!(
+            unsupported.compiler_result(),
+            Err(CompileAttemptError::Inconclusive(
+                CompileDisposition::Unsupported
+            ))
+        ));
+        let payload: Value =
+            serde_json::from_str(&unsupported.development_attempt().unwrap().to_json()).unwrap();
+        assert!(
+            payload["diagnostics"].as_array().unwrap().is_empty(),
+            "{payload}"
+        );
+        assert!(
+            payload["capability_trace"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["capability"] == "typecheck.closures"
+                    && entry["disposition"] == "missing"),
+            "{payload}"
+        );
+    }
+}
+
+#[test]
 fn direct_and_postfix_callee_holes_remain_explicitly_unsupported() {
     for expression in [
         "_(1)",

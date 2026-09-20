@@ -6,6 +6,9 @@ use eglur_driver::{
 };
 use eglur_sema::{CompileCapability, ResolveCapability, TypecheckCapability};
 
+#[path = "execution/grouped_calls.rs"]
+mod grouped_calls;
+
 fn execution_profile() -> SupportProfile {
     SupportProfile::new(
         SupportSchemaVersion::V1,

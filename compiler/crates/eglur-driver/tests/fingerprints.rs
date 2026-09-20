@@ -123,6 +123,33 @@ fn assert_global_conformance_dependency(snapshot: &FingerprintSnapshot) {
 }
 
 #[test]
+fn grouped_call_fingerprints_preserve_trivia_and_source_label_invariance() {
+    let source = "fn id(value: i64) -> i64 = value\npub fn value() -> i64 = ((id))(7)\n";
+    let base = resolve([file("main.eglur", source)], "main.eglur", false);
+    let labeled = resolve(
+        [FileInput::with_source_label(
+            "main.eglur",
+            "generated:grouped-call",
+            source.as_bytes().to_vec(),
+        )],
+        "main.eglur",
+        true,
+    );
+    assert_eq!(base, labeled);
+
+    let spaced = resolve(
+        [file(
+            "main.eglur",
+            "fn id(value: i64) -> i64 = value\n\npub fn value() -> i64 = (\n ( /* callee */ id )\n)(7)\n",
+        )],
+        "main.eglur",
+        false,
+    );
+    assert_eq!(base.semantics, spaced.semantics);
+    assert_ne!(base.analysis, spaced.analysis);
+}
+
+#[test]
 fn shuffled_source_insertion_and_observation_do_not_change_fingerprints() {
     let files = [
         file("a.eglur", "pub fn left() -> i64 = 1\n"),

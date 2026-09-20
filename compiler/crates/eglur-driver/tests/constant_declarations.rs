@@ -168,6 +168,14 @@ fn forward_references_faults_and_nonconstant_initializers_are_compile_errors() {
             "fn f!() -> i8 = 1\nconst A: i8 = f!()\n",
             "CONST_INIT_NOT_CONST",
         ),
+        (
+            "fn f() -> i8 = 1\nconst A: i8 = ((f))()\n",
+            "CONST_INIT_NOT_CONST",
+        ),
+        (
+            "fn f!() -> i8 = 1\nconst A: i8 = (f!)()\n",
+            "CONST_INIT_NOT_CONST",
+        ),
         ("const A: i8 = true\n", "ASSIGNMENT_TYPE_MISMATCH"),
     ] {
         let source = format!("{declarations}fn main!() -> Res[i8, Str] = Ok(A)\n");

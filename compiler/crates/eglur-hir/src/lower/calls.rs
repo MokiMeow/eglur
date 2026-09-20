@@ -77,13 +77,10 @@ impl Builder {
     pub(super) fn call_has_holes(&self, callee: ExprId, arguments: &[CallArgument]) -> bool {
         std::iter::once(callee)
             .chain(arguments.iter().map(|argument| argument.value))
-            .any(|mut id| {
-                loop {
-                    match self.bodies[id.body().index()].expressions[id.index()].kind() {
-                        ExprKind::Group(inner) => id = *inner,
-                        kind => break matches!(kind, ExprKind::Hole),
-                    }
-                }
+            .any(|id| {
+                crate::body::grouping_chain(&self.bodies[id.body().index()].expressions, id)
+                    .last()
+                    .is_some_and(|(_, expression)| matches!(expression.kind(), ExprKind::Hole))
             })
     }
 

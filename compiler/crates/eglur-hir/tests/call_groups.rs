@@ -44,6 +44,54 @@ fn written_expression<'a>(text: &'a str, hir: &HirFile, id: ExprId) -> &'a str {
 }
 
 #[test]
+fn grouping_chain_retains_occurrences_and_stops_at_the_first_non_group() {
+    for (expression, expected) in [
+        ("((f))", vec!["((f))", "(f)", "f"]),
+        ("(f((1)))", vec!["(f((1)))", "f((1))"]),
+        ("(x.read)", vec!["(x.read)", "x.read"]),
+        ("(1, 2)", vec!["(1, 2)"]),
+        ("(())", vec!["(())", "()"]),
+    ] {
+        let (text, hir, root) = lower_expression(expression);
+        let chain = hir
+            .body(root.body())
+            .grouping_chain(root)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            chain
+                .iter()
+                .map(|(id, _)| written_expression(&text, &hir, *id))
+                .collect::<Vec<_>>(),
+            expected,
+        );
+        assert!(
+            chain[..chain.len() - 1]
+                .iter()
+                .all(|(_, expr)| matches!(expr.kind(), ExprKind::Group(_)))
+        );
+        assert!(!matches!(
+            chain.last().unwrap().1.kind(),
+            ExprKind::Group(_)
+        ));
+    }
+}
+
+#[test]
+fn grouping_chain_does_not_reinterpret_another_body_occurrence() {
+    let text = "fn first() -> Unit = ((f))\nfn second() -> Unit = ((g))\n";
+    let source = SourceFile::new(FileId::new(0), text.as_bytes().to_vec());
+    let FrontendOutcome::Parsed(parse) = parse(&source) else {
+        panic!("valid source")
+    };
+    assert!(parse.is_success());
+    let hir = lower(&parse);
+    let bodies = hir.bodies().map(|(_, body)| body).collect::<Vec<_>>();
+    let foreign = bodies[1].expressions().next().unwrap().0;
+    assert!(bodies[0].grouping_chain(foreign).next().is_none());
+    assert!(bodies[1].grouping_chain(foreign).next().is_some());
+}
+
+#[test]
 fn grouped_tuple_apply_preserves_arity_order_and_surface_origin() {
     for source in [
         "((1, 2)).apply(f)",

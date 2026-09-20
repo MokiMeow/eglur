@@ -28,6 +28,9 @@ mod enum_declarations;
 #[path = "body_types/failure_traversal.rs"]
 mod failure_traversal;
 
+#[path = "body_types/grouped_calls.rs"]
+mod grouped_calls;
+
 #[path = "body_types/invocation_traversal.rs"]
 mod invocation_traversal;
 

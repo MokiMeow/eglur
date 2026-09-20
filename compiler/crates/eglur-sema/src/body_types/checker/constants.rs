@@ -11,11 +11,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 ExprKind::CatalogCall(call) => return call.member.is_bang(),
                 _ => return false,
             };
-            let bang = body.expression(callee).is_some_and(|expression| match expression.kind() {
+            let Some((callee, expression)) = body.grouping_chain(callee).last() else {
+                return false;
+            };
+            let bang = match expression.kind() {
                 ExprKind::Name(path) => path.last().is_some_and(eglur_hir::Name::is_bang),
                 ExprKind::Member { member, .. } => member.is_bang(),
                 _ => false,
-            });
+            };
             bang || matches!(self.names.fact(ResolutionKey::Expression { module, expression: callee }),
                 FactState::Known(ResolvedName::Declarations(targets)) if targets.iter().any(|target| {
                     matches!(target, CanonicalTarget::Source(id) if self.collection.declaration(*id)
