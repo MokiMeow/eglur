@@ -63,6 +63,17 @@ pub(super) enum CallStep {
 }
 
 impl Builder {
+    pub(super) fn call_has_holes(&self, callee: ExprId, arguments: &[CallArgument]) -> bool {
+        std::iter::once(callee)
+            .chain(arguments.iter().map(|argument| argument.value))
+            .any(|id| {
+                matches!(
+                    self.bodies[id.body().index()].expressions[id.index()].kind(),
+                    ExprKind::Hole
+                )
+            })
+    }
+
     pub(super) fn schedule_arguments(
         &mut self,
         body: BodyId,
@@ -204,9 +215,7 @@ impl Builder {
             }
             CallStep::Finish(node, callee, type_arguments, count, syntax) => {
                 let arguments = take_tail(&mut traversal.arguments, count);
-                let partial_application = arguments
-                    .iter()
-                    .any(|argument| self.expr_is_hole(argument.value));
+                let partial_application = self.call_has_holes(callee, &arguments);
                 let origin = if let Some(kind) = syntax.call_desugaring() {
                     self.derived(node.span(), kind)
                 } else if partial_application {

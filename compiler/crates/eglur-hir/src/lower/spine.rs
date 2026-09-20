@@ -260,11 +260,7 @@ impl Builder {
                 .call_desugaring()
                 .expect("postfix application is a desugaring"),
         );
-        let partial_application = self.expr_is_hole(call.callee)
-            || call
-                .arguments
-                .iter()
-                .any(|argument| self.expr_is_hole(argument.value));
+        let partial_application = self.call_has_holes(call.callee, &call.arguments);
         let kind = ExprKind::Call(CallExpr {
             callee: call.callee,
             arguments: call.arguments.into_boxed_slice(),

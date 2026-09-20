@@ -151,3 +151,58 @@ fn development_projection_retains_profile_and_phase_observations() {
         assert!(ToolLimit::new(invalid).is_none(), "accepted {invalid:?}");
     }
 }
+
+#[test]
+fn direct_and_postfix_callee_holes_remain_explicitly_unsupported() {
+    for expression in [
+        "_(1)",
+        "1.then(_)",
+        "_(1, 2)",
+        "(1, 2).apply(_)",
+        "_ { || 1 }",
+    ] {
+        let source = format!("fn main!() -> Unit {{\nlet partial = {expression}\nyield ()\n}}\n");
+        let mut session = CompilerSession::build(
+            FileSetRequest::single("main.eglur", source.into_bytes()).unwrap(),
+            SessionOptions::new(true),
+        )
+        .unwrap();
+        session
+            .resolve_for(ProgramMode::Executable, &full_profile(), None)
+            .unwrap();
+        let sealed = session
+            .seal(None)
+            .unwrap_or_else(|error| panic!("{expression}: {error:?}"));
+        assert!(sealed.checked_program().is_none(), "{expression}");
+
+        let unsupported = CompileAttempt::finalize(sealed, None).unwrap();
+        assert_eq!(
+            unsupported.disposition(),
+            CompileDisposition::Unsupported,
+            "{expression}"
+        );
+        assert!(matches!(
+            unsupported.compiler_result(),
+            Err(CompileAttemptError::Inconclusive(
+                CompileDisposition::Unsupported
+            ))
+        ));
+
+        let payload: Value =
+            serde_json::from_str(&unsupported.development_attempt().unwrap().to_json()).unwrap();
+        assert!(
+            payload["diagnostics"].as_array().unwrap().is_empty(),
+            "{payload}"
+        );
+        assert!(
+            payload["capability_trace"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| {
+                    entry["capability"] == "typecheck.closures" && entry["disposition"] == "missing"
+                }),
+            "{payload}"
+        );
+    }
+}

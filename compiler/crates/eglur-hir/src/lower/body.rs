@@ -331,13 +331,6 @@ impl Builder {
         crate::Path::new(vec![name].into_boxed_slice(), origin)
     }
 
-    pub(super) fn expr_is_hole(&self, id: ExprId) -> bool {
-        matches!(
-            self.bodies[id.body().index()].expressions[id.index()].kind(),
-            ExprKind::Hole
-        )
-    }
-
     pub(super) fn invalid_expr(
         &mut self,
         body: crate::BodyId,
