@@ -657,6 +657,50 @@ fn source_order_is_preserved_when_calls_and_fields_bind_by_declaration_slot() {
 }
 
 #[test]
+fn grouped_postfix_applications_preserve_values_and_effect_order() {
+    for (expression, marks) in [
+        ("(mark!(2), mark!(3)).apply(join!)", vec!["2", "3", "join"]),
+        (
+            "((mark!(2), mark!(3))).apply(join!)",
+            vec!["2", "3", "join"],
+        ),
+        (
+            "(((mark!(2), mark!(3))).apply)(join!)",
+            vec!["2", "3", "join"],
+        ),
+        ("((mark!(5)).then)(pass!)", vec!["5", "join"]),
+    ] {
+        let source = format!(
+            "import std::test::emit!\n\
+             fn mark!(value: i64) -> i64 {{ emit!(to_str(value))\nyield value }}\n\
+             fn join!(first: i64, second: i64) -> i64 {{ emit!(\"join\")\nyield wrapping_add(first, second) }}\n\
+             fn pass!(value: i64) -> i64 {{ emit!(\"join\")\nyield value }}\n\
+             fn main!() -> Res[Str, Str] = Ok(to_str({expression}))\n"
+        );
+        let (program, catalog, profile) = compile_single(&source);
+        let result = completed(&program, &catalog, &profile);
+        assert_eq!(ok_str(result.value()), "5", "{expression}");
+        assert_eq!(
+            result.events(),
+            marks
+                .into_iter()
+                .map(|mark| eglur_driver::RuntimeEvent::Emitted(mark.into()))
+                .collect::<Vec<_>>(),
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn grouped_apply_keeps_a_tuple_argument_inside_a_unary_tuple() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn first(pair: (i64, i64)) -> i64 = pair.0\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str((((2, 3),)).apply(first)))\n",
+    ));
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "2");
+}
+
+#[test]
 fn source_display_impl_executes_through_the_free_adapter() {
     let (program, catalog, profile) = compile_single(concat!(
         "import std::test::emit!\n",

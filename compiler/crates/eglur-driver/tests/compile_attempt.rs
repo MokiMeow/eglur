@@ -160,6 +160,11 @@ fn direct_and_postfix_callee_holes_remain_explicitly_unsupported() {
         "_(1, 2)",
         "(1, 2).apply(_)",
         "_ { || 1 }",
+        "(_)(1)",
+        "((_))(1)",
+        "1.then((_))",
+        "((1, 2)).apply((_))",
+        "(_) { || 1 }",
     ] {
         let source = format!("fn main!() -> Unit {{\nlet partial = {expression}\nyield ()\n}}\n");
         let mut session = CompilerSession::build(
