@@ -127,7 +127,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             NameKey::from_hir(&frame.member).expect("valid method name has canonical spelling");
         let inherent_targets = self.inherent_method_targets(subject, &name)?;
         let (trait_tier, candidates) = if inherent_targets.is_empty() {
-            let candidates = match self.trait_method_candidates(module, subject, &name)? {
+            let candidates = match self.trait_method_candidates(
+                module,
+                source,
+                frame.request.origin,
+                subject,
+                &name,
+            )? {
                 Outcome::Known(candidates) => candidates,
                 outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
             };

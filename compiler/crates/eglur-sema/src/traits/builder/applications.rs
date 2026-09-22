@@ -111,9 +111,6 @@ fn synchronize_implementations(
             changed = true;
         }
     }
-    if changed {
-        environment.clear_query_caches();
-    }
     changed
 }
 

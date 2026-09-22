@@ -25,41 +25,9 @@ impl TraitEnvironment {
         signatures: &mut DeclarationSignatures,
         application: &TypeApplication,
     ) -> Result<ApplicationCheck, TraitEnvironmentError> {
-        let mut assumptions = self.application_assumptions(signatures, application.site())?;
-        let mut pending = (0..assumptions.len()).collect::<Vec<_>>();
-        while !pending.is_empty() {
-            let mut remaining = Vec::new();
-            for &index in &pending {
-                match self.normalize_obligation(
-                    None,
-                    signatures,
-                    &assumptions[index].obligation,
-                    &assumptions,
-                    &mut BTreeSet::new(),
-                )? {
-                    Ok(obligation) => {
-                        if assumptions[index].obligation != obligation {
-                            assumptions[index].obligation = obligation;
-                            self.local_query_cache = Some(LocalQueryCache::default());
-                        }
-                    }
-                    Err(_) => remaining.push(index),
-                }
-            }
-            let progressed = remaining.len() < pending.len();
-            pending = remaining;
-            if !progressed {
-                break;
-            }
-        }
-        let assumptions_complete = pending.is_empty();
-        let normalized_assumptions = assumptions
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, assumption)| {
-                pending.binary_search(&index).is_err().then_some(assumption)
-            })
-            .collect::<Vec<_>>();
+        let declared = self.application_assumptions(signatures, application.site())?;
+        let normalized = self.normalize_assumptions(signatures, declared)?;
+        let normalized_assumptions = normalized.resolved();
 
         // Query keys are scoped to one exact assumption environment, including normalization.
         self.local_query_cache = Some(LocalQueryCache::default());
@@ -68,7 +36,7 @@ impl TraitEnvironment {
             None,
             signatures,
             application.arguments(),
-            &normalized_assumptions,
+            normalized_assumptions,
             &mut BTreeSet::new(),
             &mut BTreeSet::new(),
         )? {
@@ -76,7 +44,7 @@ impl TraitEnvironment {
             Err(failure) => return Ok(ApplicationCheck::Failed(failure)),
         };
         // The offending bound application owns an unavailable environment's diagnostic.
-        if !assumptions_complete {
+        if matches!(normalized, AssumptionNormalization::Incomplete { .. }) {
             return Ok(ApplicationCheck::Unperformed);
         }
         if let Some(violation) =
@@ -100,7 +68,7 @@ impl TraitEnvironment {
                 None,
                 signatures,
                 &obligation,
-                &normalized_assumptions,
+                normalized_assumptions,
                 &mut BTreeSet::new(),
             )? {
                 Ok(obligation) => obligation,
@@ -110,7 +78,7 @@ impl TraitEnvironment {
                 None,
                 signatures,
                 obligation,
-                &normalized_assumptions,
+                normalized_assumptions,
                 &mut BTreeSet::new(),
             )? {
                 SelectionOutcome::Assumed(_)
@@ -135,41 +103,6 @@ impl TraitEnvironment {
             }
         }
         Ok(ApplicationCheck::Checked)
-    }
-
-    pub(super) fn normalize_obligation(
-        &mut self,
-        owner: Option<DefId>,
-        signatures: &mut DeclarationSignatures,
-        obligation: &TraitObligation,
-        assumptions: &[TraitAssumption],
-        active: &mut BTreeSet<TraitObligation>,
-    ) -> Result<Result<TraitObligation, TraitNormalization>, TraitEnvironmentError> {
-        let mut components = vec![obligation.subject()];
-        components.extend_from_slice(
-            signatures
-                .types()
-                .substitution(obligation.trait_ref().substitution())?,
-        );
-        let normalized = self.normalize_many(
-            owner,
-            signatures,
-            &components,
-            assumptions,
-            &mut BTreeSet::new(),
-            active,
-        )?;
-        let (components, _) = match normalized {
-            Ok(components) => components,
-            Err(failure) => return Ok(Err(failure)),
-        };
-        let substitution = signatures
-            .types_mut()
-            .intern_substitution(components[1..].to_vec())?;
-        Ok(Ok(TraitObligation::new(
-            components[0],
-            TraitRef::new(obligation.trait_ref().declaration().clone(), substitution),
-        )))
     }
 
     fn application_assumptions(

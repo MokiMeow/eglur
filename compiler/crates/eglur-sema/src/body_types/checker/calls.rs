@@ -118,6 +118,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn trait_method_candidates(
         &mut self,
         module: ModuleId,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
         subject: TypeId,
         name: &NameKey,
     ) -> Result<Outcome<Vec<MethodCandidate>>, BodyTypingError> {
@@ -146,12 +148,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             if methods.is_empty() {
                 continue;
             }
-            let receiver_candidates = self.trait_environment.receiver_candidates_for_trait(
+            let receiver_candidates = match self.trait_environment.receiver_candidates_for_trait(
                 owner,
                 self.signatures,
                 subject,
                 &trait_target,
-            )?;
+            )? {
+                Ok(candidates) => candidates,
+                Err(failure) => return self.normalization_failure_at(source, origin, failure),
+            };
             for method in methods {
                 let callable = match self.signatures.declaration(&method) {
                     FactState::Known(DeclarationSignature::Callable(callable)) => self
@@ -1325,7 +1330,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             .generic_parameter(parameter.clone())?;
                         Some(
                             self.trait_environment
-                                .witness_for_obligation(
+                                .declared_witness_for_obligation(
                                     owner,
                                     &TraitObligation::new(subject, bound.declared().clone()),
                                 )

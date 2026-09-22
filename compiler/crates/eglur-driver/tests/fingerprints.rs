@@ -142,6 +142,24 @@ fn bound_priority_does_not_change_semantic_contract_or_evidence_fingerprints() {
 }
 
 #[test]
+fn normalized_owner_evidence_fingerprints_ignore_declaration_order() {
+    let snapshot = |prefix: &str| {
+        let source = format!(
+            "{prefix}\n\
+             pub trait Carries {{ type Item }}\npub struct Carrier {{}}\n\
+             impl Carries for Carrier {{ type Item = i64 }}\n\
+             pub type Item[T: Carries] = T::Item\n\
+             pub fn accept[T: Link[i64]](x: T) -> Unit = ()\n\
+             pub fn forward[T: Mark + Link[Item[Carrier]]](x: T) -> Unit = accept(x)\n"
+        );
+        resolve([file("main.eglur", &source)], "main.eglur", false)
+    };
+    let first = snapshot("pub trait Mark {}\npub trait Link[A] {}\npub struct Unrelated {}");
+    let reordered = snapshot("pub struct Unrelated {}\npub trait Link[A] {}\npub trait Mark {}");
+    assert_eq!(first.semantics, reordered.semantics);
+}
+
+#[test]
 fn grouped_call_fingerprints_preserve_trivia_and_source_label_invariance() {
     let source = "fn id(value: i64) -> i64 = value\npub fn value() -> i64 = ((id))(7)\n";
     let base = resolve([file("main.eglur", source)], "main.eglur", false);

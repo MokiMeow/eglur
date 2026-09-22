@@ -239,9 +239,6 @@ pub(super) fn validate_impl_methods(
         }
     }
 
-    // Contract comparison uses the same normalizer. Validation may subsequently poison an impl,
-    // so no provisional query result may escape into body typing.
-    environment.clear_query_caches();
     Ok(())
 }
 

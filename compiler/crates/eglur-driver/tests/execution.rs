@@ -519,6 +519,27 @@ fn dependent_generic_bounds_forward_parameterized_witnesses() {
 }
 
 #[test]
+fn normalized_owner_bounds_forward_witnesses_to_checked_methods() {
+    for caller_argument in ["i64", "Item[Carrier]"] {
+        for callee_argument in ["i64", "Item[Carrier]"] {
+            let source = format!(
+                "trait Carries {{ type Item }}\nstruct Carrier {{}}\n\
+                 impl Carries for Carrier {{ type Item = i64 }}\n\
+                 type Item[T: Carries] = T::Item\n\
+                 trait Link[A] {{\nfn linked(self: &Self, value: A) -> A\n\
+                 fn forward(self: &Self, value: A) -> A = self.linked(value)\n}}\n\
+                 impl Link[i64] for Bool {{ fn linked(self: &Self, value: i64) -> i64 = value }}\n\
+                 fn project[T: Link[{callee_argument}]](value: T) -> i64 = value.linked(7)\n\
+                 fn forward[T: Link[{caller_argument}]](value: T) -> i64 = project(value)\n\
+                 fn main!() -> Res[Str, Str] = Ok(to_str(forward(true)))\n"
+            );
+            let (program, catalog, profile) = compile_single(&source);
+            assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+        }
+    }
+}
+
+#[test]
 fn cross_module_method_dispatch_and_mutable_reference_updates_work() {
     let (program, catalog, profile) = compile_files(
         [

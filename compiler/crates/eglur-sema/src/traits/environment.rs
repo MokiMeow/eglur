@@ -19,7 +19,11 @@ use super::overlap::{
 };
 
 mod applications;
+mod assumptions;
+#[cfg(test)]
+mod tests;
 pub(super) use applications::ApplicationCheck;
+use assumptions::AssumptionNormalization;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct TraitAssumption {
@@ -58,6 +62,24 @@ enum SelectionOutcome {
     Ambiguous(TraitObligation),
 }
 
+impl SelectionOutcome {
+    fn normalization_failure(failure: TraitNormalization) -> Self {
+        match failure {
+            TraitNormalization::Poisoned(poison) => Self::Poisoned(poison),
+            TraitNormalization::InvalidArgument(violation) => Self::InvalidArgument(violation),
+            TraitNormalization::Unsatisfied(obligation)
+            | TraitNormalization::Ambiguous(obligation) => Self::Unsatisfied(obligation),
+            TraitNormalization::Cyclic(projection) => Self::Unsatisfied(TraitObligation::new(
+                projection.base(),
+                projection.trait_ref().clone(),
+            )),
+            TraitNormalization::Normalized(_) | TraitNormalization::Symbolic(_) => {
+                unreachable!("normalization success has an obligation")
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct LocalQueryCache {
     projections: BTreeMap<TypeId, TraitNormalization>,
@@ -81,6 +103,7 @@ pub struct TraitEnvironment {
     implementations: BTreeMap<CanonicalTarget, TraitImpl>,
     buckets: ImplBuckets,
     assumptions: BTreeMap<DefId, Box<[TraitAssumption]>>,
+    owner_assumption_cache: BTreeMap<DefId, Vec<TraitAssumption>>,
     method_targets: BTreeMap<(CanonicalTarget, CanonicalTarget), CanonicalTarget>,
     normalization_cache: BTreeMap<(DefId, TypeId), TraitNormalization>,
     projection_cache: BTreeMap<(DefId, TypeId), TraitNormalization>,
@@ -98,6 +121,7 @@ impl TraitEnvironment {
             implementations,
             buckets,
             assumptions,
+            owner_assumption_cache: BTreeMap::new(),
             method_targets: BTreeMap::new(),
             normalization_cache: BTreeMap::new(),
             projection_cache: BTreeMap::new(),
@@ -119,7 +143,7 @@ impl TraitEnvironment {
             })
     }
 
-    pub(crate) fn witness_for_obligation(
+    pub(crate) fn declared_witness_for_obligation(
         &self,
         owner: DefId,
         obligation: &TraitObligation,
@@ -146,6 +170,7 @@ impl TraitEnvironment {
             .get_mut(implementation)
             .expect("collected implementation remains present")
             .poison = Some(poison);
+        self.clear_query_caches();
     }
 
     pub(super) fn implementation_validation_inputs(&self) -> Vec<ImplementationValidationInput> {
@@ -166,7 +191,8 @@ impl TraitEnvironment {
         self.method_targets.extend(targets);
     }
 
-    pub(super) fn clear_query_caches(&mut self) {
+    fn clear_query_caches(&mut self) {
+        self.owner_assumption_cache.clear();
         self.normalization_cache.clear();
         self.projection_cache.clear();
         self.selection_cache.clear();
@@ -255,10 +281,10 @@ impl TraitEnvironment {
         if let Some(cached) = self.normalization_cache.get(&(owner, root)) {
             return Ok(cached.clone());
         }
-        let assumptions = self
-            .assumptions
-            .get(&owner)
-            .map_or_else(Vec::new, |values| values.to_vec());
+        let assumptions = match self.normalized_owner_assumptions(owner, signatures)? {
+            Ok(assumptions) => assumptions,
+            Err(failure) => return Ok(failure),
+        };
         let mut active_projections = BTreeSet::new();
         let mut active_obligations = BTreeSet::new();
         let result = self.normalize_inner(
@@ -315,75 +341,83 @@ impl TraitEnvironment {
         signatures: &mut DeclarationSignatures,
         obligation: TraitObligation,
     ) -> Result<TraitProof, TraitEnvironmentError> {
-        if let FactState::Poisoned(poison) = signatures.source_declaration(owner) {
-            return Ok(TraitProof::Poisoned(poison.clone()));
-        }
-        let assumptions = self
-            .assumptions
-            .get(&owner)
-            .map_or_else(Vec::new, |values| values.to_vec());
-        let mut active = BTreeSet::new();
-        Ok(
-            match self.select_impl(
-                Some(owner),
-                signatures,
-                obligation,
-                &assumptions,
-                &mut active,
-            )? {
-                SelectionOutcome::Assumed(witness) => TraitProof::Bound(witness),
-                SelectionOutcome::TrustedBound => {
-                    unreachable!("source owners only have source witness slots")
+        let outcome = match self.normalized_owner_assumptions(owner, signatures)? {
+            Err(failure) => SelectionOutcome::normalization_failure(failure),
+            Ok(assumptions) => {
+                let mut active = BTreeSet::new();
+                match self.normalize_obligation(
+                    Some(owner),
+                    signatures,
+                    &obligation,
+                    &assumptions,
+                    &mut active,
+                )? {
+                    Ok(obligation) => self.select_impl(
+                        Some(owner),
+                        signatures,
+                        obligation,
+                        &assumptions,
+                        &mut active,
+                    )?,
+                    Err(failure) => SelectionOutcome::normalization_failure(failure),
                 }
-                SelectionOutcome::Selected(selection) => {
-                    let implementation = self
-                        .implementations
-                        .get(&selection.implementation)
-                        .ok_or_else(|| {
-                            TraitEnvironmentError::UnknownImplementation(
-                                selection.implementation.clone(),
-                            )
-                        })?;
-                    let arguments = implementation
-                        .header
-                        .generic_parameters()
-                        .iter()
-                        .map(|parameter| {
-                            selection
-                                .replacements
-                                .get(parameter)
-                                .copied()
-                                .ok_or_else(|| TraitEnvironmentError::UnconstrainedCheckedImpl {
-                                    implementation: selection.implementation.clone(),
-                                    parameter: parameter.clone(),
-                                })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let substitution = signatures.types_mut().intern_substitution(arguments)?;
-                    TraitProof::Implementation(TraitImplEvidence {
-                        implementation: selection.implementation,
-                        substitution,
+            }
+        };
+        Ok(match outcome {
+            SelectionOutcome::Assumed(witness) => TraitProof::Bound(witness),
+            SelectionOutcome::TrustedBound => {
+                unreachable!("source owners only have source witness slots")
+            }
+            SelectionOutcome::Selected(selection) => {
+                let implementation = self
+                    .implementations
+                    .get(&selection.implementation)
+                    .ok_or_else(|| {
+                        TraitEnvironmentError::UnknownImplementation(
+                            selection.implementation.clone(),
+                        )
+                    })?;
+                let arguments = implementation
+                    .header
+                    .generic_parameters()
+                    .iter()
+                    .map(|parameter| {
+                        selection
+                            .replacements
+                            .get(parameter)
+                            .copied()
+                            .ok_or_else(|| TraitEnvironmentError::UnconstrainedCheckedImpl {
+                                implementation: selection.implementation.clone(),
+                                parameter: parameter.clone(),
+                            })
                     })
-                }
-                SelectionOutcome::Poisoned(poison) => TraitProof::Poisoned(poison),
-                SelectionOutcome::InvalidArgument(violation) => {
-                    TraitProof::InvalidArgument(violation)
-                }
-                SelectionOutcome::Unsatisfied(obligation) => TraitProof::Unsatisfied(obligation),
-                SelectionOutcome::Ambiguous(obligation) => TraitProof::Ambiguous(obligation),
-            },
-        )
+                    .collect::<Result<Vec<_>, _>>()?;
+                let substitution = signatures.types_mut().intern_substitution(arguments)?;
+                TraitProof::Implementation(TraitImplEvidence {
+                    implementation: selection.implementation,
+                    substitution,
+                })
+            }
+            SelectionOutcome::Poisoned(poison) => TraitProof::Poisoned(poison),
+            SelectionOutcome::InvalidArgument(violation) => TraitProof::InvalidArgument(violation),
+            SelectionOutcome::Unsatisfied(obligation) => TraitProof::Unsatisfied(obligation),
+            SelectionOutcome::Ambiguous(obligation) => TraitProof::Ambiguous(obligation),
+        })
     }
 
     /// Collects structural receiver matches without using impl bounds as filters.
     pub(crate) fn receiver_candidates_for_trait(
-        &self,
+        &mut self,
         owner: DefId,
         signatures: &mut DeclarationSignatures,
         subject: TypeId,
         trait_declaration: &CanonicalTarget,
-    ) -> Result<Vec<TraitReceiverCandidate>, TraitEnvironmentError> {
-        let assumptions = self.assumptions.get(&owner).map_or(&[][..], AsRef::as_ref);
+    ) -> Result<Result<Vec<TraitReceiverCandidate>, TraitNormalization>, TraitEnvironmentError>
+    {
+        let assumptions = match self.normalized_owner_assumptions(owner, signatures)? {
+            Ok(assumptions) => assumptions,
+            Err(failure) => return Ok(Err(failure)),
+        };
         let mut assumed = assumptions
             .iter()
             .filter(|assumption| {
@@ -399,7 +433,7 @@ impl TraitEnvironment {
         if !assumed.is_empty() {
             assumed.sort();
             assumed.dedup();
-            return Ok(assumed);
+            return Ok(Ok(assumed));
         }
 
         let target_bucket = target_bucket(signatures.types(), subject)?;
@@ -453,7 +487,7 @@ impl TraitEnvironment {
         }
         candidates.sort();
         candidates.dedup();
-        Ok(candidates)
+        Ok(Ok(candidates))
     }
 
     fn normalize_inner(
@@ -906,28 +940,7 @@ impl TraitEnvironment {
                         )? {
                             Ok(required) => required,
                             Err(failure) => {
-                                failed = Some(match failure {
-                                    TraitNormalization::Poisoned(poison) => {
-                                        SelectionOutcome::Poisoned(poison)
-                                    }
-                                    TraitNormalization::InvalidArgument(violation) => {
-                                        SelectionOutcome::InvalidArgument(violation)
-                                    }
-                                    TraitNormalization::Unsatisfied(obligation)
-                                    | TraitNormalization::Ambiguous(obligation) => {
-                                        SelectionOutcome::Unsatisfied(obligation)
-                                    }
-                                    TraitNormalization::Cyclic(projection) => {
-                                        SelectionOutcome::Unsatisfied(TraitObligation::new(
-                                            projection.base(),
-                                            projection.trait_ref().clone(),
-                                        ))
-                                    }
-                                    TraitNormalization::Normalized(_)
-                                    | TraitNormalization::Symbolic(_) => {
-                                        unreachable!("normalization success has an obligation")
-                                    }
-                                });
+                                failed = Some(SelectionOutcome::normalization_failure(failure));
                                 break;
                             }
                         };
