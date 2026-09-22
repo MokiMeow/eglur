@@ -18,6 +18,9 @@ use super::overlap::{
     target_bucket,
 };
 
+mod applications;
+pub(super) use applications::ApplicationCheck;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct TraitAssumption {
     pub(super) obligation: TraitObligation,
@@ -27,6 +30,7 @@ pub(super) struct TraitAssumption {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum TraitAssumptionEvidence {
     Witness(WitnessSlotId),
+    Trusted,
     Implementation(CanonicalTarget),
 }
 
@@ -46,11 +50,18 @@ struct ImplSelection {
 #[derive(Clone, Debug)]
 enum SelectionOutcome {
     Assumed(WitnessSlotId),
+    TrustedBound,
     Selected(ImplSelection),
     Poisoned(Poison),
     InvalidArgument(ImplArgumentViolation),
     Unsatisfied(TraitObligation),
     Ambiguous(TraitObligation),
+}
+
+#[derive(Default)]
+struct LocalQueryCache {
+    projections: BTreeMap<TypeId, TraitNormalization>,
+    selections: BTreeMap<TraitObligation, SelectionOutcome>,
 }
 
 pub(super) enum CollectedImplementations {
@@ -66,6 +77,7 @@ pub(super) struct ImplementationValidationInput {
 
 /// Checked impl index and bounded associated-projection normalizer.
 pub struct TraitEnvironment {
+    local_query_cache: Option<LocalQueryCache>,
     implementations: BTreeMap<CanonicalTarget, TraitImpl>,
     buckets: ImplBuckets,
     assumptions: BTreeMap<DefId, Box<[TraitAssumption]>>,
@@ -82,6 +94,7 @@ impl TraitEnvironment {
         assumptions: BTreeMap<DefId, Box<[TraitAssumption]>>,
     ) -> Self {
         Self {
+            local_query_cache: None,
             implementations,
             buckets,
             assumptions,
@@ -101,6 +114,7 @@ impl TraitEnvironment {
                     Some(&assumption.obligation)
                 }
                 TraitAssumptionEvidence::Witness(_)
+                | TraitAssumptionEvidence::Trusted
                 | TraitAssumptionEvidence::Implementation(_) => None,
             })
     }
@@ -116,7 +130,9 @@ impl TraitEnvironment {
             }
             match assumption.evidence {
                 TraitAssumptionEvidence::Witness(witness) => Some(witness),
-                TraitAssumptionEvidence::Implementation(_) => None,
+                TraitAssumptionEvidence::Implementation(_) | TraitAssumptionEvidence::Trusted => {
+                    None
+                }
             }
         })
     }
@@ -154,6 +170,7 @@ impl TraitEnvironment {
         self.normalization_cache.clear();
         self.projection_cache.clear();
         self.selection_cache.clear();
+        self.local_query_cache = None;
     }
 
     #[must_use]
@@ -212,6 +229,7 @@ impl TraitEnvironment {
         implementation: &CanonicalTarget,
         trait_method: &CanonicalTarget,
     ) -> Option<&CanonicalTarget> {
+        self.checked_impl_target(implementation)?;
         self.method_targets
             .get(&(implementation.clone(), trait_method.clone()))
     }
@@ -231,6 +249,9 @@ impl TraitEnvironment {
         signatures: &mut DeclarationSignatures,
         root: TypeId,
     ) -> Result<TraitNormalization, TraitEnvironmentError> {
+        if let FactState::Poisoned(poison) = signatures.source_declaration(owner) {
+            return Ok(TraitNormalization::Poisoned(poison.clone()));
+        }
         if let Some(cached) = self.normalization_cache.get(&(owner, root)) {
             return Ok(cached.clone());
         }
@@ -274,14 +295,17 @@ impl TraitEnvironment {
             },
             evidence: TraitAssumptionEvidence::Implementation(implementation.clone()),
         }];
-        self.normalize_inner(
+        self.local_query_cache = Some(LocalQueryCache::default());
+        let result = self.normalize_inner(
             None,
             signatures,
             root,
             &assumptions,
             &mut BTreeSet::new(),
             &mut BTreeSet::new(),
-        )
+        );
+        self.local_query_cache = None;
+        result
     }
 
     /// Proves one exact obligation using the checked environment and owner assumptions.
@@ -291,6 +315,9 @@ impl TraitEnvironment {
         signatures: &mut DeclarationSignatures,
         obligation: TraitObligation,
     ) -> Result<TraitProof, TraitEnvironmentError> {
+        if let FactState::Poisoned(poison) = signatures.source_declaration(owner) {
+            return Ok(TraitProof::Poisoned(poison.clone()));
+        }
         let assumptions = self
             .assumptions
             .get(&owner)
@@ -305,6 +332,9 @@ impl TraitEnvironment {
                 &mut active,
             )? {
                 SelectionOutcome::Assumed(witness) => TraitProof::Bound(witness),
+                SelectionOutcome::TrustedBound => {
+                    unreachable!("source owners only have source witness slots")
+                }
                 SelectionOutcome::Selected(selection) => {
                     let implementation = self
                         .implementations
@@ -668,6 +698,14 @@ impl TraitEnvironment {
         {
             return Ok(cached.clone());
         }
+        if owner.is_none()
+            && let Some(cached) = self
+                .local_query_cache
+                .as_ref()
+                .and_then(|cache| cache.projections.get(&projection_ty))
+        {
+            return Ok(cached.clone());
+        }
         if !active_projections.insert(projection_ty) {
             return Ok(TraitNormalization::Cyclic(normalized_projection));
         }
@@ -717,12 +755,16 @@ impl TraitEnvironment {
                 TraitNormalization::Unsatisfied(obligation)
             }
             SelectionOutcome::Ambiguous(obligation) => TraitNormalization::Ambiguous(obligation),
-            SelectionOutcome::Assumed(_) => TraitNormalization::Unsatisfied(obligation),
+            SelectionOutcome::Assumed(_) | SelectionOutcome::TrustedBound => {
+                TraitNormalization::Unsatisfied(obligation)
+            }
         };
         active_projections.remove(&projection_ty);
         if let Some(owner) = owner {
             self.projection_cache
                 .insert((owner, projection_ty), result.clone());
+        } else if let Some(cache) = &mut self.local_query_cache {
+            cache.projections.insert(projection_ty, result.clone());
         }
         Ok(result)
     }
@@ -735,8 +777,21 @@ impl TraitEnvironment {
         assumptions: &[TraitAssumption],
         active: &mut BTreeSet<TraitObligation>,
     ) -> Result<SelectionOutcome, TraitEnvironmentError> {
+        if let FactState::Poisoned(poison) =
+            signatures.declaration(obligation.trait_ref.declaration())
+        {
+            return Ok(SelectionOutcome::Poisoned(poison.clone()));
+        }
         if let Some(owner) = owner
             && let Some(cached) = self.selection_cache.get(&(owner, obligation.clone()))
+        {
+            return Ok(cached.clone());
+        }
+        if owner.is_none()
+            && let Some(cached) = self
+                .local_query_cache
+                .as_ref()
+                .and_then(|cache| cache.selections.get(&obligation))
         {
             return Ok(cached.clone());
         }
@@ -749,6 +804,9 @@ impl TraitEnvironment {
                     let implementation = self.implementations.get(evidence).ok_or_else(|| {
                         TraitEnvironmentError::UnknownImplementation(evidence.clone())
                     })?;
+                    if let Some(poison) = &implementation.poison {
+                        return Ok(SelectionOutcome::Poisoned(poison.clone()));
+                    }
                     match match_impl(signatures.types(), &implementation.header, &obligation)? {
                         Some(replacements) => match impl_argument_violation(
                             signatures.types(),
@@ -765,10 +823,13 @@ impl TraitEnvironment {
                     }
                 }
                 TraitAssumptionEvidence::Witness(witness) => SelectionOutcome::Assumed(*witness),
+                TraitAssumptionEvidence::Trusted => SelectionOutcome::TrustedBound,
             };
             if let Some(owner) = owner {
                 self.selection_cache
                     .insert((owner, obligation), selected.clone());
+            } else if let Some(cache) = &mut self.local_query_cache {
+                cache.selections.insert(obligation, selected.clone());
             }
             return Ok(selected);
         }
@@ -814,8 +875,8 @@ impl TraitEnvironment {
             } else {
                 let mut failed = None;
                 for parameter in implementation.header.generic_parameters() {
-                    let signature = match signatures.generic_parameter(parameter) {
-                        FactState::Known(signature) => signature.clone(),
+                    let bounds = match signatures.declared_parameter_bounds(parameter) {
+                        FactState::Known(bounds) => bounds.to_vec(),
                         FactState::Poisoned(poison) => {
                             failed = Some(SelectionOutcome::Poisoned(poison.clone()));
                             break;
@@ -832,7 +893,7 @@ impl TraitEnvironment {
                             parameter: parameter.clone(),
                         });
                     };
-                    for bound in signature.bounds() {
+                    for bound in &bounds {
                         let arguments = signatures
                             .types()
                             .substitution(bound.substitution())?
@@ -847,6 +908,40 @@ impl TraitEnvironment {
                             subject,
                             trait_ref: TraitRef::new(bound.declaration().clone(), substitution),
                         };
+                        let required = match self.normalize_obligation(
+                            owner,
+                            signatures,
+                            &required,
+                            assumptions,
+                            active,
+                        )? {
+                            Ok(required) => required,
+                            Err(failure) => {
+                                failed = Some(match failure {
+                                    TraitNormalization::Poisoned(poison) => {
+                                        SelectionOutcome::Poisoned(poison)
+                                    }
+                                    TraitNormalization::InvalidArgument(violation) => {
+                                        SelectionOutcome::InvalidArgument(violation)
+                                    }
+                                    TraitNormalization::Unsatisfied(obligation)
+                                    | TraitNormalization::Ambiguous(obligation) => {
+                                        SelectionOutcome::Unsatisfied(obligation)
+                                    }
+                                    TraitNormalization::Cyclic(projection) => {
+                                        SelectionOutcome::Unsatisfied(TraitObligation::new(
+                                            projection.base(),
+                                            projection.trait_ref().clone(),
+                                        ))
+                                    }
+                                    TraitNormalization::Normalized(_)
+                                    | TraitNormalization::Symbolic(_) => {
+                                        unreachable!("normalization success has an obligation")
+                                    }
+                                });
+                                break;
+                            }
+                        };
                         match self.select_impl(
                             owner,
                             signatures,
@@ -854,7 +949,9 @@ impl TraitEnvironment {
                             assumptions,
                             active,
                         )? {
-                            SelectionOutcome::Assumed(_) | SelectionOutcome::Selected(_) => {}
+                            SelectionOutcome::Assumed(_)
+                            | SelectionOutcome::TrustedBound
+                            | SelectionOutcome::Selected(_) => {}
                             SelectionOutcome::Poisoned(poison) => {
                                 failed = Some(SelectionOutcome::Poisoned(poison));
                                 break;
@@ -884,6 +981,8 @@ impl TraitEnvironment {
         if let Some(owner) = owner {
             self.selection_cache
                 .insert((owner, obligation), outcome.clone());
+        } else if let Some(cache) = &mut self.local_query_cache {
+            cache.selections.insert(obligation, outcome.clone());
         }
         Ok(outcome)
     }

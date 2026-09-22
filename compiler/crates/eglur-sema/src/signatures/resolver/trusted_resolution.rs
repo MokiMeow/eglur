@@ -27,6 +27,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let diagnostic_type_names =
             DiagnosticTypeNames::new(collection, imports, external_names, trusted)?;
         let mut resolver = Self {
+            type_applications: super::super::applications::TypeApplicationFacts::default(),
             collection,
             imports,
             sources,
@@ -71,6 +72,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
 
     pub(super) fn finish(self) -> DeclarationSignatures {
         DeclarationSignatures {
+            type_applications: self.type_applications,
             types: self.types,
             diagnostic_type_names: self.diagnostic_type_names,
             declarations: self.declarations,
@@ -823,6 +825,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     self.resolve_trusted_trait_ref(declaration.id(), parameters.len(), bound)
                 })
                 .collect::<Result<Vec<_>, SignatureResolutionError>>()?;
+            let written_bounds = bounds.clone().into_boxed_slice();
+            self.type_applications
+                .written_bounds
+                .insert(id.clone(), written_bounds);
             bounds.sort();
             let before = bounds.len();
             bounds.dedup();
@@ -929,6 +935,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 }
             }
         }
+        self.type_applications
+            .applications
+            .insert(TypeApplication::new(
+                TypeApplicationSite::Trusted(owner.clone()),
+                target.clone(),
+                arguments.clone(),
+            ));
         let substitution = self.types.intern_substitution(arguments)?;
         Ok(TraitRef::new(target, substitution))
     }
@@ -997,6 +1010,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         )
                     })
                     .collect::<Result<Vec<_>, SignatureResolutionError>>()?;
+                self.type_applications
+                    .applications
+                    .insert(TypeApplication::new(
+                        TypeApplicationSite::Trusted(owner.clone()),
+                        CanonicalTarget::External(head.clone()),
+                        arguments.clone(),
+                    ));
                 self.types.nominal(nominal, arguments)?
             }
             TrustedTypeExpr::GenericParameter(index) => {

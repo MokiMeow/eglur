@@ -493,6 +493,7 @@ pub enum EnumVariantPayloadSignature {
 
 /// Completed canonical signature graph for one semantic compilation graph.
 pub struct DeclarationSignatures {
+    pub(super) type_applications: super::applications::TypeApplicationFacts,
     pub(super) types: CanonicalTypeStore,
     pub(super) diagnostic_type_names: DiagnosticTypeNames,
     pub(super) declarations: FactTable<CanonicalTarget, DeclarationSignature>,
@@ -534,6 +535,9 @@ impl DeclarationSignatures {
         &self,
         declaration: &CanonicalTarget,
     ) -> FactState<'_, DeclarationSignature> {
+        if let Some(poison) = self.application_poison(declaration) {
+            return FactState::Poisoned(poison);
+        }
         declaration_fact_state(
             &self.declarations,
             &self.overload_family_poisons,
@@ -563,6 +567,11 @@ impl DeclarationSignatures {
         &self,
         parameter: &GenericParameterId,
     ) -> FactState<'_, GenericParameterSignature> {
+        if let GenericParameterId::Source(parameter) = parameter
+            && let Some(poison) = self.application_poison(&CanonicalTarget::Source(*parameter))
+        {
+            return FactState::Poisoned(poison);
+        }
         self.generic_parameters.state(parameter)
     }
 
@@ -581,6 +590,9 @@ impl DeclarationSignatures {
 
     #[must_use]
     pub fn impl_header(&self, declaration: &CanonicalTarget) -> FactState<'_, TraitImplHeader> {
+        if let Some(poison) = self.application_poison(declaration) {
+            return FactState::Poisoned(poison);
+        }
         self.impl_headers.state(declaration)
     }
 
@@ -651,7 +663,8 @@ impl DeclarationSignatures {
     }
 
     pub(crate) fn has_poisoned_facts(&self) -> bool {
-        self.declarations.has_poisoned()
+        self.has_invalid_applications()
+            || self.declarations.has_poisoned()
             || !self.overload_family_poisons.is_empty()
             || self.generic_parameters.has_poisoned()
             || self.occurrences.has_poisoned()

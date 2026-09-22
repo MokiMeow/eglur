@@ -611,6 +611,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             } else if unperformed {
                 Resolution::Unperformed
             } else {
+                let written_bounds = bounds.clone().into_boxed_slice();
+                self.type_applications
+                    .written_bounds
+                    .insert(id.clone(), written_bounds);
                 bounds.sort();
                 Resolution::Known(GenericParameterSignature {
                     id: id.clone(),

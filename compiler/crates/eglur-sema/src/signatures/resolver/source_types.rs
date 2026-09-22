@@ -1,6 +1,26 @@
 use super::*;
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
+    fn retain_source_application(
+        &mut self,
+        owner: DefId,
+        source: &SemanticSource<'_>,
+        type_ref: TypeRefId,
+        target: CanonicalTarget,
+        arguments: Vec<TypeId>,
+    ) {
+        self.type_applications
+            .applications
+            .insert(TypeApplication::new(
+                TypeApplicationSite::Source {
+                    owner,
+                    occurrence: TypeOccurrenceId::new(source.file(), type_ref),
+                },
+                target,
+                arguments,
+            ));
+    }
+
     pub(super) fn resolve_source_trait_ref(
         &mut self,
         owner: DefId,
@@ -93,6 +113,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                         context.structure_validation,
                                     )? {
                                     Resolution::Known(arguments) => {
+                                        self.retain_source_application(
+                                            owner,
+                                            source,
+                                            type_ref,
+                                            target.clone(),
+                                            arguments.clone(),
+                                        );
                                         let substitution =
                                             self.types.intern_substitution(arguments)?;
                                         Resolution::Known(TraitRef::new(
@@ -229,6 +256,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         hir,
                         context,
                         type_origin: occurrence.origin(),
+                        type_ref,
                     },
                     path,
                     arguments,
@@ -314,6 +342,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             hir,
             context,
             type_origin,
+            type_ref,
         } = site;
         let Some(path_text) = path.text() else {
             return Ok((self.invalid_path_resolution(source, path)?, None));
@@ -573,6 +602,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 )?;
                 let result = match arguments {
                     Resolution::Known(arguments) => {
+                        self.retain_source_application(
+                            owner,
+                            source,
+                            type_ref,
+                            target.clone(),
+                            arguments.clone(),
+                        );
                         let ty = self.types.nominal(head, arguments)?;
                         self.validate_source_slot(
                             source,
@@ -629,6 +665,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         };
                         match self.resolve_alias(alias, Some((source, type_origin)))? {
                             Resolution::Known(template) => {
+                                self.retain_source_application(
+                                    owner,
+                                    source,
+                                    type_ref,
+                                    CanonicalTarget::Source(alias),
+                                    arguments.clone(),
+                                );
                                 let replacements = template
                                     .generic_parameters
                                     .iter()

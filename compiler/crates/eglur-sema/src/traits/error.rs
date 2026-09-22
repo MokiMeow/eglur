@@ -14,6 +14,10 @@ use crate::{
 /// Trait-environment infrastructure failure; source failures are diagnostics.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TraitEnvironmentError {
+    InvalidTrustedTypeApplication {
+        owner: CanonicalTarget,
+        target: CanonicalTarget,
+    },
     UnexpectedImplSignature(CanonicalTarget),
     UnknownImplementation(CanonicalTarget),
     DuplicateSource(FileId),
@@ -68,6 +72,10 @@ pub enum TraitEnvironmentError {
 impl fmt::Display for TraitEnvironmentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidTrustedTypeApplication { owner, target } => write!(
+                formatter,
+                "trusted declaration {owner:?} has an invalid type application of {target:?}"
+            ),
             Self::UnexpectedImplSignature(declaration) => {
                 write!(
                     formatter,
@@ -175,6 +183,7 @@ impl std::error::Error for TraitEnvironmentError {
             Self::TypeStore(error) => Some(error),
             Self::DiagnosticStore(error) => Some(error),
             Self::UnexpectedImplSignature(_)
+            | Self::InvalidTrustedTypeApplication { .. }
             | Self::UnknownImplementation(_)
             | Self::DuplicateSource(_)
             | Self::UnknownModule(_)

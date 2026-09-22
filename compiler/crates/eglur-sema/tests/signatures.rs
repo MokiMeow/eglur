@@ -27,6 +27,8 @@ mod associated_bindings;
 mod enums;
 #[path = "signatures/impl_arguments.rs"]
 mod impl_arguments;
+#[path = "signatures/type_applications.rs"]
+mod type_applications;
 
 struct PreparedSource {
     file: FileId,

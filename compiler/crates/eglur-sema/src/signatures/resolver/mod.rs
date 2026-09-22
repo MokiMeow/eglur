@@ -250,6 +250,7 @@ impl<'hir> SourceCallable<'hir> {
 }
 
 struct SignatureResolver<'input, 'hir> {
+    type_applications: super::applications::TypeApplicationFacts,
     collection: &'input DeclarationCollection,
     imports: &'input ResolvedImports,
     sources: BTreeMap<FileId, &'input SemanticSource<'hir>>,
@@ -443,6 +444,7 @@ struct SourceTypeSite<'source, 'hir> {
     hir: &'source HirFile,
     context: &'source SourceTypeContext,
     type_origin: OriginId,
+    type_ref: TypeRefId,
 }
 
 #[derive(Clone)]

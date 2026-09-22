@@ -1,3 +1,4 @@
+mod applications;
 mod error;
 mod model;
 mod resolver;
@@ -8,3 +9,5 @@ pub use error::SignatureResolutionError;
 pub use model::*;
 pub use resolver::{SignatureResolutionInputs, resolve_declaration_signatures};
 pub use trusted::*;
+
+pub(crate) use applications::{TypeApplication, TypeApplicationSite};
