@@ -426,20 +426,27 @@ impl<'facts> InhabitanceGraph<'facts> {
                 self.product_formula(arguments.iter().copied())
             }
             NominalHead::Declaration(CanonicalTarget::Source(declaration)) => {
-                self.source_nominal_formula(*declaration, arguments)
+                self.declared_nominal_formula(CanonicalTarget::Source(*declaration), arguments)
             }
             NominalHead::Declaration(CanonicalTarget::External(declaration)) => {
-                self.trusted_nominal_formula(declaration, arguments)
+                let target = CanonicalTarget::External(declaration.clone());
+                if matches!(
+                    self.signatures.declaration(&target),
+                    FactState::Known(DeclarationSignature::Enum { .. })
+                ) {
+                    self.declared_nominal_formula(target, arguments)
+                } else {
+                    self.trusted_nominal_formula(declaration, arguments)
+                }
             }
         }
     }
 
-    fn source_nominal_formula(
+    fn declared_nominal_formula(
         &mut self,
-        declaration: crate::DefId,
+        target: CanonicalTarget,
         arguments: &[TypeId],
     ) -> Result<NodeFormula, InhabitanceError> {
-        let target = CanonicalTarget::Source(declaration);
         let signature = match self.signatures.declaration(&target) {
             FactState::Known(signature) => signature.clone(),
             FactState::Poisoned(_) | FactState::Unperformed | FactState::NotApplicable => {
@@ -481,7 +488,7 @@ impl<'facts> InhabitanceGraph<'facts> {
                             return Ok(NodeFormula::Constant(Inhabitance::Unknown));
                         }
                     };
-                    let DeclarationSignature::EnumVariant { payload } = signature else {
+                    let DeclarationSignature::EnumVariant { payload, .. } = signature else {
                         return Err(InhabitanceError::UnexpectedSignature {
                             declaration: variant,
                             expected: "enum variant",
@@ -595,7 +602,7 @@ impl<'facts> InhabitanceGraph<'facts> {
 
     fn field_type(&self, field: &CanonicalTarget) -> Result<Option<TypeId>, InhabitanceError> {
         match self.signatures.declaration(field) {
-            FactState::Known(DeclarationSignature::Field { ty }) => Ok(Some(*ty)),
+            FactState::Known(DeclarationSignature::Field { ty, .. }) => Ok(Some(*ty)),
             FactState::Known(_) => Err(InhabitanceError::UnexpectedSignature {
                 declaration: field.clone(),
                 expected: "storage field",

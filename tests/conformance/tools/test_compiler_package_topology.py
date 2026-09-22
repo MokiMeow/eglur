@@ -17,7 +17,9 @@ def expected_production_graph() -> dict[str, frozenset[str]]:
         "eglur-syntax": frozenset({"eglur-source"}),
         "eglur-hir": frozenset({"eglur-source", "eglur-syntax"}),
         "eglur-diagnostics": frozenset({"eglur-hir", "eglur-source"}),
-        "eglur-sema": frozenset({"eglur-diagnostics", "eglur-hir", "eglur-source"}),
+        "eglur-sema": frozenset(
+            {"eglur-diagnostics", "eglur-hir", "eglur-source", "eglur-syntax"}
+        ),
         "eglur-eval": frozenset({"eglur-hir", "eglur-sema"}),
         "eglur-driver": frozenset(
             {

@@ -12,7 +12,7 @@ The crates depend on one another as follows:
 ```text
 eglur-driver -> eglur-diagnostics, eglur-eval, eglur-hir, eglur-sema, eglur-syntax, eglur-source
 eglur-eval -> eglur-hir, eglur-sema
-eglur-sema -> eglur-diagnostics, eglur-hir, eglur-source
+eglur-sema -> eglur-diagnostics, eglur-hir, eglur-source, eglur-syntax
 eglur-hir -> eglur-syntax -> eglur-source
 eglur-diagnostics -> eglur-hir, eglur-source
 ```
@@ -53,6 +53,7 @@ for diagnostics; changing that label does not change semantic fingerprints.
 
 The concrete tree library is private to `eglur-syntax`. Semantic phases consume
 `HirFile`, not raw tree nodes, and lowering never re-lexes or reparses source.
+Trusted enum metadata uses the syntax crate only to validate identifier spellings.
 
 ## Parser Failure Boundary
 
@@ -115,6 +116,12 @@ Arithmetic with known nonnumeric operands reports `NUMERIC_OPERAND_NOT_NUMERIC`,
 including unary minus and fractional division. Diagnostics retain canonical
 operand types before promotion and suppress errors derived from poisoned operands.
 Constant initializers cannot execute general function calls.
+
+Source and catalog enums use the same canonical variant and payload declarations.
+Bare match bindings are checked against the expected enum's variant names,
+including through type aliases and nested patterns. Catalog payloads also
+determine enum inhabitance. External variant construction and qualified external
+variant patterns remain unsupported.
 
 The bounded ownership pass checks straight-line code, `if` branches, and
 `result`/`checked` exits. A typed body that this pass cannot finish reports

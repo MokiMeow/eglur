@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use eglur_hir::is_residual_constructor_name;
+use eglur_syntax::is_identifier_spelling;
+
 use super::trusted_method_contracts::validate_trusted_method_contracts;
 
 use crate::{
@@ -117,11 +120,39 @@ pub enum TrustedConstructorPayload {
     Positional(Box<[TrustedTypeExpr]>),
 }
 
+/// One named field in a trusted enum variant's payload.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrustedEnumField {
+    pub id: ExternalDefId,
+    pub name: NameKey,
+    pub ty: TrustedTypeExpr,
+}
+
+/// Payload syntax retained independently from the variant's identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TrustedEnumPayload {
+    Absent,
+    Tuple(Box<[TrustedTypeExpr]>),
+    Named(Box<[TrustedEnumField]>),
+}
+
+/// One ordered member of a complete trusted enum declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrustedEnumVariant {
+    pub id: ExternalDefId,
+    pub name: NameKey,
+    pub payload: TrustedEnumPayload,
+}
+
 /// Bounded declaration families accepted from a trusted catalog adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TrustedSignatureKind {
     Nominal {
         generic_parameters: Box<[TrustedGenericParameter]>,
+    },
+    Enum {
+        generic_parameters: Box<[TrustedGenericParameter]>,
+        variants: Box<[TrustedEnumVariant]>,
     },
     Trait {
         closed: bool,
@@ -250,6 +281,9 @@ impl TrustedSignatureEnvironment {
         }
         for declaration in &declarations {
             validate_trusted_names(declaration)?;
+            if let TrustedSignatureKind::Enum { variants, .. } = declaration.kind() {
+                validate_enum_members(declaration.id(), variants, &mut all_ids)?;
+            }
             if let TrustedSignatureKind::Trait {
                 associated_types, ..
             } = declaration.kind()
@@ -330,6 +364,7 @@ fn normalize_trusted_members(declaration: &mut TrustedDeclarationSignature) {
                 .then_with(|| left.associated.cmp(&right.associated))
         }),
         TrustedSignatureKind::Nominal { .. }
+        | TrustedSignatureKind::Enum { .. }
         | TrustedSignatureKind::Callable { .. }
         | TrustedSignatureKind::Constructor { .. } => {}
     }
@@ -361,6 +396,9 @@ fn validate_trusted_names(
     }
     let parameters = match &declaration.kind {
         TrustedSignatureKind::Nominal { generic_parameters }
+        | TrustedSignatureKind::Enum {
+            generic_parameters, ..
+        }
         | TrustedSignatureKind::Trait {
             generic_parameters, ..
         }
@@ -398,6 +436,51 @@ fn validate_trusted_names(
                     declaration: declaration.id.clone(),
                     associated: associated.id.clone(),
                 });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_enum_members(
+    owner: &ExternalDefId,
+    variants: &[TrustedEnumVariant],
+    all_ids: &mut BTreeSet<ExternalDefId>,
+) -> Result<(), TrustedSignatureError> {
+    let mut names = BTreeSet::new();
+    for variant in variants {
+        if variant.name.is_bang()
+            || !is_identifier_spelling(variant.name.text())
+            || is_residual_constructor_name(variant.name.text())
+            || !names.insert(&variant.name)
+        {
+            return Err(TrustedSignatureError::InvalidEnumMember {
+                owner: owner.clone(),
+                member: variant.id.clone(),
+            });
+        }
+        if !all_ids.insert(variant.id.clone()) {
+            return Err(TrustedSignatureError::DuplicateDeclaration(
+                variant.id.clone(),
+            ));
+        }
+        if let TrustedEnumPayload::Named(fields) = &variant.payload {
+            let mut names = BTreeSet::new();
+            for field in fields {
+                if field.name.is_bang()
+                    || !is_identifier_spelling(field.name.text())
+                    || !names.insert(&field.name)
+                {
+                    return Err(TrustedSignatureError::InvalidEnumMember {
+                        owner: variant.id.clone(),
+                        member: field.id.clone(),
+                    });
+                }
+                if !all_ids.insert(field.id.clone()) {
+                    return Err(TrustedSignatureError::DuplicateDeclaration(
+                        field.id.clone(),
+                    ));
+                }
             }
         }
     }
@@ -509,6 +592,10 @@ fn validate_trusted_method_relations(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TrustedSignatureError {
     DuplicateDeclaration(ExternalDefId),
+    InvalidEnumMember {
+        owner: ExternalDefId,
+        member: ExternalDefId,
+    },
     InvalidGenericParameter {
         declaration: ExternalDefId,
         name: Box<str>,
@@ -591,6 +678,12 @@ impl fmt::Display for TrustedSignatureError {
             Self::DuplicateDeclaration(id) => {
                 write!(formatter, "duplicate trusted signature {}", id.as_str())
             }
+            Self::InvalidEnumMember { owner, member } => write!(
+                formatter,
+                "invalid or duplicate member {} of trusted enum declaration {}",
+                member.as_str(),
+                owner.as_str(),
+            ),
             Self::InvalidGenericParameter { declaration, name } => write!(
                 formatter,
                 "trusted signature {} has invalid or duplicate generic parameter `{name}`",

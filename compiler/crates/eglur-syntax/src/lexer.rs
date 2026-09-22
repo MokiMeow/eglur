@@ -74,6 +74,15 @@ pub fn lex(source: ValidatedSource<'_>) -> Lexed<'_> {
     Lexer::new(source).run()
 }
 
+/// Checks one ordinary identifier, excluding reserved keywords, `_`, and bang names.
+#[must_use]
+pub fn is_identifier_spelling(text: &str) -> bool {
+    let mut characters = text.chars();
+    characters.next().is_some_and(is_identifier_start)
+        && characters.all(is_identifier_continue)
+        && identifier_kind(text) == TokenKind::Identifier
+}
+
 struct Lexer<'source> {
     source: ValidatedSource<'source>,
     index: usize,
@@ -395,11 +404,7 @@ impl<'source> Lexer<'source> {
             self.advance_char();
         }
         let text = &self.text()[start..self.index];
-        let mut kind = if text == "_" {
-            TokenKind::Underscore
-        } else {
-            TokenKind::keyword(text).unwrap_or(TokenKind::Identifier)
-        };
+        let mut kind = identifier_kind(text);
         if kind == TokenKind::Identifier && self.peek_char() == Some('!') {
             self.index += 1;
             kind = TokenKind::BangIdentifier;
@@ -703,6 +708,14 @@ fn byte_range(start: usize, end: usize) -> ByteRange {
     ByteRange::new(start, end).expect("lexer ranges are emitted in source order")
 }
 
+fn identifier_kind(text: &str) -> TokenKind {
+    if text == "_" {
+        TokenKind::Underscore
+    } else {
+        TokenKind::keyword(text).unwrap_or(TokenKind::Identifier)
+    }
+}
+
 fn is_identifier_start(character: char) -> bool {
     character.is_ascii_alphabetic() || character == '_'
 }
@@ -750,7 +763,7 @@ fn single_token(character: char) -> Option<TokenKind> {
 mod tests {
     use eglur_source::{ByteOffset, FileId, SourceFile};
 
-    use super::lex;
+    use super::{is_identifier_spelling, lex};
     use crate::{SyntaxDiagnosticKind, TokenKind};
 
     fn lex_text(text: &str) -> super::Lexed<'_> {
@@ -759,6 +772,42 @@ mod tests {
             text.as_bytes().to_vec(),
         )));
         lex(source.validate().expect("test source should validate"))
+    }
+
+    #[test]
+    fn identifier_spelling_agrees_with_complete_ordinary_identifier_tokens() {
+        for text in [
+            "Red",
+            "_name",
+            "a123",
+            "self",
+            "super",
+            "closed",
+            "view",
+            "Fn",
+            "Never",
+            "",
+            "_",
+            "fn",
+            "match",
+            "own",
+            "drop_own",
+            "Red!",
+            "123",
+            "a b",
+            "a-b",
+            "a\n",
+            "a\0",
+            "a::b",
+            "\u{03bb}",
+            "a\u{03bb}",
+        ] {
+            let source = SourceFile::new(FileId::new(1), text.as_bytes().to_vec());
+            let tokens = lex(source.validate().unwrap());
+            let expected = tokens.diagnostics().is_empty()
+                && matches!(tokens.tokens(), [token] if token.kind() == TokenKind::Identifier);
+            assert_eq!(is_identifier_spelling(text), expected, "{text:?}");
+        }
     }
 
     fn significant(lexed: &super::Lexed<'_>) -> Vec<(TokenKind, String)> {

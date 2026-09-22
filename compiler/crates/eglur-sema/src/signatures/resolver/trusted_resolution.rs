@@ -39,6 +39,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             types: CanonicalTypeStore::new()?,
             diagnostic_type_names,
             declarations: FactTable::new(),
+            enum_variant_names: HashMap::new(),
             overload_family_poisons: BTreeMap::new(),
             generic_parameters: FactTable::new(),
             occurrences: FactTable::new(),
@@ -73,6 +74,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             types: self.types,
             diagnostic_type_names: self.diagnostic_type_names,
             declarations: self.declarations,
+            enum_variant_names: self.enum_variant_names,
             overload_family_poisons: self.overload_family_poisons,
             generic_parameters: self.generic_parameters,
             occurrences: self.occurrences,
@@ -255,15 +257,17 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         };
         for declaration in trusted.declarations() {
             match declaration.kind() {
-                TrustedSignatureKind::Nominal { generic_parameters } => {
-                    self.require_external_kind(
-                        declaration.id(),
-                        &[
-                            DeclarationKind::Struct,
-                            DeclarationKind::Enum,
-                            DeclarationKind::OpaqueType,
-                        ],
-                    )?;
+                TrustedSignatureKind::Nominal { generic_parameters }
+                | TrustedSignatureKind::Enum {
+                    generic_parameters, ..
+                } => {
+                    let kinds: &[DeclarationKind] =
+                        if matches!(declaration.kind(), TrustedSignatureKind::Enum { .. }) {
+                            &[DeclarationKind::Enum]
+                        } else {
+                            &[DeclarationKind::Struct, DeclarationKind::OpaqueType]
+                        };
+                    self.require_external_kind(declaration.id(), kinds)?;
                     self.types.register_nominal_head(
                         NominalHead::Declaration(CanonicalTarget::External(
                             declaration.id().clone(),
@@ -636,6 +640,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             let signature = match declaration.kind() {
                 TrustedSignatureKind::Nominal { .. } => {
                     DeclarationSignature::Nominal { generic_parameters }
+                }
+                TrustedSignatureKind::Enum { variants, .. } => {
+                    self.resolve_trusted_enum(declaration.id(), &generic_parameters, variants)?
                 }
                 TrustedSignatureKind::Trait {
                     closed,

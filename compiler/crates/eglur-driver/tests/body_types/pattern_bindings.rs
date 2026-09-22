@@ -1,7 +1,7 @@
-use super::{branching_profile, diagnostic_codes, session};
+use super::{body_profile, branching_profile, diagnostic_codes, session};
 use eglur_diagnostics::DiagnosticDataValue;
-use eglur_driver::TrustedCatalog;
-use eglur_sema::{FactState, PrimitiveType, TypeKind};
+use eglur_driver::{SupportProfile, SupportProfileId, SupportSchemaVersion, TrustedCatalog};
+use eglur_sema::{CompileCapability, FactState, PrimitiveType, TypeKind, TypecheckCapability};
 
 #[test]
 fn duplicate_aliases_report_the_later_binding_not_an_internal_collision() {
@@ -113,4 +113,153 @@ fn distinct_aliases_remain_valid_bindings() {
         ));
     }
     assert!(diagnostic_codes(&accepted.into_diagnostics(None)).is_empty());
+}
+
+#[test]
+fn bare_enum_variant_spellings_are_not_whole_value_bindings() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for (declarations, ty, pattern, name) in [
+        ("enum Color { Red\n Blue }\n", "Color", "Red", "Red"),
+        ("enum Color { Red\n Blue }\n", "Color", "(Red)", "Red"),
+        (
+            "enum Color { Red\n Blue }\ntype Shade = Color\n",
+            "Shade",
+            "Red",
+            "Red",
+        ),
+        (
+            "enum Color { Red\n Blue }\n",
+            "(Color, i64)",
+            "(Red, _)",
+            "Red",
+        ),
+        (
+            "enum Color { Red\n Blue }\n",
+            "Opt[Color]",
+            "Some(Red)",
+            "Red",
+        ),
+        (
+            "enum Boxed[T] { Value(T)\n Empty }\n",
+            "Boxed[i64]",
+            "Value",
+            "Value",
+        ),
+        (
+            "import std::io::TextError\n",
+            "TextError",
+            "InvalidUtf8",
+            "InvalidUtf8",
+        ),
+        ("import std::io::TextError\n", "TextError", "Io", "Io"),
+        (
+            "import std::io::TextError\n",
+            "Opt[TextError]",
+            "Some(InvalidUtf8)",
+            "InvalidUtf8",
+        ),
+    ] {
+        let source = format!(
+            "{declarations}fn f(value: {ty}) -> i64 = match value {{ {pattern} => 0, _ => 1 }}\n"
+        );
+        let mut rejected = session(&source);
+        rejected
+            .resolve(&branching_profile(), Some(&catalog))
+            .unwrap();
+        let snapshot = rejected.into_diagnostics(None);
+        assert_eq!(diagnostic_codes(&snapshot), ["NAME_AMBIGUOUS"], "{source}");
+        let diagnostic = &snapshot.diagnostics()[0];
+        assert_eq!(
+            diagnostic.data().get("name"),
+            Some(&DiagnosticDataValue::from(name))
+        );
+        let range = diagnostic
+            .primary_span()
+            .as_source()
+            .unwrap()
+            .file_span()
+            .range();
+        assert_eq!(
+            &source[range.start().as_usize()..range.end().as_usize()],
+            name
+        );
+        assert!(range.start().as_usize() > source.find("match value").unwrap());
+    }
+}
+
+#[test]
+fn enum_variant_names_only_conflict_in_bare_match_binding_roles() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for source in [
+        "enum Color { Red\n Blue }\nfn f(value: Color) -> i64 = match value { other => 0 }\n",
+        "enum Color { Red\n Blue }\nfn f(value: Color) -> i64 = match value { Red @ _ => 0 }\n",
+        "enum Color { Red\n Blue }\nfn f(Red: Color) -> Color = Red\n",
+        "enum Color { Red\n Blue }\nfn f(value: Color) -> Color { let Red = value\nyield Red }\n",
+        "enum Color { Red\n Blue }\nfn f(value: i64) -> i64 = match value { Red => Red }\n",
+        "enum Color { Red\n Blue }\nenum Other { Green }\nfn f(value: Other) -> i64 = match value { Red => 0 }\n",
+        "import std::io::TextError\nfn f(value: TextError) -> i64 = match value { InvalidUtf8 @ _ => 0 }\n",
+    ] {
+        let mut accepted = session(source);
+        accepted
+            .resolve(&branching_profile(), Some(&catalog))
+            .unwrap();
+        assert!(
+            diagnostic_codes(&accepted.into_diagnostics(None)).is_empty(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn poisoned_enum_members_do_not_create_derivative_pattern_diagnostics() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for pattern in ["Red", "other"] {
+        let source = format!(
+            "enum Color {{ Red(Missing) }}\nfn f(value: Color) -> i64 = match value {{ {pattern} => 0, _ => 1 }}\n"
+        );
+        let mut rejected = session(&source);
+        rejected
+            .resolve(&branching_profile(), Some(&catalog))
+            .unwrap();
+        assert_eq!(
+            diagnostic_codes(&rejected.into_diagnostics(None)),
+            ["NAME_NOT_FOUND"]
+        );
+    }
+}
+
+#[test]
+fn enum_metadata_does_not_enable_unsupported_pattern_or_constructor_paths() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let without_members = SupportProfile::compile_only(
+        SupportSchemaVersion::V1,
+        SupportProfileId::new("without-members").unwrap(),
+        branching_profile()
+            .compile_capabilities()
+            .filter(|capability| {
+                *capability != CompileCapability::Typecheck(TypecheckCapability::ResolveMembers)
+            }),
+    )
+    .unwrap();
+    for source in [
+        "import std::io::TextError\nfn f(value: TextError) -> i64 = match value { TextError::InvalidUtf8 => 0, _ => 1 }\n",
+        "import std::io::TextError\nfn f() -> TextError = TextError::InvalidUtf8\n",
+    ] {
+        let mut unsupported = session(source);
+        let analysis = unsupported
+            .resolve(&without_members, Some(&catalog))
+            .unwrap();
+        assert!(analysis.trace().missing().any(|entry| entry.capability()
+            == CompileCapability::Typecheck(TypecheckCapability::ResolveMembers)));
+        assert!(diagnostic_codes(&unsupported.into_diagnostics(None)).is_empty());
+    }
+
+    let mut unsupported =
+        session("enum Color { Red }\nfn f(value: Color) -> i64 = match value { Red => 0 }\n");
+    let analysis = unsupported
+        .resolve(&body_profile(), Some(&catalog))
+        .unwrap();
+    assert!(analysis.trace().missing().any(|entry| entry.capability()
+        == CompileCapability::Typecheck(TypecheckCapability::CheckBranching)));
+    assert!(diagnostic_codes(&unsupported.into_diagnostics(None)).is_empty());
 }

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use eglur_diagnostics::Poison;
 use eglur_hir::{BodyId, OriginId, PatternId, TypeRefId};
@@ -458,9 +458,12 @@ pub enum DeclarationSignature {
         variants: Box<[CanonicalTarget]>,
     },
     EnumVariant {
+        owner: CanonicalTarget,
+        name: NameKey,
         payload: EnumVariantPayloadSignature,
     },
     Field {
+        name: NameKey,
         ty: TypeId,
     },
     TypeAlias {
@@ -480,7 +483,7 @@ pub enum DeclarationSignature {
     GenericParameter(GenericParameterSignature),
 }
 
-/// Canonical payload shape for one source enum variant.
+/// Canonical payload shape for one source or trusted enum variant.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EnumVariantPayloadSignature {
     Absent,
@@ -493,6 +496,7 @@ pub struct DeclarationSignatures {
     pub(super) types: CanonicalTypeStore,
     pub(super) diagnostic_type_names: DiagnosticTypeNames,
     pub(super) declarations: FactTable<CanonicalTarget, DeclarationSignature>,
+    pub(super) enum_variant_names: HashMap<CanonicalTarget, SemanticFact<HashSet<NameKey>>>,
     pub(super) overload_family_poisons: BTreeMap<DefId, Poison>,
     pub(super) generic_parameters: FactTable<GenericParameterId, GenericParameterSignature>,
     pub(super) occurrences: FactTable<TypeOccurrenceId, ResolvedTypeOccurrence>,
@@ -540,6 +544,18 @@ impl DeclarationSignatures {
     #[must_use]
     pub fn source_declaration(&self, declaration: DefId) -> FactState<'_, DeclarationSignature> {
         self.declaration(&CanonicalTarget::Source(declaration))
+    }
+
+    pub(crate) fn enum_variant_names(
+        &self,
+        declaration: &CanonicalTarget,
+    ) -> FactState<'_, HashSet<NameKey>> {
+        match self.enum_variant_names.get(declaration) {
+            Some(SemanticFact::Known(names)) => FactState::Known(names),
+            Some(SemanticFact::Poisoned(poison)) => FactState::Poisoned(poison),
+            Some(SemanticFact::NotApplicable) => FactState::NotApplicable,
+            None => FactState::Unperformed,
+        }
     }
 
     #[must_use]

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use eglur_diagnostics::{
     DiagnosticDataValue, DiagnosticStore, DiagnosticStoreError, Poison, RelatedSpan, SourceSpan,
@@ -44,6 +44,7 @@ use crate::{
 mod contexts;
 mod declarations;
 mod diagnostics;
+mod enums;
 mod impl_headers;
 mod source_types;
 mod trusted_resolution;
@@ -113,6 +114,7 @@ pub fn resolve_declaration_signatures(
     resolver.resolve_source_declarations()?;
     resolver.validate_source_overload_families()?;
     resolver.resolve_body_type_occurrences()?;
+    resolver.index_enum_variant_names()?;
     let trusted_inhabitance = resolver.resolve_trusted_inhabitance()?;
     let signatures = resolver.finish();
     let inhabitance = InhabitanceFacts::new(trusted_inhabitance)?;
@@ -259,6 +261,7 @@ struct SignatureResolver<'input, 'hir> {
     types: CanonicalTypeStore,
     diagnostic_type_names: DiagnosticTypeNames,
     declarations: FactTable<CanonicalTarget, DeclarationSignature>,
+    enum_variant_names: HashMap<CanonicalTarget, SemanticFact<HashSet<NameKey>>>,
     overload_family_poisons: BTreeMap<DefId, Poison>,
     generic_parameters: FactTable<GenericParameterId, GenericParameterSignature>,
     occurrences: FactTable<TypeOccurrenceId, ResolvedTypeOccurrence>,
@@ -783,6 +786,9 @@ fn projection_path_reaches_any(
 fn trusted_generic_parameters(kind: &TrustedSignatureKind) -> &[TrustedGenericParameter] {
     match kind {
         TrustedSignatureKind::Nominal { generic_parameters }
+        | TrustedSignatureKind::Enum {
+            generic_parameters, ..
+        }
         | TrustedSignatureKind::Trait {
             generic_parameters, ..
         }

@@ -11,15 +11,18 @@ use eglur_sema::{
     RawPointerMutability, ReferenceMutability, ResolveCapability, SemanticSource,
     SignatureResolutionError, SignatureResolutionInputs, TrustedAssociatedBinding,
     TrustedAssociatedType, TrustedCallableParameter, TrustedConstructorPayload,
-    TrustedDeclarationInputs, TrustedDeclarationSignature, TrustedGenericParameter,
-    TrustedImplMethod, TrustedInhabitanceEnvironment, TrustedInhabitanceFact,
-    TrustedInhabitanceProduct, TrustedLanguageItemEnvironment, TrustedNominalInhabitance,
+    TrustedDeclarationInputs, TrustedDeclarationSignature, TrustedEnumPayload, TrustedEnumVariant,
+    TrustedGenericParameter, TrustedImplMethod, TrustedInhabitanceEnvironment,
+    TrustedInhabitanceFact, TrustedLanguageItemEnvironment, TrustedNominalInhabitance,
     TrustedSignatureEnvironment, TrustedSignatureError, TrustedSignatureKind, TrustedTraitAdapter,
     TrustedTraitExpr, TrustedTraitMethod, TrustedTypeExpr, TypeKind, TypecheckCapability,
     collect_declarations, plan_imports, resolve_declaration_signatures, resolve_imports,
 };
 use eglur_source::{FileId, LineIndex, SourceFile};
 use eglur_syntax::parse_validated;
+
+#[path = "signatures/enums.rs"]
+mod enums;
 
 struct PreparedSource {
     file: FileId,
@@ -284,6 +287,7 @@ fn explicit_variant_visibility_is_rejected_without_poisoning_valid_siblings() {
                 signatures.source_declaration(good),
                 FactState::Known(DeclarationSignature::EnumVariant {
                     payload: EnumVariantPayloadSignature::Tuple(fields),
+                    ..
                 }) if fields.len() == 1
             ));
         }
@@ -635,8 +639,24 @@ fn trusted_product_and_sum_inhabitance_rules_bind_to_canonical_types() {
         ),
         TrustedDeclarationSignature::new(
             choice.clone(),
-            TrustedSignatureKind::Nominal {
+            TrustedSignatureKind::Enum {
                 generic_parameters: Box::new([generic("T"), generic("E")]),
+                variants: Box::new([
+                    TrustedEnumVariant {
+                        id: ExternalDefId::new("std::shape::Choice::Left").unwrap(),
+                        name: NameKey::new("Left", false).unwrap(),
+                        payload: TrustedEnumPayload::Tuple(Box::new([
+                            TrustedTypeExpr::GenericParameter(0),
+                        ])),
+                    },
+                    TrustedEnumVariant {
+                        id: ExternalDefId::new("std::shape::Choice::Right").unwrap(),
+                        name: NameKey::new("Right", false).unwrap(),
+                        payload: TrustedEnumPayload::Tuple(Box::new([
+                            TrustedTypeExpr::GenericParameter(1),
+                        ])),
+                    },
+                ]),
             },
         ),
         TrustedDeclarationSignature::new(
@@ -651,13 +671,6 @@ fn trusted_product_and_sum_inhabitance_rules_bind_to_canonical_types() {
         TrustedInhabitanceFact::new(
             wrapper,
             TrustedNominalInhabitance::Product(Box::new([TrustedTypeExpr::GenericParameter(0)])),
-        ),
-        TrustedInhabitanceFact::new(
-            choice,
-            TrustedNominalInhabitance::Sum(Box::new([
-                TrustedInhabitanceProduct::new([TrustedTypeExpr::GenericParameter(0)]),
-                TrustedInhabitanceProduct::new([TrustedTypeExpr::GenericParameter(1)]),
-            ])),
         ),
         TrustedInhabitanceFact::new(empty_seq, TrustedNominalInhabitance::Inhabited),
     ])
@@ -781,14 +794,16 @@ enum Token {
     assert!(matches!(
         signatures.source_declaration(end),
         FactState::Known(DeclarationSignature::EnumVariant {
-            payload: EnumVariantPayloadSignature::Absent
+            payload: EnumVariantPayloadSignature::Absent,
+            ..
         })
     ));
     let pair = source_def(&analysis.declarations, "Pair", DeclarationKind::EnumVariant);
     assert!(matches!(
         signatures.source_declaration(pair),
         FactState::Known(DeclarationSignature::EnumVariant {
-            payload: EnumVariantPayloadSignature::Tuple(elements)
+            payload: EnumVariantPayloadSignature::Tuple(elements),
+            ..
         }) if elements.len() == 2
     ));
     let number = source_def(
@@ -799,7 +814,8 @@ enum Token {
     assert!(matches!(
         signatures.source_declaration(number),
         FactState::Known(DeclarationSignature::EnumVariant {
-            payload: EnumVariantPayloadSignature::Named(fields)
+            payload: EnumVariantPayloadSignature::Named(fields),
+            ..
         }) if fields.len() == 1
     ));
 }

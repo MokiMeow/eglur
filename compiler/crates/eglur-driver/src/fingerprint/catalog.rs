@@ -3,9 +3,9 @@ use eglur_sema::{
     ExternalNameCoverage, ExternalNameEnvironment, ExternalSemanticOwner, FingerprintDomain,
     IntrinsicNominal, LanguageItem, Namespace, PrimitiveType, RawPointerMutability,
     ReferenceMutability, StateScope, TensorSourceConstructor, TrustedCallableRequirement,
-    TrustedConstructorPayload, TrustedDeclarationSignature, TrustedGenericParameter,
-    TrustedInhabitanceProduct, TrustedNominalInhabitance, TrustedSignatureKind, TrustedTraitExpr,
-    TrustedTypeExpr,
+    TrustedConstructorPayload, TrustedDeclarationSignature, TrustedEnumPayload,
+    TrustedGenericParameter, TrustedInhabitanceProduct, TrustedNominalInhabitance,
+    TrustedSignatureKind, TrustedTraitExpr, TrustedTypeExpr,
 };
 
 use super::CatalogFingerprint;
@@ -94,6 +94,34 @@ fn write_signature_declarations<'a>(
             TrustedSignatureKind::Nominal { generic_parameters } => {
                 builder.write_u8(0);
                 write_generics(builder, generic_parameters);
+            }
+            TrustedSignatureKind::Enum {
+                generic_parameters,
+                variants,
+            } => {
+                builder.write_u8(5);
+                write_generics(builder, generic_parameters);
+                builder.write_len(variants.len());
+                for variant in variants {
+                    builder.write_str(variant.id.as_str());
+                    write_name(builder, &variant.name);
+                    match &variant.payload {
+                        TrustedEnumPayload::Absent => builder.write_u8(0),
+                        TrustedEnumPayload::Tuple(types) => {
+                            builder.write_u8(1);
+                            write_ordered_types(builder, types);
+                        }
+                        TrustedEnumPayload::Named(fields) => {
+                            builder.write_u8(2);
+                            builder.write_len(fields.len());
+                            for field in fields {
+                                builder.write_str(field.id.as_str());
+                                write_name(builder, &field.name);
+                                CatalogType::from(&field.ty).write_to(builder);
+                            }
+                        }
+                    }
+                }
             }
             TrustedSignatureKind::Trait {
                 closed,
@@ -582,7 +610,8 @@ mod tests {
     use eglur_sema::{
         DeclarationKind, ExternalDeclaration, ExternalDefId, ExternalNameEnvironment,
         ModuleAddress, NameKey, TensorSourceConstructor, TrustedCallableParameter,
-        TrustedImplMethod, TrustedTraitAdapter, TrustedTraitMethod,
+        TrustedEnumField, TrustedEnumPayload, TrustedEnumVariant, TrustedImplMethod,
+        TrustedSignatureEnvironment, TrustedTraitAdapter, TrustedTraitMethod,
     };
 
     use super::{
@@ -700,6 +729,94 @@ mod tests {
                 id("test::Display.render"),
             ))
         );
+    }
+
+    #[test]
+    fn fingerprint_observes_enum_members_and_each_payload_contract() {
+        fn fingerprint(variants: Vec<TrustedEnumVariant>) -> CatalogFingerprint {
+            let declarations =
+                TrustedSignatureEnvironment::new([TrustedDeclarationSignature::new(
+                    id("test::Choice"),
+                    TrustedSignatureKind::Enum {
+                        generic_parameters: Box::new([]),
+                        variants: variants.into_boxed_slice(),
+                    },
+                )])
+                .unwrap();
+            relation_fingerprint(&declarations.declarations().cloned().collect::<Vec<_>>())
+        }
+
+        fn fields(variants: &mut [TrustedEnumVariant]) -> &mut [TrustedEnumField] {
+            let TrustedEnumPayload::Named(fields) = &mut variants[1].payload else {
+                panic!("second variant has named fields");
+            };
+            fields
+        }
+
+        let baseline = vec![
+            TrustedEnumVariant {
+                id: id("test::stop"),
+                name: NameKey::new("Stop", false).unwrap(),
+                payload: TrustedEnumPayload::Absent,
+            },
+            TrustedEnumVariant {
+                id: id("test::record"),
+                name: NameKey::new("Record", false).unwrap(),
+                payload: TrustedEnumPayload::Named(Box::new([
+                    TrustedEnumField {
+                        id: id("test::left"),
+                        name: NameKey::new("left", false).unwrap(),
+                        ty: TrustedTypeExpr::Primitive(PrimitiveType::I64),
+                    },
+                    TrustedEnumField {
+                        id: id("test::right"),
+                        name: NameKey::new("right", false).unwrap(),
+                        ty: TrustedTypeExpr::Primitive(PrimitiveType::Bool),
+                    },
+                ])),
+            },
+        ];
+        let expected = fingerprint(baseline.clone());
+        type Mutation = fn(&mut [TrustedEnumVariant]);
+        let mutations: [(&str, Mutation); 11] = [
+            ("variant identity", |variants| {
+                variants[0].id = id("test::other")
+            }),
+            ("variant name", |variants| {
+                variants[0].name = NameKey::new("End", false).unwrap()
+            }),
+            ("variant order", |variants| variants.swap(0, 1)),
+            ("empty positional payload", |variants| {
+                variants[0].payload = TrustedEnumPayload::Tuple(Box::new([]))
+            }),
+            ("positional payload", |variants| {
+                variants[0].payload = TrustedEnumPayload::Tuple(Box::new([TrustedTypeExpr::Never]))
+            }),
+            ("empty named payload", |variants| {
+                variants[0].payload = TrustedEnumPayload::Named(Box::new([]))
+            }),
+            ("field identity", |variants| {
+                fields(variants)[0].id = id("test::other")
+            }),
+            ("field name", |variants| {
+                fields(variants)[0].name = NameKey::new("other", false).unwrap()
+            }),
+            ("field type", |variants| {
+                fields(variants)[0].ty = TrustedTypeExpr::Never
+            }),
+            ("field order", |variants| fields(variants).swap(0, 1)),
+            ("payload form", |variants| {
+                variants[1].payload = TrustedEnumPayload::Tuple(Box::new([
+                    TrustedTypeExpr::Primitive(PrimitiveType::I64),
+                    TrustedTypeExpr::Primitive(PrimitiveType::Bool),
+                ]))
+            }),
+        ];
+        for (label, mutate) in mutations {
+            let mut changed = baseline.clone();
+            mutate(&mut changed);
+            assert_ne!(expected, fingerprint(changed), "{label}");
+        }
     }
 
     #[test]

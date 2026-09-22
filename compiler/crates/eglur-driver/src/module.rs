@@ -1,6 +1,6 @@
 use std::fmt;
 
-use eglur_syntax::TokenKind;
+use eglur_syntax::is_identifier_spelling;
 
 /// Source-addressable canonical module path derived from one source location.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -80,18 +80,7 @@ impl ModulePathCandidate {
 }
 
 fn is_valid_component(index: usize, component: &str) -> bool {
-    let mut bytes = component.bytes();
-    let Some(first) = bytes.next() else {
-        return false;
-    };
-    if !(first.is_ascii_alphabetic() || first == b'_')
-        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-        || component == "_"
-        || TokenKind::is_reserved_keyword(component)
-    {
-        return false;
-    }
-    index != 0 || !matches!(component, "self" | "super")
+    is_identifier_spelling(component) && (index != 0 || !matches!(component, "self" | "super"))
 }
 
 #[cfg(test)]
