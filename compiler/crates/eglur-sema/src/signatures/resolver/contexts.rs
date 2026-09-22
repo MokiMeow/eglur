@@ -112,6 +112,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         Ok(SourceTypeContext {
             generics,
             self_binding,
+            structure_validation: TypeStructureValidation::Immediate,
         })
     }
 

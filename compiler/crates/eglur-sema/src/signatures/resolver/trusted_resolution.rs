@@ -787,95 +787,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             ));
                         }
                     };
-                    let trait_ref = header.trait_ref().clone();
-                    let impl_target = header.target();
-                    let info = self
-                        .trait_info
-                        .get(trait_ref.declaration())
-                        .cloned()
-                        .ok_or_else(|| {
-                            SignatureResolutionError::Trusted(TrustedSignatureError::UnknownTrait(
-                                match trait_ref.declaration() {
-                                    CanonicalTarget::External(id) => id.clone(),
-                                    CanonicalTarget::Source(_) => unreachable!(
-                                        "trusted trait references cannot target source declarations"
-                                    ),
-                                },
-                            ))
-                        })?;
-                    let expected = info
-                        .associated
-                        .values()
-                        .flatten()
-                        .cloned()
-                        .collect::<BTreeSet<_>>();
-                    let mut seen = BTreeSet::new();
-                    let mut bindings = Vec::with_capacity(associated_bindings.len());
-                    for binding in associated_bindings {
-                        let associated = CanonicalTarget::External(binding.associated.clone());
-                        if !expected.contains(&associated) || !seen.insert(associated.clone()) {
-                            return Err(SignatureResolutionError::Trusted(
-                                TrustedSignatureError::UnknownAssociatedType(
-                                    binding.associated.clone(),
-                                ),
-                            ));
-                        }
-                        let value = self.resolve_trusted_type(
-                            declaration.id(),
-                            generic_parameters.len(),
-                            &binding.value,
-                            TypePosition::Ordinary,
-                        )?;
-                        if self.types.contains_reference(value)? {
-                            return Err(SignatureResolutionError::Trusted(
-                                TrustedSignatureError::InvalidTypePosition {
-                                    declaration: declaration.id().clone(),
-                                    reason: "reference-bearing associated type binding",
-                                },
-                            ));
-                        }
-                        let signature = AssociatedBindingSignature {
-                            declaration: CanonicalTarget::External(binding.declaration.clone()),
-                            associated,
-                            value,
-                        };
-                        bindings.push(signature);
-                    }
-                    if seen != expected {
-                        let missing = expected
-                            .difference(&seen)
-                            .next()
-                            .expect("unequal associated sets have one missing member");
-                        let CanonicalTarget::External(missing) = missing else {
-                            unreachable!("trusted traits have portable associated identities")
-                        };
-                        return Err(SignatureResolutionError::Trusted(
-                            TrustedSignatureError::UnknownAssociatedType(missing.clone()),
-                        ));
-                    }
-                    if associated_binding_cycle_sets(
-                        &self.types,
-                        &trait_ref,
-                        impl_target,
-                        &bindings,
-                    )?
-                    .is_some()
-                    {
-                        return Err(SignatureResolutionError::Trusted(
-                            TrustedSignatureError::InvalidTypePosition {
-                                declaration: declaration.id().clone(),
-                                reason: "associated type binding cycle",
-                            },
-                        ));
-                    }
-                    for binding in &bindings {
-                        self.declarations.insert(
-                            binding.declaration.clone(),
-                            SemanticFact::Known(DeclarationSignature::AssociatedTypeBinding(
-                                binding.clone(),
-                            )),
-                        )?;
-                    }
+                    let bindings = self.resolve_trusted_impl_bindings(
+                        declaration.id(),
+                        generic_parameters.len(),
+                        header.trait_ref(),
+                        header.target(),
+                        associated_bindings,
+                    )?;
                     DeclarationSignature::Impl {
                         associated_bindings: bindings.into_boxed_slice(),
                     }
@@ -948,6 +866,21 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         generic_count: usize,
         reference: &TrustedTraitExpr,
     ) -> Result<TraitRef, SignatureResolutionError> {
+        self.resolve_trusted_trait_ref_with_validation(
+            owner,
+            generic_count,
+            reference,
+            TypeStructureValidation::Immediate,
+        )
+    }
+
+    pub(super) fn resolve_trusted_trait_ref_with_validation(
+        &mut self,
+        owner: &ExternalDefId,
+        generic_count: usize,
+        reference: &TrustedTraitExpr,
+        validation: TypeStructureValidation,
+    ) -> Result<TraitRef, SignatureResolutionError> {
         let target = CanonicalTarget::External(reference.declaration.clone());
         let info = self.trait_info.get(&target).cloned().ok_or_else(|| {
             SignatureResolutionError::Trusted(TrustedSignatureError::UnknownTrait(
@@ -967,25 +900,33 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             .arguments
             .iter()
             .map(|argument| {
-                self.resolve_trusted_type(owner, generic_count, argument, TypePosition::Ordinary)
+                self.resolve_trusted_type_with_validation(
+                    owner,
+                    generic_count,
+                    argument,
+                    TypePosition::Ordinary,
+                    validation,
+                )
             })
             .collect::<Result<Vec<_>, SignatureResolutionError>>()?;
-        for &argument in &arguments {
-            if self.types.contains_ownership(argument)? {
-                return Err(SignatureResolutionError::Trusted(
-                    TrustedSignatureError::InvalidTypePosition {
-                        declaration: owner.clone(),
-                        reason: "ownership-bearing trait argument",
-                    },
-                ));
-            }
-            if self.types.contains_reference(argument)? {
-                return Err(SignatureResolutionError::Trusted(
-                    TrustedSignatureError::InvalidTypePosition {
-                        declaration: owner.clone(),
-                        reason: "reference-bearing trait argument",
-                    },
-                ));
+        if validation == TypeStructureValidation::Immediate {
+            for &argument in &arguments {
+                if self.types.contains_ownership(argument)? {
+                    return Err(SignatureResolutionError::Trusted(
+                        TrustedSignatureError::InvalidTypePosition {
+                            declaration: owner.clone(),
+                            reason: "ownership-bearing trait argument",
+                        },
+                    ));
+                }
+                if self.types.contains_reference(argument)? {
+                    return Err(SignatureResolutionError::Trusted(
+                        TrustedSignatureError::InvalidTypePosition {
+                            declaration: owner.clone(),
+                            reason: "reference-bearing trait argument",
+                        },
+                    ));
+                }
             }
         }
         let substitution = self.types.intern_substitution(arguments)?;
@@ -999,6 +940,23 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         expression: &TrustedTypeExpr,
         position: TypePosition,
     ) -> Result<TypeId, SignatureResolutionError> {
+        self.resolve_trusted_type_with_validation(
+            owner,
+            generic_count,
+            expression,
+            position,
+            TypeStructureValidation::Immediate,
+        )
+    }
+
+    pub(super) fn resolve_trusted_type_with_validation(
+        &mut self,
+        owner: &ExternalDefId,
+        generic_count: usize,
+        expression: &TrustedTypeExpr,
+        position: TypePosition,
+        validation: TypeStructureValidation,
+    ) -> Result<TypeId, SignatureResolutionError> {
         let ty = match expression {
             TrustedTypeExpr::Never => self.types.never(),
             TrustedTypeExpr::Primitive(primitive) => self.types.primitive(*primitive)?,
@@ -1008,7 +966,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     .enumerate()
                     .map(|(index, argument)| {
                         let argument_position = position.intrinsic_argument(*head, index);
-                        self.resolve_trusted_type(owner, generic_count, argument, argument_position)
+                        self.resolve_trusted_type_with_validation(
+                            owner,
+                            generic_count,
+                            argument,
+                            argument_position,
+                            validation,
+                        )
                     })
                     .collect::<Result<Vec<_>, SignatureResolutionError>>()?;
                 self.types
@@ -1024,7 +988,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let arguments = arguments
                     .iter()
                     .map(|argument| {
-                        self.resolve_trusted_type(owner, generic_count, argument, position.nested())
+                        self.resolve_trusted_type_with_validation(
+                            owner,
+                            generic_count,
+                            argument,
+                            position.nested(),
+                            validation,
+                        )
                     })
                     .collect::<Result<Vec<_>, SignatureResolutionError>>()?;
                 self.types.nominal(nominal, arguments)?
@@ -1050,11 +1020,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 mutability,
                 referent,
             } => {
-                let referent = self.resolve_trusted_type(
+                let referent = self.resolve_trusted_type_with_validation(
                     owner,
                     generic_count,
                     referent,
                     position.reference_referent(),
+                    validation,
                 )?;
                 self.types.reference(*mutability, referent)?
             }
@@ -1070,15 +1041,26 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         },
                     ));
                 }
-                let referent =
-                    self.resolve_trusted_type(owner, generic_count, referent, position.nested())?;
+                let referent = self.resolve_trusted_type_with_validation(
+                    owner,
+                    generic_count,
+                    referent,
+                    position.nested(),
+                    validation,
+                )?;
                 self.types.raw_pointer(*mutability, referent)?
             }
             TrustedTypeExpr::Tuple(elements) => {
                 let elements = elements
                     .iter()
                     .map(|element| {
-                        self.resolve_trusted_type(owner, generic_count, element, position.nested())
+                        self.resolve_trusted_type_with_validation(
+                            owner,
+                            generic_count,
+                            element,
+                            position.nested(),
+                            validation,
+                        )
                     })
                     .collect::<Result<Vec<_>, SignatureResolutionError>>()?;
                 self.types.tuple(elements)?
@@ -1087,16 +1069,22 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let parameters = parameters
                     .iter()
                     .map(|parameter| {
-                        self.resolve_trusted_type(
+                        self.resolve_trusted_type_with_validation(
                             owner,
                             generic_count,
                             parameter,
                             position.nested(),
+                            validation,
                         )
                     })
                     .collect::<Result<Vec<_>, SignatureResolutionError>>()?;
-                let result =
-                    self.resolve_trusted_type(owner, generic_count, result, position.nested())?;
+                let result = self.resolve_trusted_type_with_validation(
+                    owner,
+                    generic_count,
+                    result,
+                    position.nested(),
+                    validation,
+                )?;
                 self.types.callable(parameters, result)?
             }
             TrustedTypeExpr::ErrorUnion(members) => {
@@ -1115,7 +1103,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let members = members
                     .iter()
                     .map(|member| {
-                        self.resolve_trusted_type(owner, generic_count, member, position.nested())
+                        self.resolve_trusted_type_with_validation(
+                            owner,
+                            generic_count,
+                            member,
+                            position.nested(),
+                            validation,
+                        )
                     })
                     .collect::<Result<Vec<_>, SignatureResolutionError>>()?;
                 self.types.error_union(members)?
@@ -1126,15 +1120,21 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 trait_arguments,
                 associated,
             } => {
-                let base =
-                    self.resolve_trusted_type(owner, generic_count, base, position.nested())?;
-                let trait_ref = self.resolve_trusted_trait_ref(
+                let base = self.resolve_trusted_type_with_validation(
+                    owner,
+                    generic_count,
+                    base,
+                    position.nested(),
+                    validation,
+                )?;
+                let trait_ref = self.resolve_trusted_trait_ref_with_validation(
                     owner,
                     generic_count,
                     &TrustedTraitExpr {
                         declaration: trait_declaration.clone(),
                         arguments: trait_arguments.clone(),
                     },
+                    validation,
                 )?;
                 let associated_target = CanonicalTarget::External(associated.clone());
                 let info = self
@@ -1158,8 +1158,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 ))?
             }
         };
-        self.validate_trusted_slot(owner, ty)?;
-        if !position.is_extern()
+        if validation == TypeStructureValidation::Immediate {
+            self.validate_trusted_slot(owner, ty)?;
+        }
+        if validation == TypeStructureValidation::Immediate
+            && !position.is_extern()
             && self.types.contains_ownership(ty)?
             && !self.ownership_allowed_at(ty, position)?
         {

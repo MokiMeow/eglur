@@ -21,6 +21,8 @@ use eglur_sema::{
 use eglur_source::{FileId, LineIndex, SourceFile};
 use eglur_syntax::parse_validated;
 
+#[path = "signatures/associated_bindings.rs"]
+mod associated_bindings;
 #[path = "signatures/enums.rs"]
 mod enums;
 #[path = "signatures/impl_arguments.rs"]

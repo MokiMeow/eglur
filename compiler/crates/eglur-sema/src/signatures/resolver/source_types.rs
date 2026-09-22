@@ -90,6 +90,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                         source,
                                         occurrence.origin(),
                                         arguments,
+                                        context.structure_validation,
                                     )? {
                                     Resolution::Known(arguments) => {
                                         let substitution =
@@ -288,9 +289,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             TypeRefKind::Invalid => self.invalid_resolution(source, occurrence.origin())?,
         };
         let result = match result {
-            Resolution::Known(ty) => {
-                self.validate_source_position(source, occurrence.origin(), ty, position)?
-            }
+            Resolution::Known(ty) => self.validate_source_position(
+                source,
+                occurrence.origin(),
+                ty,
+                position,
+                context.structure_validation,
+            )?,
             other => other,
         };
         Ok((result, written))
@@ -378,7 +383,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         let ty = self
                             .types
                             .nominal(NominalHead::Intrinsic(intrinsic), arguments)?;
-                        self.validate_source_slot(source, type_origin, ty)?
+                        self.validate_source_slot(
+                            source,
+                            type_origin,
+                            ty,
+                            context.structure_validation,
+                        )?
                     }
                     Resolution::Poisoned(poison) => Resolution::Poisoned(poison),
                     Resolution::Unperformed => Resolution::Unperformed,
@@ -435,7 +445,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let result = match members {
                     Resolution::Known(members) => {
                         let ty = self.types.error_union(members)?;
-                        self.validate_source_position(source, type_origin, ty, position)?
+                        self.validate_source_position(
+                            source,
+                            type_origin,
+                            ty,
+                            position,
+                            context.structure_validation,
+                        )?
                     }
                     Resolution::Poisoned(poison) => Resolution::Poisoned(poison),
                     Resolution::Unperformed => Resolution::Unperformed,
@@ -558,7 +574,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let result = match arguments {
                     Resolution::Known(arguments) => {
                         let ty = self.types.nominal(head, arguments)?;
-                        self.validate_source_slot(source, type_origin, ty)?
+                        self.validate_source_slot(
+                            source,
+                            type_origin,
+                            ty,
+                            context.structure_validation,
+                        )?
                     }
                     Resolution::Poisoned(poison) => Resolution::Poisoned(poison),
                     Resolution::Unperformed => Resolution::Unperformed,
@@ -595,6 +616,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             source,
                             type_origin,
                             arguments,
+                            context.structure_validation,
                         )? {
                             Resolution::Known(arguments) => arguments,
                             Resolution::Poisoned(poison) => {
@@ -614,7 +636,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                     .zip(arguments)
                                     .collect::<BTreeMap<_, _>>();
                                 let ty = self.types.substitute(template.value, &replacements)?;
-                                self.validate_source_position(source, type_origin, ty, position)?
+                                self.validate_source_position(
+                                    source,
+                                    type_origin,
+                                    ty,
+                                    position,
+                                    context.structure_validation,
+                                )?
                             }
                             Resolution::Poisoned(poison) => Resolution::Poisoned(poison),
                             Resolution::Unperformed => Resolution::Unperformed,
@@ -822,8 +850,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         origin: OriginId,
         ty: TypeId,
         position: TypePosition,
+        validation: TypeStructureValidation,
     ) -> Result<Resolution<TypeId>, SignatureResolutionError> {
-        if !position.is_extern()
+        if validation == TypeStructureValidation::Immediate
+            && !position.is_extern()
             && self.types.contains_ownership(ty)?
             && !self.ownership_allowed_at(ty, position)?
         {
@@ -933,7 +963,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         source: &SemanticSource<'hir>,
         origin: OriginId,
         ty: TypeId,
+        validation: TypeStructureValidation,
     ) -> Result<Resolution<TypeId>, SignatureResolutionError> {
+        if validation == TypeStructureValidation::AfterBindingCycles {
+            return Ok(Resolution::Known(ty));
+        }
         let TypeKind::Nominal { head, substitution } = self.types.kind(ty)? else {
             return Ok(Resolution::Known(ty));
         };
@@ -980,7 +1014,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         source: &SemanticSource<'hir>,
         origin: OriginId,
         arguments: Vec<TypeId>,
+        validation: TypeStructureValidation,
     ) -> Result<Resolution<Vec<TypeId>>, SignatureResolutionError> {
+        if validation == TypeStructureValidation::AfterBindingCycles {
+            return Ok(Resolution::Known(arguments));
+        }
         if arguments
             .iter()
             .copied()
