@@ -183,6 +183,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Ok(Outcome::Known(ty))
             }
             TraitNormalization::Poisoned(poison) => Ok(Outcome::Poisoned(poison)),
+            TraitNormalization::InvalidArgument(violation) => {
+                let (code, message) = crate::diagnostic::impl_argument_diagnostic(violation);
+                self.type_error(source, origin, code, message, BTreeMap::new())
+                    .map(Outcome::Poisoned)
+            }
             TraitNormalization::Unsatisfied(obligation)
             | TraitNormalization::Ambiguous(obligation) => {
                 let data = BTreeMap::from([

@@ -103,6 +103,21 @@ pub(crate) fn record_visibility_violation(
     )
 }
 
+pub(crate) const fn impl_argument_diagnostic(
+    violation: crate::ImplArgumentViolation,
+) -> (&'static str, &'static str) {
+    match violation {
+        crate::ImplArgumentViolation::Ownership(_) => (
+            "OWNERSHIP_TYPE_POSITION_FORBIDDEN",
+            "ownership type position is forbidden for an inferred impl argument",
+        ),
+        crate::ImplArgumentViolation::Reference(_) => (
+            "REFERENCE_TYPE_POSITION_FORBIDDEN",
+            "reference type position is forbidden for an inferred impl argument",
+        ),
+    }
+}
+
 pub(crate) fn record_type_error(
     store: &mut DiagnosticStore,
     code_spelling: &'static str,

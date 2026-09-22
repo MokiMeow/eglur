@@ -23,6 +23,8 @@ use eglur_syntax::parse_validated;
 
 #[path = "signatures/enums.rs"]
 mod enums;
+#[path = "signatures/impl_arguments.rs"]
+mod impl_arguments;
 
 struct PreparedSource {
     file: FileId,

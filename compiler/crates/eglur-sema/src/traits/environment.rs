@@ -10,7 +10,8 @@ use crate::{
 
 use super::error::TraitEnvironmentError;
 use super::model::{
-    TraitImplEvidence, TraitNormalization, TraitObligation, TraitProof, TraitReceiverCandidate,
+    ImplArgumentViolation, TraitImplEvidence, TraitNormalization, TraitObligation, TraitProof,
+    TraitReceiverCandidate,
 };
 use super::overlap::{
     ImplBuckets, ImplCandidate, ImplTargetBucket, classify_normalized, match_impl, match_type,
@@ -47,6 +48,7 @@ enum SelectionOutcome {
     Assumed(WitnessSlotId),
     Selected(ImplSelection),
     Poisoned(Poison),
+    InvalidArgument(ImplArgumentViolation),
     Unsatisfied(TraitObligation),
     Ambiguous(TraitObligation),
 }
@@ -334,6 +336,9 @@ impl TraitEnvironment {
                     })
                 }
                 SelectionOutcome::Poisoned(poison) => TraitProof::Poisoned(poison),
+                SelectionOutcome::InvalidArgument(violation) => {
+                    TraitProof::InvalidArgument(violation)
+                }
                 SelectionOutcome::Unsatisfied(obligation) => TraitProof::Unsatisfied(obligation),
                 SelectionOutcome::Ambiguous(obligation) => TraitProof::Ambiguous(obligation),
             },
@@ -586,7 +591,8 @@ impl TraitEnvironment {
                     symbolic = true;
                     normalized.push(ty);
                 }
-                failure @ (TraitNormalization::Poisoned(_)
+                failure @ (TraitNormalization::InvalidArgument(_)
+                | TraitNormalization::Poisoned(_)
                 | TraitNormalization::Unsatisfied(_)
                 | TraitNormalization::Ambiguous(_)
                 | TraitNormalization::Cyclic(_)) => return Ok(Err(failure)),
@@ -704,6 +710,9 @@ impl TraitEnvironment {
                 )?
             }
             SelectionOutcome::Poisoned(poison) => TraitNormalization::Poisoned(poison),
+            SelectionOutcome::InvalidArgument(violation) => {
+                TraitNormalization::InvalidArgument(violation)
+            }
             SelectionOutcome::Unsatisfied(obligation) => {
                 TraitNormalization::Unsatisfied(obligation)
             }
@@ -740,14 +749,20 @@ impl TraitEnvironment {
                     let implementation = self.implementations.get(evidence).ok_or_else(|| {
                         TraitEnvironmentError::UnknownImplementation(evidence.clone())
                     })?;
-                    match_impl(signatures.types(), &implementation.header, &obligation)?
-                        .map(|replacements| {
-                            SelectionOutcome::Selected(ImplSelection {
+                    match match_impl(signatures.types(), &implementation.header, &obligation)? {
+                        Some(replacements) => match impl_argument_violation(
+                            signatures.types(),
+                            &implementation.header,
+                            &replacements,
+                        )? {
+                            Some(violation) => SelectionOutcome::InvalidArgument(violation),
+                            None => SelectionOutcome::Selected(ImplSelection {
                                 implementation: evidence.clone(),
                                 replacements,
-                            })
-                        })
-                        .unwrap_or_else(|| SelectionOutcome::Unsatisfied(obligation.clone()))
+                            }),
+                        },
+                        None => SelectionOutcome::Unsatisfied(obligation.clone()),
+                    }
                 }
                 TraitAssumptionEvidence::Witness(witness) => SelectionOutcome::Assumed(*witness),
             };
@@ -792,6 +807,10 @@ impl TraitEnvironment {
                 .ok_or_else(|| TraitEnvironmentError::UnknownImplementation(declaration.clone()))?;
             if let Some(poison) = implementation.poison {
                 SelectionOutcome::Poisoned(poison)
+            } else if let Some(violation) =
+                impl_argument_violation(signatures.types(), &implementation.header, &replacements)?
+            {
+                SelectionOutcome::InvalidArgument(violation)
             } else {
                 let mut failed = None;
                 for parameter in implementation.header.generic_parameters() {
@@ -838,6 +857,10 @@ impl TraitEnvironment {
                             SelectionOutcome::Assumed(_) | SelectionOutcome::Selected(_) => {}
                             SelectionOutcome::Poisoned(poison) => {
                                 failed = Some(SelectionOutcome::Poisoned(poison));
+                                break;
+                            }
+                            SelectionOutcome::InvalidArgument(violation) => {
+                                failed = Some(SelectionOutcome::InvalidArgument(violation));
                                 break;
                             }
                             SelectionOutcome::Unsatisfied(obligation)
@@ -892,4 +915,24 @@ impl TraitEnvironment {
         }
         Ok(candidates)
     }
+}
+
+fn impl_argument_violation(
+    types: &CanonicalTypeStore,
+    header: &TraitImplHeader,
+    replacements: &BTreeMap<GenericParameterId, TypeId>,
+) -> Result<Option<ImplArgumentViolation>, TraitEnvironmentError> {
+    let arguments = header
+        .generic_parameters()
+        .iter()
+        .map(|parameter| {
+            replacements.get(parameter).copied().ok_or_else(|| {
+                TraitEnvironmentError::UnconstrainedCheckedImpl {
+                    implementation: header.declaration().clone(),
+                    parameter: parameter.clone(),
+                }
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ImplArgumentViolation::in_arguments(types, &arguments)?)
 }

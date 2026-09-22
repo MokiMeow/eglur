@@ -3,9 +3,35 @@ use std::collections::BTreeMap;
 use eglur_diagnostics::Poison;
 
 use crate::{
-    AssociatedProjection, CanonicalTarget, GenericParameterId, SubstId, TraitRef, TypeId,
-    WitnessSlotId,
+    AssociatedProjection, CanonicalTarget, CanonicalTypeStore, GenericParameterId, SubstId,
+    TraitRef, TypeId, TypeStoreError, WitnessSlotId,
 };
+
+/// An inferred impl argument outside the generic parameter domain.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImplArgumentViolation {
+    Ownership(TypeId),
+    Reference(TypeId),
+}
+
+impl ImplArgumentViolation {
+    pub(super) fn in_arguments(
+        types: &CanonicalTypeStore,
+        arguments: &[TypeId],
+    ) -> Result<Option<Self>, TypeStoreError> {
+        for &argument in arguments {
+            if types.contains_ownership(argument)? {
+                return Ok(Some(Self::Ownership(argument)));
+            }
+        }
+        for &argument in arguments {
+            if types.contains_reference(argument)? {
+                return Ok(Some(Self::Reference(argument)));
+            }
+        }
+        Ok(None)
+    }
+}
 
 /// One exact nominal trait obligation in a declaration's well-formedness environment.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -56,6 +82,7 @@ pub enum TraitProof {
     Bound(WitnessSlotId),
     Implementation(TraitImplEvidence),
     Poisoned(Poison),
+    InvalidArgument(ImplArgumentViolation),
     Unsatisfied(TraitObligation),
     Ambiguous(TraitObligation),
 }
@@ -88,7 +115,49 @@ pub enum TraitNormalization {
     Normalized(TypeId),
     Symbolic(TypeId),
     Poisoned(Poison),
+    InvalidArgument(ImplArgumentViolation),
     Unsatisfied(TraitObligation),
     Ambiguous(TraitObligation),
     Cyclic(AssociatedProjection),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{IntrinsicNominal, NominalHead, PrimitiveType, ReferenceMutability};
+
+    #[test]
+    fn complete_impl_vector_checks_ownership_before_any_reference() {
+        let mut types = CanonicalTypeStore::new().unwrap();
+        let integer = types.primitive(PrimitiveType::I64).unwrap();
+        let reference = types
+            .reference(ReferenceMutability::Shared, integer)
+            .unwrap();
+        let owned = types
+            .nominal(NominalHead::Intrinsic(IntrinsicNominal::Own), [integer])
+            .unwrap();
+        for arguments in [[reference, owned], [owned, reference]] {
+            assert_eq!(
+                ImplArgumentViolation::in_arguments(&types, &arguments).unwrap(),
+                Some(ImplArgumentViolation::Ownership(owned))
+            );
+        }
+        let both = types.tuple([reference, owned]).unwrap();
+        assert_eq!(
+            ImplArgumentViolation::in_arguments(&types, &[both]).unwrap(),
+            Some(ImplArgumentViolation::Ownership(both))
+        );
+        assert_eq!(
+            ImplArgumentViolation::in_arguments(&types, &[reference]).unwrap(),
+            Some(ImplArgumentViolation::Reference(reference))
+        );
+        assert_eq!(
+            ImplArgumentViolation::in_arguments(&types, &[integer]).unwrap(),
+            None
+        );
+        assert_eq!(
+            ImplArgumentViolation::in_arguments(&types, &[]).unwrap(),
+            None
+        );
+    }
 }
