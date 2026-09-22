@@ -1,6 +1,6 @@
 use eglur_hir::{
-    AxisExprId, AxisExprKind, ExprId, ExprKind, FunctionBody, HirFile, ItemKind, LiteralKind, Name,
-    SourceOrigin, TensorSchemaExpr, TensorSchemaFamily, lower,
+    AxisExprId, AxisExprKind, ExprId, ExprKind, FunctionBody, HirFile, InvalidCategory, ItemKind,
+    LiteralKind, Name, SourceOrigin, TensorSchemaExpr, TensorSchemaFamily, lower,
 };
 use eglur_source::{FileId, FileSpan, SourceFile};
 use eglur_syntax::ast::{AstNode, Expr as SyntaxExpr};
@@ -400,5 +400,62 @@ fn fixed_cardinality_schemas_reject_extra_lists() {
                 .any(|diagnostic| diagnostic.kind() == SyntaxDiagnosticKind::ParseUnexpectedToken)
         );
         assert!(!lower(&parsed).invalid_occurrences().is_empty());
+    }
+}
+
+#[test]
+fn invalid_pack_factors_keep_syntax_causes_and_following_declarations() {
+    for (family, _) in FAMILIES {
+        for axes in ["(...)", "2 * ...tail", "... + a", "a * (b + ...tail)"] {
+            for (input, output) in [(axes, "end"), ("start", axes)] {
+                let text = format!(
+                    "fn schema() -> Unit = {family}{{ {input} -> {output} }}\n\
+                     const Following: Unit = ()\n"
+                );
+                let source = SourceFile::new(FileId::new(43), text.as_bytes().to_vec());
+                let FrontendOutcome::Parsed(parsed) = parse(&source) else {
+                    panic!("test source must reach the parser");
+                };
+                assert_eq!(parsed.syntax().text(), text);
+                let [diagnostic] = parsed.diagnostics() else {
+                    panic!("expected one syntax diagnostic for {text}");
+                };
+                assert_eq!(
+                    diagnostic.kind(),
+                    SyntaxDiagnosticKind::ParseUnexpectedToken
+                );
+
+                let hir = lower(&parsed);
+                let causes: Vec<_> = hir.syntax_causes().collect();
+                let [(cause, span)] = causes.as_slice() else {
+                    panic!("expected one syntax cause for {text}");
+                };
+                assert_eq!(*span, diagnostic.span());
+                assert!(!hir.invalid_occurrences().is_empty());
+                for occurrence in hir.invalid_occurrences() {
+                    assert_eq!(occurrence.syntax_causes(), &[*cause]);
+                    if occurrence.category() == InvalidCategory::ReportedSyntax {
+                        assert_eq!(
+                            hir.origin(occurrence.origin()),
+                            SourceOrigin::Written(diagnostic.span())
+                        );
+                    } else {
+                        assert_eq!(occurrence.category(), InvalidCategory::Item);
+                    }
+                }
+
+                let (following, invalid) = hir.roots().split_last().unwrap();
+                assert!(!invalid.is_empty());
+                for &root in invalid {
+                    assert!(matches!(hir.item(root).kind(), ItemKind::Invalid));
+                }
+                let ItemKind::Const(constant) = hir.item(*following).kind() else {
+                    panic!("following declaration was not recovered: {text}");
+                };
+                assert_eq!(constant.name.text(), Some("Following"));
+                let value = hir.body(constant.body).expression(constant.value).unwrap();
+                assert!(matches!(value.kind(), ExprKind::Unit));
+            }
+        }
     }
 }

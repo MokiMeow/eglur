@@ -85,8 +85,9 @@ fn every_schema_family_preserves_long_input_sums_and_output_products() {
 #[test]
 fn mixed_grouped_axes_retain_integer_and_pack_meanings() {
     let text = format!(
-        "fn schema() -> Unit = rearrange{{ a{} -> a }}\n",
-        " + (2 * ...pack) + (... * b)".repeat(1000)
+        "fn schema() -> Unit = rearrange{{ a{}{} -> a }}\n",
+        " + (2 * c) + (d * b)".repeat(1000),
+        " ...pack ...".repeat(1000)
     );
     let hir = lower_text(&text, true);
     assert!(hir.invalid_occurrences().is_empty());
