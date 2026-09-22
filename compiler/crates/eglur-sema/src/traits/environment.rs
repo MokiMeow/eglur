@@ -875,8 +875,8 @@ impl TraitEnvironment {
             } else {
                 let mut failed = None;
                 for parameter in implementation.header.generic_parameters() {
-                    let bounds = match signatures.declared_parameter_bounds(parameter) {
-                        FactState::Known(bounds) => bounds.to_vec(),
+                    let signature = match signatures.generic_parameter(parameter) {
+                        FactState::Known(signature) => signature.clone(),
                         FactState::Poisoned(poison) => {
                             failed = Some(SelectionOutcome::Poisoned(poison.clone()));
                             break;
@@ -887,27 +887,16 @@ impl TraitEnvironment {
                             ));
                         }
                     };
-                    let Some(&subject) = replacements.get(parameter) else {
+                    if !replacements.contains_key(parameter) {
                         return Err(TraitEnvironmentError::UnconstrainedCheckedImpl {
                             implementation: declaration,
                             parameter: parameter.clone(),
                         });
-                    };
-                    for bound in &bounds {
-                        let arguments = signatures
-                            .types()
-                            .substitution(bound.substitution())?
-                            .to_vec()
-                            .into_iter()
-                            .map(|argument| {
-                                signatures.types_mut().substitute(argument, &replacements)
-                            })
-                            .collect::<Result<Vec<_>, _>>()?;
-                        let substitution = signatures.types_mut().intern_substitution(arguments)?;
-                        let required = TraitObligation {
-                            subject,
-                            trait_ref: TraitRef::new(bound.declaration().clone(), substitution),
-                        };
+                    }
+                    for bound in
+                        signature.instantiate_bounds(signatures.types_mut(), &replacements)?
+                    {
+                        let required = bound.into_obligation();
                         let required = match self.normalize_obligation(
                             owner,
                             signatures,

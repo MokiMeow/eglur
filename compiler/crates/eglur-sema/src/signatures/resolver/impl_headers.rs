@@ -611,23 +611,18 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             } else if unperformed {
                 Resolution::Unperformed
             } else {
-                let written_bounds = bounds.clone().into_boxed_slice();
-                self.type_applications
-                    .written_bounds
-                    .insert(id.clone(), written_bounds);
-                bounds.sort();
-                Resolution::Known(GenericParameterSignature {
-                    id: id.clone(),
-                    name: parameter.name.text().unwrap_or("<invalid>").into(),
-                    bounds: bounds.into_boxed_slice(),
-                })
+                Resolution::Known(GenericParameterSignature::new(
+                    id.clone(),
+                    parameter.name.text().unwrap_or("<invalid>").into(),
+                    bounds,
+                ))
             }
         };
 
         let state = match result {
             Resolution::Known(signature) => {
                 self.generic_bounds
-                    .insert(id.clone(), signature.bounds.clone());
+                    .insert(id.clone(), signature.bounds().into());
                 self.generic_parameters
                     .insert(id, SemanticFact::Known(signature.clone()))?;
                 self.declarations.insert(

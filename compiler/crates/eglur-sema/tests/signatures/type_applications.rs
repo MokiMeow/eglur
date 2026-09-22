@@ -142,6 +142,110 @@ fn checked_catalog(
 }
 
 #[test]
+fn trusted_bound_contracts_check_every_bound_and_reject_duplicates() {
+    let module = ModuleAddress::new([Box::<str>::from("std"), Box::<str>::from("bounds")]).unwrap();
+    let alpha = ExternalDefId::new("std::bounds::Alpha").unwrap();
+    let zulu = ExternalDefId::new("std::bounds::Zulu").unwrap();
+    let guarded = ExternalDefId::new("std::bounds::Guarded").unwrap();
+    let probe = ExternalDefId::new("std::bounds::probe").unwrap();
+    let external = ExternalNameEnvironment::new(
+        [module.clone()],
+        [
+            (alpha.clone(), "Alpha", DeclarationKind::Trait),
+            (zulu.clone(), "Zulu", DeclarationKind::Trait),
+            (guarded.clone(), "Guarded", DeclarationKind::OpaqueType),
+            (probe.clone(), "probe", DeclarationKind::Function),
+        ]
+        .into_iter()
+        .map(|(id, name, kind)| {
+            ExternalDeclaration::new(id, module.clone(), NameKey::new(name, false).unwrap(), kind)
+                .unwrap()
+        }),
+        [],
+    )
+    .unwrap();
+
+    for (implementations, duplicate) in [(0, false), (1, false), (2, false), (3, false), (3, true)]
+    {
+        let mut declarations = Vec::new();
+        let mut bounds = Vec::new();
+        for (index, marker) in [&zulu, &alpha].into_iter().enumerate() {
+            let trait_ref = TrustedTraitExpr {
+                declaration: marker.clone(),
+                arguments: Box::new([]),
+            };
+            bounds.push(trait_ref.clone());
+            declarations.push(TrustedDeclarationSignature::new(
+                marker.clone(),
+                TrustedSignatureKind::Trait {
+                    closed: false,
+                    generic_parameters: Box::new([]),
+                    associated_types: Box::new([]),
+                },
+            ));
+            if implementations & (1 << index) != 0 {
+                declarations.push(TrustedDeclarationSignature::new(
+                    ExternalDefId::new(format!("std::bounds::impl{index}")).unwrap(),
+                    TrustedSignatureKind::Impl {
+                        negative: false,
+                        generic_parameters: Box::new([]),
+                        trait_ref,
+                        target: TrustedTypeExpr::Primitive(PrimitiveType::I64),
+                        associated_bindings: Box::new([]),
+                    },
+                ));
+            }
+        }
+        if duplicate {
+            bounds.push(bounds[0].clone());
+        }
+        declarations.push(TrustedDeclarationSignature::new(
+            guarded.clone(),
+            TrustedSignatureKind::Nominal {
+                generic_parameters: Box::new([TrustedGenericParameter {
+                    name: "T".into(),
+                    bounds: bounds.into_boxed_slice(),
+                }]),
+            },
+        ));
+        declarations.push(TrustedDeclarationSignature::new(
+            probe.clone(),
+            TrustedSignatureKind::Callable {
+                bang: false,
+                generic_parameters: Box::new([]),
+                parameters: Box::new([]),
+                result: TrustedTypeExpr::Nominal {
+                    head: guarded.clone(),
+                    arguments: Box::new([TrustedTypeExpr::Primitive(PrimitiveType::I64)]),
+                },
+                requirements: Box::new([]),
+            },
+        ));
+        let trusted = TrustedSignatureEnvironment::new(declarations).unwrap();
+        if duplicate {
+            assert!(matches!(
+                try_analyze(
+                    "fn local() -> Unit = ()\n",
+                    &CapabilitySet::signatures(),
+                    Some(&external),
+                    Some(&trusted),
+                ),
+                Err(SignatureResolutionError::Trusted(
+                    TrustedSignatureError::DuplicateBound { .. }
+                ))
+            ));
+        } else if implementations == 3 {
+            assert!(checked_catalog(&external, &trusted).unwrap());
+        } else {
+            assert!(matches!(
+                checked_catalog(&external, &trusted),
+                Err(TraitEnvironmentError::InvalidTrustedTypeApplication { .. })
+            ));
+        }
+    }
+}
+
+#[test]
 fn trusted_type_applications_require_concrete_or_exact_declared_evidence() {
     for trait_application in [false, true] {
         let result = checked_environment(

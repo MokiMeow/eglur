@@ -4,6 +4,7 @@ use eglur_diagnostics::Poison;
 use eglur_hir::{BodyId, OriginId, PatternId, TypeRefId};
 use eglur_source::FileId;
 
+use super::GenericParameterSignature;
 use crate::type_rendering::{DiagnosticTypeFacts, DiagnosticTypeNames};
 use crate::{
     CallableSignatureId, CanonicalTarget, CanonicalTypeStore, DefId, FactState, FactTable,
@@ -80,31 +81,6 @@ impl ResolvedTypeOccurrence {
 pub enum ResolvedType {
     Type(TypeId),
     Trait(TraitRef),
-}
-
-/// Resolved generic parameter and its order-insensitive nominal bounds.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GenericParameterSignature {
-    pub(super) id: GenericParameterId,
-    pub(super) name: Box<str>,
-    pub(super) bounds: Box<[TraitRef]>,
-}
-
-impl GenericParameterSignature {
-    #[must_use]
-    pub const fn id(&self) -> &GenericParameterId {
-        &self.id
-    }
-
-    #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    #[must_use]
-    pub fn bounds(&self) -> &[TraitRef] {
-        &self.bounds
-    }
 }
 
 /// One callable parameter after declaration-signature resolution.

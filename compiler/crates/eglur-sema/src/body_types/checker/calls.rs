@@ -1304,15 +1304,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
         for parameter in parameters {
             let signature = match self.signatures.generic_parameter(parameter) {
-                FactState::Known(signature) => signature,
+                FactState::Known(signature) => signature.clone(),
                 FactState::Unperformed | FactState::Poisoned(_) | FactState::NotApplicable => {
                     return Err(BodyTypingError::UnavailableGenericParameter(
                         parameter.clone(),
                     ));
                 }
             };
-            let bounds = signature.bounds().to_vec();
-            for bound in bounds {
+            for bound in signature.instantiate_bounds(self.signatures.types_mut(), replacements)? {
                 let destination = match parameter {
                     GenericParameterId::Source(declaration) => {
                         let owner = self
@@ -1328,7 +1327,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             self.trait_environment
                                 .witness_for_obligation(
                                     owner,
-                                    &TraitObligation::new(subject, bound.clone()),
+                                    &TraitObligation::new(subject, bound.declared().clone()),
                                 )
                                 .ok_or_else(|| {
                                     BodyTypingError::MissingBoundWitness(parameter.clone())
@@ -1337,27 +1336,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     }
                     GenericParameterId::Trusted { .. } => None,
                 };
-                let arguments = self
-                    .signatures
-                    .types()
-                    .substitution(bound.substitution())?
-                    .to_vec();
-                let arguments = arguments
-                    .into_iter()
-                    .map(|argument| {
-                        self.signatures
-                            .types_mut()
-                            .substitute(argument, replacements)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let substitution = self.signatures.types_mut().intern_substitution(arguments)?;
+                let obligation = bound.into_obligation();
                 self.obligations.push(PendingTraitObligation {
                     invocation,
                     owner,
                     location: SemanticLocation::origin(source.file(), origin),
                     parameter: parameter.clone(),
-                    subject: replacements[parameter],
-                    trait_ref: TraitRef::new(bound.declaration().clone(), substitution),
+                    subject: obligation.subject(),
+                    trait_ref: obligation.trait_ref().clone(),
                     destination,
                 });
             }

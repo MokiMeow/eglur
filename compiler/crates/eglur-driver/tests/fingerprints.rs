@@ -123,6 +123,25 @@ fn assert_global_conformance_dependency(snapshot: &FingerprintSnapshot) {
 }
 
 #[test]
+fn bound_priority_does_not_change_semantic_contract_or_evidence_fingerprints() {
+    let resolve_bounds = |bounds: &str| {
+        let source = format!(
+            concat!(
+                "pub trait Alpha {{ fn alpha(self: &Self) -> i64 }}\n",
+                "pub trait Zulu {{ fn zulu(self: &Self) -> i64 }}\n",
+                "pub fn choose[T: {}](value: T) -> i64 = value.zulu()\n",
+                "pub fn forward[T: {}](value: T) -> i64 = choose(value)\n",
+            ),
+            bounds, bounds,
+        );
+        resolve([file("main.eglur", &source)], "main.eglur", false)
+    };
+    let forward = resolve_bounds("Zulu + Alpha");
+    let reverse = resolve_bounds("Alpha + Zulu");
+    assert_eq!(forward.semantics, reverse.semantics);
+}
+
+#[test]
 fn grouped_call_fingerprints_preserve_trivia_and_source_label_invariance() {
     let source = "fn id(value: i64) -> i64 = value\npub fn value() -> i64 = ((id))(7)\n";
     let base = resolve([file("main.eglur", source)], "main.eglur", false);

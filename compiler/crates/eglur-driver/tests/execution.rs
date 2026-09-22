@@ -480,6 +480,45 @@ fn generic_and_bound_calls_execute_shared_checked_bodies() {
 }
 
 #[test]
+fn reordered_generic_bounds_forward_witnesses_to_the_right_methods() {
+    for callee_bounds in ["Zulu + Alpha", "Alpha + Zulu"] {
+        for caller_bounds in ["Zulu + Alpha", "Alpha + Zulu"] {
+            let source = format!(
+                concat!(
+                    "trait Alpha {{ fn alpha(self: &Self) -> i64 }}\n",
+                    "trait Zulu {{ fn zulu(self: &Self) -> i64 = 5 }}\n",
+                    "struct Both {{}}\n",
+                    "impl Alpha for Both {{ fn alpha(self: &Self) -> i64 = 2 }}\n",
+                    "impl Zulu for Both {{}}\n",
+                    "fn combine[T: {}](value: T) -> i64 = wrapping_add(value.alpha(), value.zulu())\n",
+                    "fn forward[T: {}](value: T) -> i64 = combine(value)\n",
+                    "fn main!() -> Res[Str, Str] = Ok(to_str(forward(Both {{}})))\n",
+                ),
+                callee_bounds, caller_bounds,
+            );
+            let (program, catalog, profile) = compile_single(&source);
+            assert_eq!(
+                ok_str(completed(&program, &catalog, &profile).value()),
+                "7",
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dependent_generic_bounds_forward_parameterized_witnesses() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link[A] { fn linked(self: &Self, value: A) -> A }\n",
+        "impl Link[i64] for Bool { fn linked(self: &Self, value: i64) -> i64 = value }\n",
+        "fn project[A: Link[B], B](value: A, argument: B) -> B = value.linked(argument)\n",
+        "fn forward[A: Link[B], B](value: A, argument: B) -> B = project(value, argument)\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(forward(true, 7)))\n",
+    ));
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
 fn cross_module_method_dispatch_and_mutable_reference_updates_work() {
     let (program, catalog, profile) = compile_files(
         [

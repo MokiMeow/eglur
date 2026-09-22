@@ -818,21 +818,15 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 owner: declaration.id().clone(),
                 index,
             };
-            let mut bounds = parameter
+            let bounds = parameter
                 .bounds
                 .iter()
                 .map(|bound| {
                     self.resolve_trusted_trait_ref(declaration.id(), parameters.len(), bound)
                 })
                 .collect::<Result<Vec<_>, SignatureResolutionError>>()?;
-            let written_bounds = bounds.clone().into_boxed_slice();
-            self.type_applications
-                .written_bounds
-                .insert(id.clone(), written_bounds);
-            bounds.sort();
-            let before = bounds.len();
-            bounds.dedup();
-            if bounds.len() != before {
+            let mut unique = BTreeSet::new();
+            if bounds.iter().any(|bound| !unique.insert(bound)) {
                 return Err(SignatureResolutionError::Trusted(
                     TrustedSignatureError::DuplicateBound {
                         declaration: declaration.id().clone(),
@@ -840,13 +834,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     },
                 ));
             }
-            let signature = GenericParameterSignature {
-                id: id.clone(),
-                name: parameter.name.clone(),
-                bounds: bounds.into_boxed_slice(),
-            };
+            let signature =
+                GenericParameterSignature::new(id.clone(), parameter.name.clone(), bounds);
             self.generic_bounds
-                .insert(id.clone(), signature.bounds.clone());
+                .insert(id.clone(), signature.bounds().into());
             self.generic_parameters
                 .insert(id, SemanticFact::Known(signature))?;
         }

@@ -5,7 +5,7 @@ use eglur_diagnostics::Poison;
 use super::{DeclarationSignature, DeclarationSignatures, TypeOccurrenceId};
 use crate::{
     CanonicalTarget, DeclarationCollection, DefId, ExternalDefId, FactState, GenericParameterId,
-    SemanticFact, TraitObligation, TraitRef, TypeId, TypeStoreError,
+    SemanticFact, TraitObligation, TypeId, TypeStoreError,
 };
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -63,8 +63,6 @@ impl TypeApplication {
 #[derive(Default)]
 pub(super) struct TypeApplicationFacts {
     pub(super) applications: BTreeSet<TypeApplication>,
-    // Diagnostic priority is source ordered; canonical bounds remain an unordered conjunction.
-    pub(super) written_bounds: BTreeMap<GenericParameterId, Box<[TraitRef]>>,
     poisons: BTreeMap<CanonicalTarget, Poison>,
 }
 
@@ -129,20 +127,6 @@ impl DeclarationSignatures {
         }
     }
 
-    pub(crate) fn declared_parameter_bounds(
-        &self,
-        parameter: &GenericParameterId,
-    ) -> FactState<'_, Box<[TraitRef]>> {
-        match self.generic_parameter(parameter) {
-            FactState::Known(_) => {
-                FactState::Known(&self.type_applications.written_bounds[parameter])
-            }
-            FactState::Poisoned(poison) => FactState::Poisoned(poison),
-            FactState::Unperformed => FactState::Unperformed,
-            FactState::NotApplicable => FactState::NotApplicable,
-        }
-    }
-
     pub(crate) fn application_obligations(
         &mut self,
         application: &TypeApplication,
@@ -162,26 +146,20 @@ impl DeclarationSignatures {
             .zip(arguments.iter().copied())
             .collect();
         let mut obligations = Vec::new();
-        for (parameter, &subject) in parameters.iter().zip(arguments.iter()) {
-            let bounds = match self.declared_parameter_bounds(parameter) {
-                FactState::Known(bounds) => bounds.to_vec(),
+        for parameter in &parameters {
+            let signature = match self.generic_parameter(parameter) {
+                FactState::Known(signature) => signature.clone(),
                 FactState::Poisoned(poison) => return Ok(SemanticFact::Poisoned(poison.clone())),
                 FactState::Unperformed | FactState::NotApplicable => {
                     return Ok(SemanticFact::NotApplicable);
                 }
             };
-            for bound in bounds {
-                let arguments = self.types.substitution(bound.substitution())?.to_vec();
-                let arguments = arguments
+            obligations.extend(
+                signature
+                    .instantiate_bounds(&mut self.types, &replacements)?
                     .into_iter()
-                    .map(|argument| self.types.substitute(argument, &replacements))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let substitution = self.types.intern_substitution(arguments)?;
-                obligations.push(TraitObligation::new(
-                    subject,
-                    TraitRef::new(bound.declaration().clone(), substitution),
-                ));
-            }
+                    .map(|bound| bound.into_obligation()),
+            );
         }
         Ok(SemanticFact::Known(obligations))
     }
