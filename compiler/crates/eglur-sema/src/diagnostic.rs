@@ -109,7 +109,7 @@ pub(crate) const fn impl_argument_diagnostic(
     match violation {
         crate::ImplArgumentViolation::Ownership(_) => (
             "OWNERSHIP_TYPE_POSITION_FORBIDDEN",
-            "ownership type position is forbidden for an inferred impl argument",
+            "Own type position is forbidden for an inferred impl argument",
         ),
         crate::ImplArgumentViolation::Reference(_) => (
             "REFERENCE_TYPE_POSITION_FORBIDDEN",
@@ -233,5 +233,44 @@ impl From<DiagnosticRootError> for SemanticDiagnosticError {
 impl From<DiagnosticStoreError> for SemanticDiagnosticError {
     fn from(error: DiagnosticStoreError) -> Self {
         Self::Store(error)
+    }
+}
+
+#[cfg(test)]
+mod impl_argument_tests {
+    use super::impl_argument_diagnostic;
+    use crate::{
+        CanonicalTypeStore, ImplArgumentViolation, IntrinsicNominal, NominalHead, PrimitiveType,
+        ReferenceMutability,
+    };
+
+    #[test]
+    fn messages_preserve_the_type_position_diagnostic_contract() {
+        let mut types = CanonicalTypeStore::new().unwrap();
+        let integer = types.primitive(PrimitiveType::I64).unwrap();
+        let owned = types
+            .nominal(NominalHead::Intrinsic(IntrinsicNominal::Own), [integer])
+            .unwrap();
+        let borrowed = types
+            .reference(ReferenceMutability::Shared, integer)
+            .unwrap();
+        for (violation, expected_code, marker) in [
+            (
+                ImplArgumentViolation::Ownership(owned),
+                "OWNERSHIP_TYPE_POSITION_FORBIDDEN",
+                "Own",
+            ),
+            (
+                ImplArgumentViolation::Reference(borrowed),
+                "REFERENCE_TYPE_POSITION_FORBIDDEN",
+                "reference",
+            ),
+        ] {
+            let (code, message) = impl_argument_diagnostic(violation);
+            assert_eq!(code, expected_code);
+            for fragment in [marker, "type position", "forbidden"] {
+                assert!(message.contains(fragment), "{message} lacks {fragment}");
+            }
+        }
     }
 }
