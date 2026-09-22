@@ -1017,7 +1017,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     } else if self.types.contains_reference(ty)? {
                         Some((
                             "REFERENCE_TYPE_POSITION_FORBIDDEN",
-                            "reference type is forbidden in an associated type binding",
+                            "reference type position is forbidden for an associated type binding",
                         ))
                     } else {
                         None

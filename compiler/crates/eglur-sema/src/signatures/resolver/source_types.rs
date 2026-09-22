@@ -967,7 +967,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     source,
                     origin,
                     "REFERENCE_TYPE_POSITION_FORBIDDEN",
-                    "reference type is forbidden in this generic argument position",
+                    "reference type position is forbidden for a generic argument",
                     BTreeMap::new(),
                 )?));
             }
@@ -1009,7 +1009,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 source,
                 origin,
                 "REFERENCE_TYPE_POSITION_FORBIDDEN",
-                "reference type is forbidden in this generic argument position",
+                "reference type position is forbidden for a generic argument",
                 BTreeMap::new(),
             )?));
         }
