@@ -12,12 +12,12 @@ use crate::fingerprint::identity::{StableTraitRef, StableType, declaration_binde
 use crate::{
     BodyFingerprint, BodyTypes, CallableInstance, CanonicalFingerprintBuilder, CanonicalTarget,
     CheckedDispatch, CheckedInvocation, CheckedNumericOperation, CheckedNumericOperator,
-    Declaration, DeclarationCollection, DeclarationSignatures, EvidenceEntry, EvidenceSource,
-    ExpressionKey, FactState, FingerprintDigest, FingerprintDomain, GenericParameterId,
-    InvocationFact, InvocationTarget, MemberAccess, MemberKind, ModuleAddress, ModuleId,
-    NameLookupDecision, NameLookupPlan, NameResolution, NormalContinuation, NumericFaultCause,
-    ReduceByCommitment, ResolutionKey, ResolvedName, SemanticSource, StableDeclarationKey,
-    StableDeclarationKeys, StableTargetKey, TraitEnvironment, TraitEvidence, TypedPlace,
+    Declaration, DeclarationCollection, DeclarationSignatures, EvidenceEntry, EvidenceProofId,
+    EvidenceSource, ExpressionKey, FactState, FingerprintDigest, FingerprintDomain,
+    GenericParameterId, InvocationFact, InvocationTarget, MemberAccess, MemberKind, ModuleAddress,
+    ModuleId, NameLookupDecision, NameLookupPlan, NameResolution, NormalContinuation,
+    NumericFaultCause, ReduceByCommitment, ResolutionKey, ResolvedName, SemanticSource,
+    StableDeclarationKey, StableDeclarationKeys, TraitEnvironment, TraitEvidence, TypedPlace,
     TypedPlaceKind, WitnessSlotId,
 };
 
@@ -90,6 +90,8 @@ impl BodyProjection {
                     patterns: BTreeMap::new(),
                     axes: BTreeMap::new(),
                     types: BTreeMap::new(),
+                    proofs: BTreeMap::new(),
+                    active_proofs: BTreeSet::new(),
                     active: BTreeSet::new(),
                 };
                 let mut builder = CanonicalFingerprintBuilder::new(FingerprintDomain::Body);
@@ -239,6 +241,8 @@ struct NodeHasher<'a> {
     patterns: BTreeMap<PatternId, FingerprintDigest>,
     axes: BTreeMap<AxisExprId, FingerprintDigest>,
     types: BTreeMap<TypeRefId, FingerprintDigest>,
+    proofs: BTreeMap<EvidenceProofId, FingerprintDigest>,
+    active_proofs: BTreeSet<EvidenceProofId>,
     active: BTreeSet<NodeKey>,
 }
 
@@ -1149,7 +1153,7 @@ impl NodeHasher<'_> {
     }
 
     fn write_trait_evidence(
-        &self,
+        &mut self,
         builder: &mut CanonicalFingerprintBuilder,
         key: ExpressionKey,
     ) -> Result<(), SemanticFingerprintError> {
@@ -1167,7 +1171,7 @@ impl NodeHasher<'_> {
     }
 
     fn write_checked_invocation(
-        &self,
+        &mut self,
         builder: &mut CanonicalFingerprintBuilder,
         invocation: &CheckedInvocation,
     ) -> Result<(), SemanticFingerprintError> {
@@ -1204,27 +1208,27 @@ impl NodeHasher<'_> {
                 self.stable_witness(*witness)?.write_to(builder);
             }
             CheckedDispatch::ImplTemplate {
-                implementation,
                 callable,
-                substitution,
+                method,
+                proof,
             } => {
                 builder.write_u8(2);
-                self.keys
-                    .target(implementation)
-                    .ok_or_else(|| stable_target_error(implementation))?
-                    .write_to(builder);
                 self.keys
                     .target(callable)
                     .ok_or_else(|| stable_target_error(callable))?
                     .write_to(builder);
-                self.write_substitution(builder, *substitution)?;
+                self.keys
+                    .target(method)
+                    .ok_or_else(|| stable_target_error(method))?
+                    .write_to(builder);
+                builder.write_digest(self.stable_proof(*proof)?);
             }
         }
         Ok(())
     }
 
     fn stable_evidence_entry(
-        &self,
+        &mut self,
         entry: &EvidenceEntry,
     ) -> Result<StableEvidenceEntry, SemanticFingerprintError> {
         let parameter = match entry.parameter() {
@@ -1238,28 +1242,7 @@ impl NodeHasher<'_> {
                 index: *index,
             },
         };
-        let source = match entry.source() {
-            EvidenceSource::Bound(witness) => {
-                StableEvidenceSource::Bound(self.stable_witness(*witness)?)
-            }
-            EvidenceSource::Implementation {
-                implementation,
-                substitution,
-            } => {
-                let types = self.signatures.types().substitution(*substitution)?;
-                let substitution = types
-                    .iter()
-                    .map(|&ty| self.keys.stable_type(self.signatures, ty, &self.binders))
-                    .collect::<Result<Vec<_>, _>>()?;
-                StableEvidenceSource::Implementation {
-                    implementation: self
-                        .keys
-                        .target(implementation)
-                        .ok_or_else(|| stable_target_error(implementation))?,
-                    substitution: substitution.into_boxed_slice(),
-                }
-            }
-        };
+        let proof = self.stable_proof(entry.proof())?;
         Ok(StableEvidenceEntry {
             parameter,
             subject: self
@@ -1270,12 +1253,65 @@ impl NodeHasher<'_> {
                 entry.trait_ref(),
                 &self.binders,
             )?,
-            source,
+            proof,
             destination: entry
                 .destination()
                 .map(|witness| self.stable_witness(witness))
                 .transpose()?,
         })
+    }
+
+    fn stable_proof(
+        &mut self,
+        id: EvidenceProofId,
+    ) -> Result<FingerprintDigest, SemanticFingerprintError> {
+        if let Some(&digest) = self.proofs.get(&id) {
+            return Ok(digest);
+        }
+        if !self.active_proofs.insert(id) {
+            return Err(SemanticFingerprintError::CyclicEvidenceProof);
+        }
+        let node = self
+            .trait_evidence
+            .proof(id)
+            .ok_or(SemanticFingerprintError::UnknownEvidenceProof)?
+            .clone();
+        let mut builder = CanonicalFingerprintBuilder::new(FingerprintDomain::Body);
+        builder.write_u8(3);
+        match node {
+            EvidenceSource::Bound(witness) => {
+                builder.write_u8(0);
+                self.stable_witness(witness)?.write_to(&mut builder);
+            }
+            EvidenceSource::Implementation {
+                implementation,
+                substitution,
+                implementation_bounds,
+                trait_bounds,
+            } => {
+                builder.write_u8(1);
+                self.keys
+                    .target(&implementation)
+                    .ok_or_else(|| stable_target_error(&implementation))?
+                    .write_to(&mut builder);
+                self.write_substitution(&mut builder, substitution)?;
+                for bounds in [&implementation_bounds, &trait_bounds] {
+                    let mut stable_bounds = bounds
+                        .iter()
+                        .map(|&child| self.stable_proof(child))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    stable_bounds.sort();
+                    builder.write_len(stable_bounds.len());
+                    for child in stable_bounds {
+                        builder.write_digest(child);
+                    }
+                }
+            }
+        }
+        let digest = builder.finish();
+        self.active_proofs.remove(&id);
+        self.proofs.insert(id, digest);
+        Ok(digest)
     }
 
     fn stable_witness(
@@ -1309,7 +1345,7 @@ struct StableEvidenceEntry {
     parameter: StableGenericParameter,
     subject: StableType,
     trait_ref: StableTraitRef,
-    source: StableEvidenceSource,
+    proof: FingerprintDigest,
     destination: Option<StableWitness>,
 }
 
@@ -1318,7 +1354,7 @@ impl StableEvidenceEntry {
         self.parameter.write_to(builder);
         self.subject.write_to(builder);
         self.trait_ref.write_to(builder);
-        self.source.write_to(builder);
+        builder.write_digest(self.proof);
         match &self.destination {
             Some(destination) => {
                 builder.write_u8(1);
@@ -1349,37 +1385,6 @@ impl StableGenericParameter {
                 builder.write_u8(1);
                 builder.write_str(owner.as_str());
                 builder.write_u32(*index);
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum StableEvidenceSource {
-    Bound(StableWitness),
-    Implementation {
-        implementation: StableTargetKey,
-        substitution: Box<[StableType]>,
-    },
-}
-
-impl StableEvidenceSource {
-    fn write_to(&self, builder: &mut CanonicalFingerprintBuilder) {
-        match self {
-            Self::Bound(witness) => {
-                builder.write_u8(0);
-                witness.write_to(builder);
-            }
-            Self::Implementation {
-                implementation,
-                substitution,
-            } => {
-                builder.write_u8(1);
-                implementation.write_to(builder);
-                builder.write_len(substitution.len());
-                for ty in substitution {
-                    ty.write_to(builder);
-                }
             }
         }
     }

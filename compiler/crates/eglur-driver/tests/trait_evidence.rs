@@ -226,7 +226,7 @@ fn generic_bounds_materialize_bound_and_impl_evidence() {
     let sources = evidence
         .environments()
         .flat_map(|environment| environment.entries())
-        .map(|entry| entry.source())
+        .map(|entry| evidence.proof(entry.proof()).expect("entry proof exists"))
         .collect::<Vec<_>>();
 
     assert!(
@@ -626,7 +626,14 @@ fn generic_impl_and_method_substitutions_remain_separate_and_complete() {
         .invocations()
         .find_map(|(key, fact)| match fact {
             FactState::Known(invocation) => match invocation.dispatch() {
-                CheckedDispatch::ImplTemplate { substitution, .. } => Some((key, *substitution)),
+                CheckedDispatch::ImplTemplate { proof, .. } => {
+                    let Some(EvidenceSource::Implementation { substitution, .. }) =
+                        evidence.proof(*proof)
+                    else {
+                        panic!("impl-template proof selects one implementation");
+                    };
+                    Some((key, *substitution))
+                }
                 CheckedDispatch::Direct(_) | CheckedDispatch::Bound { .. } => None,
             },
             FactState::Poisoned(_) | FactState::NotApplicable | FactState::Unperformed => None,

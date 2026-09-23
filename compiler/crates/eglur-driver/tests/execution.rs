@@ -836,6 +836,151 @@ fn scalar_hook_support_follows_checked_witnesses_through_shared_generic_bodies()
 }
 
 #[test]
+fn default_trait_method_uses_its_current_trait_witness() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link[A] {\n",
+        "  fn linked(self: &Self, value: A) -> A\n",
+        "  fn forward(self: &Self, value: A) -> A = self.linked(value)\n",
+        "}\n",
+        "impl Link[i64] for Bool { fn linked(self: &Self, value: i64) -> i64 = value }\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.forward(7)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn normalized_bound_dispatches_into_the_default_method_frame() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Carries { type Item }\n",
+        "struct Carrier {}\n",
+        "impl Carries for Carrier { type Item = i64 }\n",
+        "type Item[T: Carries] = T::Item\n",
+        "trait Link[A] {\n",
+        "  fn linked(self: &Self, value: A) -> A\n",
+        "  fn forward(self: &Self, value: A) -> A = self.linked(value)\n",
+        "}\n",
+        "impl Link[i64] for Bool { fn linked(self: &Self, value: i64) -> i64 = value }\n",
+        "fn forward[T: Link[Item[Carrier]]](value: T) -> i64 = value.forward(7)\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(forward(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn generic_impl_method_receives_its_prerequisite_witness() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Marker {}\n",
+        "impl Marker for Bool {}\n",
+        "trait Show { fn number(self: &Self) -> i64 }\n",
+        "fn marker[T: Marker]() -> i64 = 7\n",
+        "impl[T: Marker] Show for T {\n",
+        "  fn number(self: &Self) -> i64 = marker::[T]()\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.number()))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn default_trait_method_receives_trait_generic_prerequisite() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Marker {}\n",
+        "impl Marker for Bool {}\n",
+        "fn marked[T: Marker]() -> i64 = 7\n",
+        "trait Echo[A: Marker] {\n",
+        "  fn echo(self: &Self, value: A) -> i64 = marked::[A]()\n",
+        "}\n",
+        "impl Echo[Bool] for i64 {}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(1.echo(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn override_method_generic_bounds_route_by_contract_not_written_order() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Left {}\n",
+        "trait Right {}\n",
+        "impl Left for Bool {}\n",
+        "impl Right for Bool {}\n",
+        "fn both[T: Left + Right]() -> i64 = 7\n",
+        "trait Combo { fn combine[T: Left + Right](self: &Self, value: T) -> i64 }\n",
+        "impl Combo for Bool {\n",
+        "  fn combine[U: Right + Left](self: &Self, value: U) -> i64 = both::[U]()\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.combine(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn selected_impl_prerequisite_survives_multiple_generic_calls() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Marker {}\n",
+        "impl Marker for Bool {}\n",
+        "trait Show { fn number(self: &Self) -> i64 }\n",
+        "fn marker[T: Marker]() -> i64 = 7\n",
+        "impl[T: Marker] Show for T {\n",
+        "  fn number(self: &Self) -> i64 = marker::[T]()\n",
+        "}\n",
+        "fn inner[T: Marker](value: T) -> i64 = value.number()\n",
+        "fn outer[T: Marker](value: T) -> i64 = inner::[T](value)\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(outer(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn no_bound_default_method_remains_executable() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Readable { fn read(self: &Self) -> i64 = 7 }\n",
+        "impl Readable for Bool {}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.read()))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn method_generic_bound_can_refer_to_a_trait_parameter() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link[A] {}\n",
+        "impl Link[i64] for Bool {}\n",
+        "fn linked[X: Link[Y], Y]() -> i64 = 7\n",
+        "trait Use[A] {\n",
+        "  fn use[B: Link[A]](self: &Self, value: B) -> i64 = linked::[B, A]()\n",
+        "}\n",
+        "impl Use[i64] for Bool {}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.use(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn trusted_adapter_routes_source_impl_prerequisites() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Marker {}\n",
+        "impl Marker for Bool {}\n",
+        "fn marker[T: Marker]() -> i64 = 7\n",
+        "struct Wrap[T] { field value: T }\n",
+        "impl[T: Marker] Display for Wrap[T] {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(marker::[T]())\n",
+        "}\n",
+        "fn stringify[T: Display](value: T) -> Str = to_str(value)\n",
+        "fn main!() -> Res[Str, Str] = Ok(stringify(Wrap { value: true }))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
 fn property_reads_are_rejected_before_runtime_until_accessor_dispatch_is_lowered() {
     let (program, catalog, profile) = compile_single(concat!(
         "struct Counter {\n",

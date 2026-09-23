@@ -25,6 +25,7 @@ pub(super) struct Evaluator<'a> {
     steps: u64,
     call_depth: u32,
     store: Store,
+    witness_store: WitnessStore,
     pub(super) events: Vec<RuntimeEvent>,
 }
 
@@ -41,6 +42,7 @@ impl<'a> Evaluator<'a> {
             steps: 0,
             call_depth: 0,
             store: Store::default(),
+            witness_store: WitnessStore::default(),
             events: Vec::new(),
         }
     }
@@ -468,7 +470,10 @@ impl<'a> Evaluator<'a> {
         let Some(environment) = evidence.environment(checked.evidence_environment()) else {
             return invalid_flow();
         };
-        let Some(child) = child_witnesses(environment, &frame.witnesses) else {
+        let Some(child) =
+            self.witness_store
+                .child_witnesses(evidence, environment, &frame.witnesses)
+        else {
             return invalid_flow();
         };
         match invocation.target() {
@@ -477,17 +482,20 @@ impl<'a> Evaluator<'a> {
                 self.eval_constructor(declaration, checked.dispatch(), arguments)
             }
             InvocationTarget::Callable(_) => {
-                let Some(direct_target) =
-                    self.dispatch_target(checked.dispatch(), &frame.witnesses)
-                else {
+                let Some(selected) = self.view.selected_call(
+                    checked.dispatch(),
+                    &frame.witnesses,
+                    &mut self.witness_store,
+                ) else {
                     return invalid_flow();
                 };
-                let target = match self.view.trait_adapter_dispatch(
-                    &direct_target,
+                let selected = match self.view.trait_adapter_dispatch(
+                    &selected.target,
                     frame.module,
                     invocation.arguments(),
                     environment,
                     &frame.witnesses,
+                    &mut self.witness_store,
                 ) {
                     Ok(Some(adapter)) => {
                         if let Some(index) = adapter.borrow_argument {
@@ -498,17 +506,30 @@ impl<'a> Evaluator<'a> {
                                 std::mem::replace(argument, RuntimeValue::Value(Value::Unit));
                             *argument = self.store.borrow_temporary(value);
                         }
-                        adapter.target
+                        adapter.selected
                     }
-                    Ok(None) => direct_target,
+                    Ok(None) => selected,
                     Err(_) => return invalid_flow(),
                 };
-                match target {
+                match &selected.target {
                     CanonicalTarget::Source(declaration) => {
-                        self.call_source(declaration, arguments, child)
+                        let witnesses = if selected.method.is_some() {
+                            let Some(projected) = self.witness_store.method_frame(
+                                evidence,
+                                &selected,
+                                environment,
+                                &frame.witnesses,
+                            ) else {
+                                return invalid_flow();
+                            };
+                            projected
+                        } else {
+                            child
+                        };
+                        self.call_source(*declaration, arguments, witnesses)
                     }
                     CanonicalTarget::External(declaration) => self.eval_hook(
-                        &declaration,
+                        declaration,
                         CanonicalTarget::External(declaration.clone()),
                         arguments,
                     ),
@@ -581,26 +602,6 @@ impl<'a> Evaluator<'a> {
                     }
                     _ => invalid_flow(),
                 }
-            }
-        }
-    }
-
-    fn dispatch_target(
-        &self,
-        dispatch: &CheckedDispatch,
-        witnesses: &Witnesses,
-    ) -> Option<CanonicalTarget> {
-        match dispatch {
-            CheckedDispatch::Direct(target) => Some(target.clone()),
-            CheckedDispatch::ImplTemplate { callable, .. } => Some(callable.clone()),
-            CheckedDispatch::Bound { witness, method } => {
-                let evidence = witnesses.get(witness)?;
-                self.view
-                    .program
-                    .resolution()
-                    .trait_environment()
-                    .checked_impl_method(&evidence.implementation, method)
-                    .cloned()
             }
         }
     }

@@ -270,7 +270,7 @@ mod preflight;
 mod runtime;
 mod store;
 
-use checked_program::{ProgramView, WitnessValue, Witnesses, child_witnesses};
+use checked_program::{ProgramView, WitnessId, WitnessStore, Witnesses};
 use numeric::numeric_fault;
 use preflight::Planner;
 use runtime::{Evaluator, Flow};

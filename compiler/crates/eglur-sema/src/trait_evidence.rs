@@ -12,12 +12,17 @@ use crate::diagnostic::{SemanticDiagnosticError, record_type_error};
 use crate::type_rendering::{DiagnosticTypeRenderer, DiagnosticTypeRenderingError};
 use crate::{
     BodyTypes, CallableInstanceId, CanonicalTarget, DeclarationCollection, DeclarationSignatures,
-    DefId, DuplicateFact, EvidenceEnvironmentId, ExpressionKey, FactState, FactTable,
-    GenericParameterId, IdentityOverflow, InvocationFact, InvocationTarget, PendingMethodDispatch,
-    SemanticFact, SemanticLocation, SemanticSource, SubstId, TraitEnvironment,
-    TraitEnvironmentError, TraitImplEvidence, TraitObligation, TraitProof, TraitRef, TypeId,
-    WitnessSlotId,
+    DefId, DuplicateFact, EvidenceEnvironmentId, EvidenceProofId, ExpressionKey, FactState,
+    FactTable, GenericParameterId, IdentityOverflow, InvocationFact, InvocationTarget,
+    PendingMethodDispatch, SemanticFact, SemanticLocation, SemanticSource, SubstId,
+    TraitEnvironment, TraitEnvironmentError, TraitImplEvidence, TraitObligation, TraitProof,
+    TraitRef, TypeId, WitnessSlotId,
 };
+
+mod proof;
+mod route;
+use proof::ProofArena;
+use route::build_method_routes;
 
 /// One checked source for a first-order nominal trait obligation.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -26,6 +31,8 @@ pub enum EvidenceSource {
     Implementation {
         implementation: CanonicalTarget,
         substitution: SubstId,
+        implementation_bounds: Box<[EvidenceProofId]>,
+        trait_bounds: Box<[EvidenceProofId]>,
     },
 }
 
@@ -33,9 +40,10 @@ pub enum EvidenceSource {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct EvidenceEntry {
     parameter: GenericParameterId,
+    bound_index: usize,
     subject: TypeId,
     trait_ref: TraitRef,
-    source: EvidenceSource,
+    proof: EvidenceProofId,
     destination: Option<WitnessSlotId>,
 }
 
@@ -43,6 +51,11 @@ impl EvidenceEntry {
     #[must_use]
     pub const fn parameter(&self) -> &GenericParameterId {
         &self.parameter
+    }
+
+    #[must_use]
+    pub const fn bound_index(&self) -> usize {
+        self.bound_index
     }
 
     #[must_use]
@@ -56,8 +69,8 @@ impl EvidenceEntry {
     }
 
     #[must_use]
-    pub const fn source(&self) -> &EvidenceSource {
-        &self.source
+    pub const fn proof(&self) -> EvidenceProofId {
+        self.proof
     }
 
     /// Returns the source-callable witness slot filled by this checked proof.
@@ -95,10 +108,59 @@ pub enum CheckedDispatch {
         method: CanonicalTarget,
     },
     ImplTemplate {
-        implementation: CanonicalTarget,
         callable: CanonicalTarget,
-        substitution: SubstId,
+        method: CanonicalTarget,
+        proof: EvidenceProofId,
     },
+}
+
+/// A checked source for a witness required by a selected method body.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum MethodFrameSource {
+    Root,
+    ImplementationBound(usize),
+    TraitBound(usize),
+    MethodBound {
+        parameter: GenericParameterId,
+        bound_index: usize,
+    },
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct MethodFrameBinding {
+    destination: WitnessSlotId,
+    source: MethodFrameSource,
+}
+
+impl MethodFrameBinding {
+    #[must_use]
+    pub const fn destination(&self) -> WitnessSlotId {
+        self.destination
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> &MethodFrameSource {
+        &self.source
+    }
+}
+
+/// The checked route from one selected implementation to its source body.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MethodFrameRoute {
+    target: DefId,
+    bindings: Box<[MethodFrameBinding]>,
+}
+
+impl MethodFrameRoute {
+    #[must_use]
+    pub const fn target(&self) -> DefId {
+        self.target
+    }
+
+    #[must_use]
+    pub fn bindings(&self) -> &[MethodFrameBinding] {
+        &self.bindings
+    }
 }
 
 /// One invocation paired with its checked dispatch and evidence vector.
@@ -124,6 +186,8 @@ impl CheckedInvocation {
 pub struct TraitEvidence {
     invocations: FactTable<ExpressionKey, CheckedInvocation>,
     environments: Box<[EvidenceEnvironment]>,
+    proofs: Box<[EvidenceSource]>,
+    method_routes: BTreeMap<(CanonicalTarget, CanonicalTarget), MethodFrameRoute>,
 }
 
 impl TraitEvidence {
@@ -135,6 +199,21 @@ impl TraitEvidence {
     #[must_use]
     pub fn environment(&self, id: EvidenceEnvironmentId) -> Option<&EvidenceEnvironment> {
         self.environments.get(id.index())
+    }
+
+    #[must_use]
+    pub fn proof(&self, id: EvidenceProofId) -> Option<&EvidenceSource> {
+        self.proofs.get(id.index())
+    }
+
+    #[must_use]
+    pub fn method_route(
+        &self,
+        implementation: &CanonicalTarget,
+        method: &CanonicalTarget,
+    ) -> Option<&MethodFrameRoute> {
+        self.method_routes
+            .get(&(implementation.clone(), method.clone()))
     }
 
     pub fn invocations(
@@ -152,6 +231,8 @@ impl TraitEvidence {
     #[must_use]
     pub fn fact_count(&self) -> usize {
         self.invocations.iter().len()
+            + self.proofs.len()
+            + self.method_routes.len()
             + self
                 .environments
                 .iter()
@@ -214,26 +295,34 @@ pub fn resolve_trait_evidence(
     let mut checked = FactTable::new();
     let mut environments = Vec::new();
     let mut environment_ids = BTreeMap::<Box<[EvidenceEntry]>, EvidenceEnvironmentId>::new();
+    let mut proofs = ProofArena::default();
     for (key, invocation) in invocations {
         let mut entries = Vec::new();
         let mut poison = None;
         for pending in obligations.get(&key).map_or(&[][..], Vec::as_slice) {
             let obligation = TraitObligation::new(pending.subject(), pending.trait_ref().clone());
-            match trait_environment.prove_for_owner(pending.owner(), signatures, obligation)? {
-                TraitProof::Bound(witness) => entries.push(EvidenceEntry {
-                    parameter: pending.parameter().clone(),
-                    subject: pending.subject(),
-                    trait_ref: pending.trait_ref().clone(),
-                    source: EvidenceSource::Bound(witness),
-                    destination: pending.destination(),
-                }),
-                TraitProof::Implementation(evidence) => entries.push(EvidenceEntry {
-                    parameter: pending.parameter().clone(),
-                    subject: pending.subject(),
-                    trait_ref: pending.trait_ref().clone(),
-                    source: implementation_source(evidence),
-                    destination: pending.destination(),
-                }),
+            match trait_environment.prove_for_owner(
+                pending.owner(),
+                signatures,
+                obligation.clone(),
+            )? {
+                selected @ (TraitProof::Bound(_) | TraitProof::Implementation(_)) => {
+                    let proof = proofs.materialize(
+                        pending.owner(),
+                        obligation,
+                        selected,
+                        signatures,
+                        trait_environment,
+                    )?;
+                    entries.push(EvidenceEntry {
+                        parameter: pending.parameter().clone(),
+                        bound_index: pending.bound_index(),
+                        subject: pending.subject(),
+                        trait_ref: pending.trait_ref().clone(),
+                        proof,
+                        destination: pending.destination(),
+                    });
+                }
                 TraitProof::Poisoned(found) => {
                     poison = Some(found);
                     break;
@@ -267,13 +356,24 @@ pub fn resolve_trait_evidence(
         }
         let dispatch = if let Some(pending) = method_dispatches.get(&key) {
             let obligation = TraitObligation::new(pending.subject(), pending.trait_ref().clone());
-            match trait_environment.prove_for_owner(pending.owner(), signatures, obligation)? {
+            match trait_environment.prove_for_owner(
+                pending.owner(),
+                signatures,
+                obligation.clone(),
+            )? {
                 TraitProof::Bound(witness) => CheckedDispatch::Bound {
                     witness,
                     method: pending.method().clone(),
                 },
                 TraitProof::Implementation(evidence) => {
-                    checked_impl_dispatch(trait_environment, pending, evidence)?
+                    let proof = proofs.materialize(
+                        pending.owner(),
+                        obligation,
+                        TraitProof::Implementation(evidence.clone()),
+                        signatures,
+                        trait_environment,
+                    )?;
+                    checked_impl_dispatch(trait_environment, pending, evidence, proof)?
                 }
                 TraitProof::Poisoned(found) => {
                     checked.insert(key, SemanticFact::Poisoned(found))?;
@@ -320,9 +420,12 @@ pub fn resolve_trait_evidence(
         )?;
     }
 
+    let method_routes = build_method_routes(collection, signatures, trait_environment)?;
     Ok(recorder.finish(PhaseProduct::Performed(TraitEvidence {
         invocations: checked,
         environments: environments.into_boxed_slice(),
+        proofs: proofs.into_nodes(),
+        method_routes,
     })))
 }
 
@@ -330,6 +433,7 @@ fn checked_impl_dispatch(
     trait_environment: &TraitEnvironment,
     pending: &PendingMethodDispatch,
     evidence: TraitImplEvidence,
+    proof: EvidenceProofId,
 ) -> Result<CheckedDispatch, TraitEvidenceError> {
     let callable = trait_environment
         .checked_impl_method(evidence.implementation(), pending.method())
@@ -339,17 +443,10 @@ fn checked_impl_dispatch(
             method: pending.method().clone(),
         })?;
     Ok(CheckedDispatch::ImplTemplate {
-        implementation: evidence.implementation().clone(),
         callable,
-        substitution: evidence.substitution(),
+        method: pending.method().clone(),
+        proof,
     })
-}
-
-fn implementation_source(evidence: TraitImplEvidence) -> EvidenceSource {
-    EvidenceSource::Implementation {
-        implementation: evidence.implementation().clone(),
-        substitution: evidence.substitution(),
-    }
 }
 
 fn intern_environment(
@@ -518,6 +615,10 @@ pub enum TraitEvidenceError {
         implementation: CanonicalTarget,
         method: CanonicalTarget,
     },
+    UnknownCheckedImplementation(CanonicalTarget),
+    InvalidCheckedProof(&'static str),
+    CyclicCheckedProof(TraitObligation),
+    UnmaterializablePrerequisite(TraitObligation),
     IdentityOverflow(IdentityOverflow),
     DuplicateFact(DuplicateFact),
     TraitEnvironment(TraitEnvironmentError),
@@ -562,6 +663,21 @@ impl fmt::Display for TraitEvidenceError {
                 formatter,
                 "checked implementation {implementation:?} lacks required method {method:?}"
             ),
+            Self::UnknownCheckedImplementation(implementation) => {
+                write!(
+                    formatter,
+                    "unknown checked implementation {implementation:?}"
+                )
+            }
+            Self::InvalidCheckedProof(reason) => {
+                write!(formatter, "invalid checked proof: {reason}")
+            }
+            Self::CyclicCheckedProof(obligation) => {
+                write!(formatter, "cyclic checked proof for {obligation:?}")
+            }
+            Self::UnmaterializablePrerequisite(obligation) => {
+                write!(formatter, "unmaterializable prerequisite {obligation:?}")
+            }
             Self::IdentityOverflow(error) => error.fmt(formatter),
             Self::DuplicateFact(error) => error.fmt(formatter),
             Self::TraitEnvironment(error) => error.fmt(formatter),

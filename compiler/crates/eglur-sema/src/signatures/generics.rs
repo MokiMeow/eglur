@@ -45,6 +45,11 @@ impl GenericParameterSignature {
         &self.bounds
     }
 
+    #[must_use]
+    pub(crate) fn declared_bounds(&self) -> &[TraitRef] {
+        &self.declared_bounds
+    }
+
     /// Instantiates declaration-ordered bounds using the complete argument substitution.
     pub(crate) fn instantiate_bounds(
         &self,

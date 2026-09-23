@@ -286,6 +286,7 @@ pub struct PendingTraitObligation {
     pub(super) owner: DefId,
     pub(super) location: SemanticLocation,
     pub(super) parameter: GenericParameterId,
+    pub(super) bound_index: usize,
     pub(super) subject: TypeId,
     pub(super) trait_ref: TraitRef,
     pub(super) destination: Option<WitnessSlotId>,
@@ -310,6 +311,11 @@ impl PendingTraitObligation {
     #[must_use]
     pub const fn parameter(&self) -> &GenericParameterId {
         &self.parameter
+    }
+
+    #[must_use]
+    pub const fn bound_index(&self) -> usize {
+        self.bound_index
     }
 
     #[must_use]

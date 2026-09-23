@@ -5,6 +5,7 @@ mod model;
 mod overlap;
 
 pub use builder::build_trait_environment;
+pub(crate) use builder::{CheckedMethodBound, checked_method_bound_mapping};
 pub use environment::TraitEnvironment;
 pub use error::TraitEnvironmentError;
 pub(crate) use model::TraitReceiverCandidate;

@@ -220,10 +220,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             combined,
         )?;
         let method = callable.declaration().clone();
+        let mut preset_replacements = receiver.replacements().clone();
+        preset_replacements.extend(replacements);
         Ok(MethodCandidate {
             callable,
             explicit_parameters,
-            preset_replacements: receiver.replacements().clone(),
+            preset_replacements,
             dispatch: MethodDispatchTemplate::Trait {
                 subject,
                 trait_ref: receiver.trait_ref().clone(),
@@ -1316,7 +1318,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     ));
                 }
             };
-            for bound in signature.instantiate_bounds(self.signatures.types_mut(), replacements)? {
+            for (bound_index, bound) in signature
+                .instantiate_bounds(self.signatures.types_mut(), replacements)?
+                .into_iter()
+                .enumerate()
+            {
                 let destination = match parameter {
                     GenericParameterId::Source(declaration) => {
                         let owner = self
@@ -1347,6 +1353,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     owner,
                     location: SemanticLocation::origin(source.file(), origin),
                     parameter: parameter.clone(),
+                    bound_index,
                     subject: obligation.subject(),
                     trait_ref: obligation.trait_ref().clone(),
                     destination,

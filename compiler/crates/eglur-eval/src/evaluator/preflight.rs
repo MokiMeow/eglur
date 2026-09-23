@@ -4,7 +4,7 @@ use eglur_sema::{CanonicalTypeStore, TypeStoreError};
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct PlannedCall {
     declaration: DefId,
-    witnesses: Box<[(WitnessSlotId, WitnessValue)]>,
+    witnesses: Box<[(WitnessSlotId, WitnessId)]>,
 }
 
 pub(super) struct Planner<'a> {
@@ -15,6 +15,7 @@ pub(super) struct Planner<'a> {
     call_depth: u32,
     limit: Option<ToolLimit>,
     planned: BTreeSet<PlannedCall>,
+    witness_store: WitnessStore,
 }
 
 impl<'a> Planner<'a> {
@@ -32,6 +33,7 @@ impl<'a> Planner<'a> {
             call_depth: 0,
             limit: None,
             planned: BTreeSet::new(),
+            witness_store: WitnessStore::default(),
         }
     }
 
@@ -56,7 +58,7 @@ impl<'a> Planner<'a> {
             declaration,
             witnesses: witnesses
                 .iter()
-                .map(|(slot, value)| (*slot, value.clone()))
+                .map(|(slot, value)| (*slot, *value))
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
         };
@@ -544,9 +546,12 @@ impl<'a> Planner<'a> {
                 .ok_or(SupportReason::Feature(
                     UnsupportedFeature::InvalidCheckedProgram,
                 ))?;
-        let child = child_witnesses(environment, witnesses).ok_or(SupportReason::Feature(
-            UnsupportedFeature::InvalidCheckedProgram,
-        ))?;
+        let child = self
+            .witness_store
+            .child_witnesses(evidence, environment, witnesses)
+            .ok_or(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ))?;
         match invocation.target() {
             InvocationTarget::TensorConstructor { .. } => {
                 Err(SupportReason::Feature(UnsupportedFeature::Tensor))
@@ -555,32 +560,49 @@ impl<'a> Planner<'a> {
                 self.plan_constructor(declaration, checked.dispatch())
             }
             InvocationTarget::Callable(_) => {
-                let direct_target = self.dispatch_target(checked.dispatch(), witnesses)?;
+                let selected = self
+                    .view
+                    .selected_call(checked.dispatch(), witnesses, &mut self.witness_store)
+                    .ok_or(SupportReason::Feature(
+                        UnsupportedFeature::InvalidCheckedProgram,
+                    ))?;
                 let adapter = self
                     .view
                     .trait_adapter_dispatch(
-                        &direct_target,
+                        &selected.target,
                         module,
                         invocation.arguments(),
                         environment,
                         witnesses,
+                        &mut self.witness_store,
                     )
                     .map_err(|_| {
                         SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram)
                     })?;
-                let target = if let Some(adapter) = adapter {
+                let selected = if let Some(adapter) = adapter {
                     if adapter.borrow_argument.is_some() {
                         self.require(ExecutionCapability::ReferencesAndMutation)?;
                     }
-                    adapter.target
+                    adapter.selected
                 } else {
-                    direct_target
+                    selected
                 };
-                match target {
-                    CanonicalTarget::Source(declaration) => self.plan_callable(declaration, &child),
+                match &selected.target {
+                    CanonicalTarget::Source(declaration) => {
+                        let frame = if selected.method.is_some() {
+                            self.witness_store
+                                .method_frame(evidence, &selected, environment, witnesses)
+                                .ok_or(SupportReason::Feature(
+                                    UnsupportedFeature::InvalidCheckedProgram,
+                                ))?
+                        } else {
+                            child
+                        };
+                        self.plan_callable(*declaration, &frame)
+                    }
                     CanonicalTarget::External(declaration) => {
-                        let hook = self.plan_hook(&declaration)?;
-                        self.plan_hook_arguments(hook, &declaration, invocation.arguments())
+                        let hook = self.plan_hook(declaration)?;
+                        self.plan_hook_arguments(hook, declaration, invocation.arguments())
                     }
                 }
             }
@@ -667,31 +689,6 @@ impl<'a> Planner<'a> {
             Ok(())
         } else {
             Err(SupportReason::Feature(UnsupportedFeature::HookArgumentType))
-        }
-    }
-
-    fn dispatch_target(
-        &self,
-        dispatch: &CheckedDispatch,
-        witnesses: &Witnesses,
-    ) -> Result<CanonicalTarget, SupportReason> {
-        match dispatch {
-            CheckedDispatch::Direct(target) => Ok(target.clone()),
-            CheckedDispatch::ImplTemplate { callable, .. } => Ok(callable.clone()),
-            CheckedDispatch::Bound { witness, method } => {
-                let evidence = witnesses.get(witness).ok_or(SupportReason::Feature(
-                    UnsupportedFeature::InvalidCheckedProgram,
-                ))?;
-                self.view
-                    .program
-                    .resolution()
-                    .trait_environment()
-                    .checked_impl_method(&evidence.implementation, method)
-                    .cloned()
-                    .ok_or(SupportReason::Feature(
-                        UnsupportedFeature::InvalidCheckedProgram,
-                    ))
-            }
         }
     }
 }

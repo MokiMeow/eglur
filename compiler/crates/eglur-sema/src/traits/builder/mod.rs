@@ -33,6 +33,7 @@ use assembly::{
     build_assumptions, build_buckets, collect_implementations, validate_checked_coherence,
 };
 use contracts::validate_impl_methods;
+pub(crate) use contracts::{CheckedMethodBound, checked_method_bound_mapping};
 
 /// Builds the only impl/coherence environment consumed by body and dispatch phases.
 pub fn build_trait_environment(

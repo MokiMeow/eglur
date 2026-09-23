@@ -506,6 +506,115 @@ fn method_contract_matches(
     Ok(ContractMatch::Matches)
 }
 
+pub(crate) struct CheckedMethodBound {
+    pub(crate) parameter: GenericParameterId,
+    pub(crate) bound_index: usize,
+    pub(crate) obligation: TraitObligation,
+}
+
+pub(crate) fn checked_method_bound_mapping(
+    environment: &mut TraitEnvironment,
+    signatures: &mut DeclarationSignatures,
+    implementation: &CanonicalTarget,
+    header: &TraitImplHeader,
+    trait_method: &CallableSignature,
+    override_method: &CallableSignature,
+) -> Result<Option<Vec<CheckedMethodBound>>, TraitEnvironmentError> {
+    let trait_target = header.trait_ref().declaration();
+    let trait_parameters = match signatures.declaration(trait_target) {
+        FactState::Known(DeclarationSignature::Trait {
+            generic_parameters, ..
+        }) => generic_parameters.to_vec(),
+        _ => return Ok(None),
+    };
+    let trait_arguments = signatures
+        .types()
+        .substitution(header.trait_ref().substitution())?
+        .to_vec();
+    if trait_parameters.len() != trait_arguments.len()
+        || trait_method.generic_parameters().len() != override_method.generic_parameters().len()
+    {
+        return Ok(None);
+    }
+    let mut replacements = trait_parameters
+        .into_iter()
+        .zip(trait_arguments)
+        .collect::<BTreeMap<_, _>>();
+    for (expected, actual) in trait_method
+        .generic_parameters()
+        .iter()
+        .zip(override_method.generic_parameters())
+    {
+        replacements.insert(
+            expected.clone(),
+            signatures.types_mut().generic_parameter(actual.clone())?,
+        );
+    }
+
+    let mut mapping = Vec::new();
+    for (expected, actual) in trait_method
+        .generic_parameters()
+        .iter()
+        .zip(override_method.generic_parameters())
+    {
+        let expected_bounds = match signatures.generic_parameter(expected) {
+            FactState::Known(signature) => signature.declared_bounds().to_vec(),
+            _ => return Ok(None),
+        };
+        let actual_bounds = match signatures.generic_parameter(actual) {
+            FactState::Known(signature) => signature.declared_bounds().to_vec(),
+            _ => return Ok(None),
+        };
+        let mut actual_normalized = Vec::new();
+        for bound in actual_bounds {
+            let ContractBounds::Known(normalized) = normalize_contract_bounds(
+                environment,
+                signatures,
+                implementation,
+                std::slice::from_ref(&bound),
+                &BTreeMap::new(),
+                None,
+            )?
+            else {
+                return Ok(None);
+            };
+            let [normalized] = normalized.as_slice() else {
+                return Ok(None);
+            };
+            actual_normalized.push((normalized.clone(), bound));
+        }
+        for (bound_index, bound) in expected_bounds.iter().enumerate() {
+            let ContractBounds::Known(normalized) = normalize_contract_bounds(
+                environment,
+                signatures,
+                implementation,
+                std::slice::from_ref(bound),
+                &replacements,
+                Some((trait_target, header.target())),
+            )?
+            else {
+                return Ok(None);
+            };
+            let [normalized] = normalized.as_slice() else {
+                return Ok(None);
+            };
+            let Some((_, actual_bound)) = actual_normalized
+                .iter()
+                .find(|(candidate, _)| candidate == normalized)
+            else {
+                return Ok(None);
+            };
+            let subject = signatures.types_mut().generic_parameter(actual.clone())?;
+            mapping.push(CheckedMethodBound {
+                parameter: expected.clone(),
+                bound_index,
+                obligation: TraitObligation::new(subject, actual_bound.clone()),
+            });
+        }
+    }
+    Ok(Some(mapping))
+}
+
 #[derive(Clone, Debug)]
 enum ContractType {
     Known(TypeId),
