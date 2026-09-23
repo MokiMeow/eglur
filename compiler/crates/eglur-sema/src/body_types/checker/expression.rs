@@ -197,6 +197,22 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
             ExprKind::Member { receiver, member } => {
+                if matches!(
+                    self.names.fact(ResolutionKey::Expression {
+                        module,
+                        expression: expression_id,
+                    }),
+                    FactState::Known(ResolvedName::TypeMemberOwner(_))
+                ) {
+                    return Ok(ExpressionPlan::Publish {
+                        key,
+                        outcome: self.unsupported(
+                            TypecheckCapability::CheckClosures,
+                            source,
+                            origin,
+                        ),
+                    });
+                }
                 return Ok(ExpressionPlan::Value {
                     key,
                     plan: Box::new(self.prepare_member(
@@ -652,6 +668,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 source,
                 self.expression_origin(source, expression)?,
             )),
+            ResolvedName::TypeMemberOwner(_) => {
+                Err(BodyTypingError::WrongBodyExpression(expression))
+            }
         }
     }
 }

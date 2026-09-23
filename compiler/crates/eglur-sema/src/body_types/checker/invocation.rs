@@ -116,6 +116,19 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .last()
             .ok_or(BodyTypingError::WrongBodyExpression(call.callee))?;
         if let ExprKind::Member { receiver, member } = callee.kind() {
+            if matches!(
+                self.names.fact(ResolutionKey::Expression {
+                    module,
+                    expression: callee_id,
+                }),
+                FactState::Known(ResolvedName::TypeMemberOwner(_))
+            ) {
+                return Ok(InvocationPlan::Complete(self.unsupported(
+                    TypecheckCapability::CheckClosures,
+                    source,
+                    origin,
+                )));
+            }
             return self.prepare_method_call(
                 context,
                 MethodCallRequest {
@@ -142,7 +155,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
         let targets = match self.names.fact(callee_key) {
             FactState::Known(ResolvedName::Declarations(targets)) => targets,
-            FactState::Known(ResolvedName::Local(_)) | FactState::NotApplicable => {
+            FactState::Known(ResolvedName::Local(_) | ResolvedName::TypeMemberOwner(_))
+            | FactState::NotApplicable => {
                 return Ok(InvocationPlan::Complete(self.unsupported(
                     TypecheckCapability::CheckClosures,
                     source,

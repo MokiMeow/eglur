@@ -6,8 +6,8 @@ use eglur_hir::{
 };
 
 use super::{
-    BindingGroup, LookupPurpose, NameResolutionError, PathLookup, ResolutionKey, Resolver,
-    ScopeBarrier, ScopeKind, VisitOutcome,
+    BindingGroup, LookupPurpose, NameResolutionError, PathLookup, ResolutionKey, ResolvedName,
+    Resolver, ScopeBarrier, ScopeKind, VisitOutcome,
 };
 use crate::{
     CompileCapability, ModuleId, Namespace, ResolveCapability, SemanticLocation, SemanticSource,
@@ -211,6 +211,72 @@ impl Resolver<'_, '_> {
                     .collect()
             }
             ExprKind::Member { receiver, member } => {
+                if let Some((receiver_id, receiver_expr)) = body.grouping_chain(*receiver).last() {
+                    let path = match receiver_expr.kind() {
+                        ExprKind::Name(path)
+                        | ExprKind::VariantConstructor {
+                            path,
+                            payload: ConstructorPayload::Absent,
+                        } => Some(path),
+                        _ => None,
+                    };
+                    if let Some(path) = path {
+                        let value = self.lookup_path(
+                            module,
+                            source,
+                            path,
+                            PathLookup::Namespace(Namespace::Value),
+                            LookupPurpose::Probe,
+                        )?;
+                        if matches!(value, VisitOutcome::NotApplicable) {
+                            let owner = self.lookup_path(
+                                module,
+                                source,
+                                path,
+                                PathLookup::Namespace(Namespace::Type),
+                                LookupPurpose::Probe,
+                            )?;
+                            if let VisitOutcome::Resolved(ResolvedName::Declarations(owners)) =
+                                &owner
+                                && let [owner] = owners.as_ref()
+                            {
+                                let outcome = if member.is_valid() {
+                                    VisitOutcome::Resolved(ResolvedName::TypeMemberOwner(
+                                        owner.clone(),
+                                    ))
+                                } else {
+                                    self.invalid_outcome(source, member.origin())?
+                                };
+                                self.record_fact(key, outcome.clone())?;
+                                traversal.outcomes.push(outcome);
+                                return Ok(());
+                            }
+                            if matches!(
+                                owner,
+                                VisitOutcome::Poisoned(_) | VisitOutcome::Unperformed
+                            ) {
+                                self.record_fact(key, owner.clone())?;
+                                traversal.outcomes.push(owner);
+                                return Ok(());
+                            }
+                        } else {
+                            self.record_fact(
+                                ResolutionKey::Expression {
+                                    module,
+                                    expression: receiver_id,
+                                },
+                                value.clone(),
+                            )?;
+                            let member = if member.is_valid() {
+                                VisitOutcome::Known
+                            } else {
+                                self.invalid_outcome(source, member.origin())?
+                            };
+                            traversal.outcomes.push(value.merge(member)?);
+                            return Ok(());
+                        }
+                    }
+                }
                 let member = if member.is_valid() {
                     VisitOutcome::Known
                 } else {

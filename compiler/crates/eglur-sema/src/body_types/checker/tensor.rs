@@ -58,6 +58,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             FactState::Known(ResolvedName::Local(_))
             | FactState::Known(ResolvedName::Declarations(_))
+            | FactState::Known(ResolvedName::TypeMemberOwner(_))
             | FactState::NotApplicable => self
                 .dtype_bracket_forbidden(source, origin)
                 .map(InvocationPlan::Complete),

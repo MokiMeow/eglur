@@ -909,6 +909,18 @@ impl NodeHasher<'_> {
                     target.write_to(builder);
                 }
             }
+            Some(ResolvedName::TypeMemberOwner(owner)) => {
+                builder.write_u8(3);
+                self.keys
+                    .target(owner)
+                    .ok_or_else(|| match owner {
+                        CanonicalTarget::Source(declaration) => {
+                            SemanticFingerprintError::UnknownStableDeclaration(*declaration)
+                        }
+                        CanonicalTarget::External(_) => unreachable!("external targets are stable"),
+                    })?
+                    .write_to(builder);
+            }
             None => builder.write_u8(0),
         }
         Ok(())

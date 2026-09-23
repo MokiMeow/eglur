@@ -229,11 +229,12 @@ impl<'a> Planner<'a> {
                         };
                         Err(SupportReason::Feature(feature))
                     }
-                    FactState::Poisoned(_) | FactState::Unperformed | FactState::NotApplicable => {
-                        Err(SupportReason::Feature(
-                            UnsupportedFeature::InvalidCheckedProgram,
-                        ))
-                    }
+                    FactState::Known(ResolvedName::TypeMemberOwner(_))
+                    | FactState::Poisoned(_)
+                    | FactState::Unperformed
+                    | FactState::NotApplicable => Err(SupportReason::Feature(
+                        UnsupportedFeature::InvalidCheckedProgram,
+                    )),
                 }
             }
             ExprKind::Unit => Ok(()),
