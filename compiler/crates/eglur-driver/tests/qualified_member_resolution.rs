@@ -394,6 +394,107 @@ fn concrete_owner_method_keeps_its_type_identity() {
 }
 
 #[test]
+fn transparent_alias_uses_the_underlying_inherent_method_for_calls_and_values() {
+    let (fact, _, diagnostics, missing) = inspect(
+        &[(
+            "main.eglur",
+            "struct Count { fn read(self: &Self) -> i64 = 7 }\n\
+             type Alias = Count\n\
+             fn accept(f: Fn(&Count) -> i64) -> Unit = ()\n\
+             fn source(value: &Alias) -> i64 = Alias.read(value)\n\
+             fn use_value() -> Unit = accept(Alias.read)\n",
+        )],
+        "read",
+    );
+    assert!(matches!(fact, Some(ResolvedName::TypeMemberOwner(_))));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(missing.is_empty(), "{missing:?}");
+}
+
+#[test]
+fn fixed_generic_alias_rejects_another_receiver_specialization() {
+    let prefix = "struct Boxed[T] { field value: T\nfn read(self: &Self) -> T = self.value }\n\
+                  type IntBox = Boxed[i64]\n";
+    let direct = format!("{prefix}fn source(value: &Boxed[Str]) -> Str = IntBox.read(value)\n");
+    assert_eq!(diagnostic_codes(&direct), ["CALL_ARG_TYPE_MISMATCH"]);
+
+    let value = format!(
+        "{prefix}fn accept(f: Fn(&Boxed[Str]) -> Str) -> Unit = ()\n\
+         fn source() -> Unit = accept(IntBox.read)\n"
+    );
+    assert_eq!(diagnostic_codes(&value), ["CALL_ARG_TYPE_MISMATCH"]);
+}
+
+#[test]
+fn unapplied_generic_alias_is_not_a_method_owner() {
+    assert_eq!(
+        diagnostic_codes(concat!(
+            "struct Boxed[T] { field value: T\nfn read(self: &Self) -> T = self.value }\n",
+            "type Alias[T] = Boxed[T]\n",
+            "fn source(value: &Boxed[i64]) -> i64 = Alias.read(value)\n",
+        )),
+        ["TYPE_ARG_ARITY_MISMATCH"]
+    );
+}
+
+#[test]
+fn primitive_alias_has_no_concrete_method_namespace() {
+    assert_eq!(
+        diagnostic_codes("type Alias = i64\nfn source(value: Alias) -> i64 = Alias.read(value)\n"),
+        ["METHOD_NOT_FOUND"]
+    );
+}
+
+#[test]
+fn alias_qualified_method_respects_private_family_visibility() {
+    let (fact, _, diagnostics, _) = inspect(
+        &[
+            (
+                "main.eglur",
+                "import dep::Alias\nfn source(value: &Alias) -> i64 = Alias.read(value)\n",
+            ),
+            (
+                "dep.eglur",
+                "pub struct Count { fn read(self: &Self) -> i64 = 7 }\npub type Alias = Count\n",
+            ),
+        ],
+        "read",
+    );
+    assert!(matches!(fact, Some(ResolvedName::TypeMemberOwner(_))));
+    assert_eq!(diagnostics, ["VISIBILITY_VIOLATION"]);
+}
+
+#[test]
+fn value_receiver_still_wins_over_a_same_spelled_type_alias() {
+    let (fact, _, diagnostics, missing) = inspect(
+        &[(
+            "main.eglur",
+            "struct Count { fn read(self: &Self) -> i64 = 7 }\n\
+             type Alias = Count\n\
+             fn source(Alias: Count) -> i64 = Alias.read()\n",
+        )],
+        "read",
+    );
+    assert!(fact.is_none(), "local value became a type owner: {fact:?}");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(missing.is_empty(), "{missing:?}");
+}
+
+#[test]
+fn transparent_alias_does_not_inherit_trait_impl_methods() {
+    assert_eq!(
+        diagnostic_codes(concat!(
+            "trait Rank { fn rank(self: &Self) -> i64 }\n",
+            "struct Count {}\n",
+            "type Alias = Count\n",
+            "impl Rank for Count { fn rank(self: &Self) -> i64 = 1 }\n",
+            "fn source(value: &Alias) -> i64 = Alias.rank(value)\n",
+        )),
+        ["METHOD_NOT_FOUND"]
+    );
+}
+
+#[test]
 fn concrete_owner_does_not_inherit_trait_impl_methods() {
     let prefix = "trait Rank { fn rank(self: &Self) -> i64 }\nstruct Count {}\nimpl Rank for Count { fn rank(self: &Self) -> i64 = 1 }\n";
     for expression in ["Count.rank(&value)", "Count.rank"] {

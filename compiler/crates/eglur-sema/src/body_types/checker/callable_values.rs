@@ -17,24 +17,34 @@ enum CandidateOutcome {
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn type_qualified_member_value(
         &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
+        context: BodyContext<'_, '_>,
         expression: ExprId,
         member: &Name,
         owner: &CanonicalTarget,
+        owner_origin: OriginId,
         request: TypeRequest,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        match self.signatures.declaration(owner) {
+        let BodyContext { module, source, .. } = context;
+        let owner = match self.qualified_method_owner(source, owner_origin, owner)? {
+            Outcome::Known(owner) => owner,
+            outcome => return Ok(outcome.map(|_| unreachable!())),
+        };
+        match self.signatures.declaration(&owner.target) {
             FactState::Known(DeclarationSignature::Trait { .. }) => self
                 .type_qualified_trait_method_value(
-                    module, source, expression, member, owner, request,
+                    module,
+                    source,
+                    expression,
+                    member,
+                    &owner.target,
+                    request,
                 ),
             FactState::Known(DeclarationSignature::Struct { .. }) => self
                 .type_qualified_concrete_method_value(
-                    module, source, expression, member, owner, request,
+                    module, source, expression, member, &owner, request,
                 ),
             FactState::Known(DeclarationSignature::Nominal { .. })
-                if matches!(owner, CanonicalTarget::External(_)) =>
+                if matches!(&owner.target, CanonicalTarget::External(_)) =>
             {
                 let origin = self.expression_origin(source, expression)?;
                 Ok(self.unsupported(TypecheckCapability::CheckClosures, source, origin))
@@ -51,9 +61,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         expression: ExprId,
         member: &Name,
-        owner: &CanonicalTarget,
+        qualified_owner: &QualifiedMethodOwner,
         request: TypeRequest,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        let owner = &qualified_owner.target;
         let origin = self.expression_origin(source, expression)?;
         let Some(name) = NameKey::from_hir(member) else {
             return Ok(Outcome::Poisoned(
@@ -104,7 +115,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }) => generic_parameters.len(),
             _ => return Err(BodyTypingError::UnknownDeclaration(*owner_id)),
         };
-        let subject = if generic_parameters == 0 {
+        let subject = if let Some(subject) = qualified_owner.fixed_subject {
+            subject
+        } else if generic_parameters == 0 {
             self.signatures
                 .types_mut()
                 .nominal(NominalHead::Declaration(owner.clone()), [])?

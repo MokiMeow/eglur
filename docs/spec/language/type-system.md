@@ -573,6 +573,7 @@ Rules:
 1. `type Name = Target` introduces `Name` as an alternate spelling for `Target`.
 2. `type Name[T0, ..., Tn] = Target` introduces a generic transparent alias; each use of `Name[A0, ..., An]` substitutes the supplied type arguments for the alias parameters in `Target`.
 3. Alias expansion is semantic-only and MUST NOT create a distinct runtime representation, constructor, destructor, trait implementation scope, method namespace, ownership/effect boundary, or visibility identity.
+   A fully applied alias may still spell its expanded struct's existing method owner in `Alias.method`; the selection rule is in `modules-resolution.md`.
 4. Type identity, assignability, overload applicability, trait matching, equality typing, public-API type closure, and diagnostics that depend on concrete type structure MUST operate on the alias-expanded type.
 5. Generic alias uses MUST provide exactly the alias generic arity:
    1. missing or extra type arguments fail with `TYPE_ARG_ARITY_MISMATCH`,

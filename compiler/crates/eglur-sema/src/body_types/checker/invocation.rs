@@ -158,6 +158,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         ty: request,
                         member,
                         owner: owner.clone(),
+                        owner_origin: self.expression_origin(source, *receiver)?,
                     },
                 );
             }

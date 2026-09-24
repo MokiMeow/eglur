@@ -271,7 +271,7 @@ coverage:
         test_ids: [RES-error-union-err-constructor-rejects-non-member-payload]
       - id: core-typecheck
         file: core/typecheck.yaml
-        test_ids: [TYC-bare-integer-literal-does-not-gain-overloads-by-bounded-fit, TYC-call-argument-type-mismatch-is-rejected, TYC-expected-generic-owner-payload-mismatch-is-rejected, TYC-fn-type-rejects-callable-arity-mismatch, TYC-fn-type-rejects-callable-result-mismatch, TYC-nested-block-type-mismatch-belongs-to-call-argument, TYC-nonliteral-constructor-constraint-contextualizes-integer-literal, TYC-raw-pointer-const-to-mut-argument-is-not-weakened, TYC-raw-pointer-pointee-mismatch-is-rejected-at-extern-sink, TYC-res-err-constructor-payload-mismatch-is-rejected, TYC-res-ok-constructor-payload-mismatch-is-rejected]
+        test_ids: [TYC-bare-integer-literal-does-not-gain-overloads-by-bounded-fit, TYC-call-argument-type-mismatch-is-rejected, TYC-expected-generic-owner-payload-mismatch-is-rejected, TYC-fixed-alias-owner-rejects-different-call-receiver, TYC-fixed-alias-owner-rejects-different-fn-receiver, TYC-fn-type-rejects-callable-arity-mismatch, TYC-fn-type-rejects-callable-result-mismatch, TYC-nested-block-type-mismatch-belongs-to-call-argument, TYC-nonliteral-constructor-constraint-contextualizes-integer-literal, TYC-raw-pointer-const-to-mut-argument-is-not-weakened, TYC-raw-pointer-pointee-mismatch-is-rejected-at-extern-sink, TYC-res-err-constructor-payload-mismatch-is-rejected, TYC-res-ok-constructor-payload-mismatch-is-rejected]
       - id: tensor-dtypes
         file: tensor/dtypes.yaml
         test_ids: [DTP-fixed-dtype-constructor-rejects-other-supported-dtype, DTP-unsupported-normalized-constructor-dtype-is-rejected]
@@ -1355,10 +1355,10 @@ coverage:
         test_ids: [OWN-root-does-not-forward-clone-from-payload]
       - id: core-traits
         file: core/traits.yaml
-        test_ids: [TRT-inherent-name-match-blocks-trait-fallback-even-when-only-trait-signature-is-applicable, TRT-method-overload-applicability-does-not-use-numeric-promotion-for-non-receiver-args, TRT-trait-method-call-requires-trait-visibility-at-call-site]
+        test_ids: [TRT-concrete-alias-does-not-qualify-trait-impl-method, TRT-inherent-name-match-blocks-trait-fallback-even-when-only-trait-signature-is-applicable, TRT-method-overload-applicability-does-not-use-numeric-promotion-for-non-receiver-args, TRT-trait-method-call-requires-trait-visibility-at-call-site]
       - id: core-typecheck
         file: core/typecheck.yaml
-        test_ids: [TYC-vec-only-method-on-array-literal-requires-explicit-to-vec-conversion]
+        test_ids: [TYC-primitive-alias-has-no-inherent-method-owner, TYC-vec-only-method-on-array-literal-requires-explicit-to-vec-conversion]
       - id: tensor-capabilities
         file: tensor/capabilities.yaml
         test_ids: [TCP-concrete-owner-does-not-own-readable-query-callable]
@@ -2696,7 +2696,7 @@ coverage:
         test_ids: [TRT-associated-type-application-rejects-generic-arguments]
       - id: core-typecheck
         file: core/typecheck.yaml
-        test_ids: [TYC-box-arity-error-precedes-layout-analysis, TYC-generic-type-alias-rejects-arity-mismatch, TYC-never-type-rejects-type-arguments]
+        test_ids: [TYC-box-arity-error-precedes-layout-analysis, TYC-generic-type-alias-rejects-arity-mismatch, TYC-never-type-rejects-type-arguments, TYC-unapplied-generic-alias-cannot-qualify-method]
       - id: tensor-dtypes
         file: tensor/dtypes.yaml
         test_ids: [DTP-bare-dtype-type-is-rejected, DTP-bare-tensor-type-is-rejected]
@@ -2783,7 +2783,7 @@ coverage:
     asserted_in:
       - id: core-modules
         file: core/modules.yaml
-        test_ids: [MOD-external-struct-literal-cannot-name-private-required-field, MOD-external-struct-literal-cannot-omit-private-required-field, MOD-package-public-api-rejects-private-import-of-foreign-type, MOD-package-public-api-rejects-sibling-foreign-reexport, MOD-package-public-conformance-rejects-unbridged-foreign-target, MOD-package-public-import-of-alias-cannot-replace-foreign-reexport, MOD-private-enum-type-cannot-be-imported-from-another-module, MOD-private-inherent-family-blocks-visible-trait-fallback, MOD-private-inherent-method-is-rejected-across-modules, MOD-private-property-accessor-is-rejected-across-modules, MOD-private-property-read-is-rejected-across-modules, MOD-private-property-setter-is-rejected-across-modules, MOD-private-stored-field-read-is-rejected-across-modules, MOD-private-stored-field-write-is-rejected-across-modules, MOD-private-symbol-access-across-modules-is-rejected, MOD-public-const-cannot-expose-private-nominal, MOD-public-enum-bound-cannot-name-private-trait, MOD-public-enum-payload-cannot-expose-private-nominal, MOD-public-field-cannot-contain-private-nominal, MOD-public-function-cannot-return-private-nominal, MOD-public-generic-bound-cannot-name-private-trait, MOD-public-inherent-method-cannot-expose-private-nominal, MOD-public-member-does-not-escape-private-owner, MOD-public-property-cannot-expose-private-nominal, MOD-public-struct-bound-cannot-name-private-trait, MOD-public-trait-bound-cannot-name-private-trait, MOD-public-trait-method-cannot-expose-private-nominal, MOD-public-type-alias-bound-cannot-name-private-trait, MOD-public-type-alias-cannot-bridge-private-nominal]
+        test_ids: [MOD-alias-qualified-private-inherent-method-is-rejected, MOD-external-struct-literal-cannot-name-private-required-field, MOD-external-struct-literal-cannot-omit-private-required-field, MOD-package-public-api-rejects-private-import-of-foreign-type, MOD-package-public-api-rejects-sibling-foreign-reexport, MOD-package-public-conformance-rejects-unbridged-foreign-target, MOD-package-public-import-of-alias-cannot-replace-foreign-reexport, MOD-private-enum-type-cannot-be-imported-from-another-module, MOD-private-inherent-family-blocks-visible-trait-fallback, MOD-private-inherent-method-is-rejected-across-modules, MOD-private-property-accessor-is-rejected-across-modules, MOD-private-property-read-is-rejected-across-modules, MOD-private-property-setter-is-rejected-across-modules, MOD-private-stored-field-read-is-rejected-across-modules, MOD-private-stored-field-write-is-rejected-across-modules, MOD-private-symbol-access-across-modules-is-rejected, MOD-public-const-cannot-expose-private-nominal, MOD-public-enum-bound-cannot-name-private-trait, MOD-public-enum-payload-cannot-expose-private-nominal, MOD-public-field-cannot-contain-private-nominal, MOD-public-function-cannot-return-private-nominal, MOD-public-generic-bound-cannot-name-private-trait, MOD-public-inherent-method-cannot-expose-private-nominal, MOD-public-member-does-not-escape-private-owner, MOD-public-property-cannot-expose-private-nominal, MOD-public-struct-bound-cannot-name-private-trait, MOD-public-trait-bound-cannot-name-private-trait, MOD-public-trait-method-cannot-expose-private-nominal, MOD-public-type-alias-bound-cannot-name-private-trait, MOD-public-type-alias-cannot-bridge-private-nominal]
       - id: core-traits
         file: core/traits.yaml
         test_ids: [TRT-private-qualified-base-fails-visibility-before-projection-classification, TRT-public-conformance-bound-cannot-name-private-trait, TRT-public-conformance-cannot-expose-private-associated-binding, TRT-public-conformance-checks-nested-associated-binding-visibility, TRT-public-conformance-header-cannot-contain-private-type-argument, TRT-public-conformance-on-intrinsic-target-checks-associated-visibility, TRT-public-conformance-trait-reference-cannot-contain-private-type-argument]

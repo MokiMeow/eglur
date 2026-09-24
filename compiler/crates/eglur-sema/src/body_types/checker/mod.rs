@@ -197,6 +197,12 @@ struct CheckedContext {
 }
 
 #[derive(Clone)]
+struct QualifiedMethodOwner {
+    target: CanonicalTarget,
+    fixed_subject: Option<TypeId>,
+}
+
+#[derive(Clone)]
 enum Outcome<T> {
     Known(T),
     Poisoned(Poison),

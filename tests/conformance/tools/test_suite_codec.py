@@ -46,7 +46,7 @@ class RepositoryBundleTests(unittest.TestCase):
         tests = [test.case for test in self.bundle.tests]
 
         self.assertEqual(len(self.bundle.suites), 47)
-        self.assertEqual(len(tests), 1953)
+        self.assertEqual(len(tests), 1961)
         self.assertEqual(
             Counter(
                 type(suite.entry.participation).__name__ for suite in self.bundle.suites
@@ -60,16 +60,16 @@ class RepositoryBundleTests(unittest.TestCase):
         self.assertEqual(
             Counter(type(test.invocation.source).__name__ for test in tests),
             {
-                "Utf8Source": 1768,
-                "FileSetSource": 184,
+                "Utf8Source": 1774,
+                "FileSetSource": 186,
                 "RawBytesSource": 1,
             },
         )
         self.assertEqual(
             Counter(type(test.expectation.outcome).__name__ for test in tests),
             {
-                "ValueOutcome": 965,
-                "CompileErrorOutcome": 975,
+                "ValueOutcome": 967,
+                "CompileErrorOutcome": 981,
                 "RuntimeErrorOutcome": 9,
                 "TestRunOutcome": 4,
             },

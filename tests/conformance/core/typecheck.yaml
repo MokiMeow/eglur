@@ -1685,6 +1685,105 @@ tests:
         expected_count: 1
         actual_count: 2
 
+- id: TYC-fully-applied-alias-qualifies-inherent-call-and-fn-value
+  category: typecheck
+  title: fully applied alias qualifies the underlying inherent call and Fn value
+  code: |
+    struct Boxed[T] {
+      field value: T
+      fn read(self: &Self) -> T = self.value
+    }
+    type IntBox = Boxed[i64]
+    type Alias = IntBox
+
+    fn main!() -> Res[Str, Str] {
+      let value = Boxed{ value: 7 }
+      let read: Fn(&IntBox) -> i64 = Alias.read
+      let inferred = Alias.read
+      let pair = wrapping_add(IntBox.read(&value), read(&value))
+      yield Ok(to_str(wrapping_add(pair, inferred(&value))))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"21"'
+
+- id: TYC-fixed-alias-owner-rejects-different-call-receiver
+  category: typecheck
+  title: fixed alias specialization cannot be replaced by the call receiver
+  code: |
+    struct Boxed[T] {
+      field value: T
+      fn read(self: &Self) -> T = self.value
+    }
+    type IntBox = Boxed[i64]
+
+    fn wrong(value: &Boxed[Str]) -> Str = IntBox.read(value)
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains: [call, argument, type, mismatch]
+      data_keys: [reason, actual_type, candidates]
+      data_equals:
+        reason: overload_no_match
+
+- id: TYC-fixed-alias-owner-rejects-different-fn-receiver
+  category: typecheck
+  title: fixed alias specialization cannot be replaced by expected Fn receiver
+  code: |
+    struct Boxed[T] {
+      field value: T
+      fn read(self: &Self) -> T = self.value
+    }
+    type IntBox = Boxed[i64]
+
+    fn accept(f: Fn(&Boxed[Str]) -> Str) -> Unit = ()
+    fn wrong() -> Unit = accept(IntBox.read)
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains: [call, argument, type, mismatch]
+      data_keys: [reason, actual_type, parameter, expected_type]
+      data_equals:
+        reason: parameter_type
+
+- id: TYC-unapplied-generic-alias-cannot-qualify-method
+  category: typecheck
+  title: generic alias needs type arguments before qualifying a method
+  code: |
+    struct Boxed[T] {
+      field value: T
+      fn read(self: &Self) -> T = self.value
+    }
+    type Alias[T] = Boxed[T]
+
+    fn wrong(value: &Boxed[i64]) -> i64 = Alias.read(value)
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: TYPE_ARG_ARITY_MISMATCH
+      message_contains: [type argument, arity]
+      data_keys: [expected_count, actual_count]
+      data_equals:
+        expected_count: 1
+        actual_count: 0
+
+- id: TYC-primitive-alias-has-no-inherent-method-owner
+  category: typecheck
+  title: primitive alias does not acquire an inherent method namespace
+  code: |
+    type Alias = i64
+
+    fn wrong(value: Alias) -> i64 = Alias.read(value)
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
+
 - id: TYC-abstract-numeric-kind-cannot-be-parameter-type
   category: typecheck
   title: abstract numeric kind cannot be parameter type

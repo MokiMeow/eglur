@@ -3,6 +3,62 @@ use super::invocation::InvocationFrame;
 use super::*;
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
+    pub(super) fn qualified_method_owner(
+        &mut self,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
+        written: &CanonicalTarget,
+    ) -> Result<Outcome<QualifiedMethodOwner>, BodyTypingError> {
+        match self.signatures.declaration(written) {
+            FactState::Known(DeclarationSignature::TypeAlias {
+                generic_parameters,
+                value,
+            }) => {
+                if !generic_parameters.is_empty() {
+                    let data = BTreeMap::from([
+                        (
+                            Box::<str>::from("expected_count"),
+                            self.diagnostic_count(generic_parameters.len())?,
+                        ),
+                        (Box::<str>::from("actual_count"), self.diagnostic_count(0)?),
+                    ]);
+                    return self
+                        .type_error(
+                            source,
+                            origin,
+                            "TYPE_ARG_ARITY_MISMATCH",
+                            "type argument arity mismatch: generic alias requires arguments",
+                            data,
+                        )
+                        .map(Outcome::Poisoned);
+                }
+                let value = *value;
+                let TypeKind::Nominal {
+                    head: NominalHead::Declaration(target),
+                    ..
+                } = self.signatures.types().kind(value)?
+                else {
+                    return Ok(Outcome::Known(QualifiedMethodOwner {
+                        target: written.clone(),
+                        fixed_subject: None,
+                    }));
+                };
+                Ok(Outcome::Known(QualifiedMethodOwner {
+                    target: target.clone(),
+                    fixed_subject: Some(value),
+                }))
+            }
+            FactState::Known(_) | FactState::NotApplicable => {
+                Ok(Outcome::Known(QualifiedMethodOwner {
+                    target: written.clone(),
+                    fixed_subject: None,
+                }))
+            }
+            FactState::Poisoned(poison) => Ok(Outcome::Poisoned(poison.clone())),
+            FactState::Unperformed => Ok(Outcome::Unperformed),
+        }
+    }
+
     pub(super) fn method_subject(&self, receiver: TypeId) -> Result<TypeId, BodyTypingError> {
         Ok(match self.signatures.types().kind(receiver)? {
             TypeKind::Reference { referent, .. } => *referent,

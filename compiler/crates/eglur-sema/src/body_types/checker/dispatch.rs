@@ -15,6 +15,7 @@ pub(super) struct QualifiedMemberCallRequest<'a> {
     pub(super) ty: TypeRequest,
     pub(super) member: &'a Name,
     pub(super) owner: CanonicalTarget,
+    pub(super) owner_origin: OriginId,
 }
 
 pub(super) enum DispatchContinuation {
@@ -50,7 +51,7 @@ enum DispatchSelection {
         candidates: Vec<OverloadCandidate>,
     },
     QualifiedConcrete {
-        owner: CanonicalTarget,
+        owner: QualifiedMethodOwner,
         member: Name,
         candidates: Vec<OverloadCandidate>,
     },
@@ -105,11 +106,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     })?,
             )));
         }
-        let concrete = match self.signatures.declaration(&request.owner) {
+        let owner =
+            match self.qualified_method_owner(source, request.owner_origin, &request.owner)? {
+                Outcome::Known(owner) => owner,
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+        let concrete = match self.signatures.declaration(&owner.target) {
             FactState::Known(DeclarationSignature::Trait { .. }) => false,
             FactState::Known(DeclarationSignature::Struct { .. }) => true,
             FactState::Known(DeclarationSignature::Nominal { .. })
-                if matches!(&request.owner, CanonicalTarget::External(_)) =>
+                if matches!(&owner.target, CanonicalTarget::External(_)) =>
             {
                 return Ok(InvocationPlan::Complete(self.unsupported(
                     TypecheckCapability::CheckClosures,
@@ -137,7 +143,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let name =
             NameKey::from_hir(request.member).expect("valid method name has canonical spelling");
         let source_methods = if concrete {
-            let CanonicalTarget::Source(owner) = &request.owner else {
+            let CanonicalTarget::Source(owner) = &owner.target else {
                 return Ok(InvocationPlan::Complete(self.unsupported(
                     TypecheckCapability::CheckClosures,
                     source,
@@ -159,7 +165,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .collect::<Vec<_>>()
         } else {
             self.signatures
-                .trait_methods(&request.owner)
+                .trait_methods(&owner.target)
                 .iter()
                 .filter(|method| method.name() == &name)
                 .map(|method| method.declaration().clone())
@@ -233,13 +239,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 },
                 if concrete {
                     DispatchSelection::QualifiedConcrete {
-                        owner: request.owner,
+                        owner,
                         member: request.member.clone(),
                         candidates,
                     }
                 } else {
                     DispatchSelection::QualifiedTrait {
-                        owner: request.owner,
+                        owner: owner.target,
                         member: request.member.clone(),
                         candidates,
                     }
@@ -720,12 +726,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: DispatchRequest,
-        owner: &CanonicalTarget,
+        qualified_owner: &QualifiedMethodOwner,
         member: &Name,
         candidates: Vec<OverloadCandidate>,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let source = context.source;
+        let owner = &qualified_owner.target;
         let presented = candidates
             .iter()
             .map(|candidate| candidate.callable.clone())
@@ -751,6 +758,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 continue;
             };
             if found != owner {
+                continue;
+            }
+            if qualified_owner
+                .fixed_subject
+                .is_some_and(|fixed| fixed != subject)
+            {
                 continue;
             }
             let CanonicalTarget::Source(method) = callable.declaration() else {

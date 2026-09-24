@@ -550,10 +550,19 @@ Method candidate visibility constraints:
    preserves the target trait and callable identities and MUST NOT create a
    duplicate candidate.
 6. Selecting `TypeName.method` as a call target or named callable reference
-   considers only inherent or associated callables declared on `TypeName`.
-   Trait methods implemented by that type do not become concrete-owner members.
-   If no such concrete-owner member exists, resolution MUST fail with
-   `METHOD_NOT_FOUND`; use receiver method syntax or `TraitName.method`.
+   considers only inherent or associated callables declared on that concrete
+   owner. A non-generic transparent alias whose complete expansion is a struct
+   type MUST select the expanded struct's existing inherent method family;
+   it creates no alias-owned family. An alias to an instantiated generic struct
+   fixes that complete instantiation for both calls and callable references:
+   receiver arguments or expected `Fn` types MUST NOT replace its type arguments.
+   A generic alias used without type arguments as the qualifier MUST fail with
+   `TYPE_ARG_ARITY_MISMATCH`; v0.1 provides no applied-type-expression qualifier.
+   An alias whose expansion has no concrete method owner has no such members
+   (`METHOD_NOT_FOUND`). Trait methods implemented by the expanded type do not
+   become concrete-owner members. If no concrete-owner member exists, resolution
+   MUST fail with `METHOD_NOT_FOUND`; use receiver method syntax or
+   `TraitName.method`.
 7. A concrete-owner callable reference from outside the defining module requires both an externally accessible owner and an externally accessible inherent method family. An inaccessible matching family fails with `VISIBILITY_VIOLATION` rather than `METHOD_NOT_FOUND`.
 
 ### Explicit Overload Sets

@@ -6776,6 +6776,68 @@ tests:
       data_keys: []
       primary_span:
         marker: private-owner-qualified-method
+- id: MOD-reexported-transparent-alias-qualifies-public-inherent-method
+  category: modules
+  title: reexported transparent alias resolves the original public inherent method
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Boxed[T] {
+        field value: T
+        pub fn read(self: &Self) -> T = self.value
+      }
+      pub type IntBox = Boxed[i64]
+      pub fn make() -> IntBox = Boxed{ value: 7 }
+    app/bridge.eglur: |
+      module app::bridge
+      pub import app::model::IntBox
+    app/main.eglur: |
+      module app::main
+      import app::bridge::IntBox
+      import app::model::make
+
+      fn main!() -> Res[Str, Str] {
+        let value = make()
+        let read: Fn(&IntBox) -> i64 = IntBox.read
+        yield Ok(to_str(wrapping_add(IntBox.read(&value), read(&value))))
+      }
+  entry: app/main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"14"'
+- id: MOD-alias-qualified-private-inherent-method-is-rejected
+  category: modules
+  title: transparent alias does not bypass private inherent method visibility
+  file_set_root: .
+  files:
+    app/model.eglur: |
+      module app::model
+
+      pub struct Count {
+        fn hidden(self: &Self) -> i64 = 7
+      }
+      pub type Alias = Count
+      pub fn make() -> Count = Count{}
+    app/main.eglur: |
+      module app::main
+      import app::model::Alias
+      import app::model::make
+
+      fn main!() -> Res[Str, Str] {
+        let value = make()
+        yield Ok(to_str(Alias.hidden(&value))) // @primary private-alias-qualified-method
+      }
+  entry: app/main.eglur
+  expect:
+    compile_error:
+      code: VISIBILITY_VIOLATION
+      message_contains: [visibility, private]
+      data_keys: []
+      primary_span:
+        marker: private-alias-qualified-method
 - id: MOD-external-struct-literal-cannot-omit-private-required-field
   category: modules
   title: external struct literal cannot omit private required field

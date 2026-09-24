@@ -207,11 +207,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     return Ok(ExpressionPlan::Publish {
                         key,
                         outcome: self.type_qualified_member_value(
-                            module,
-                            source,
+                            context,
                             expression_id,
                             &member,
                             &owner,
+                            self.expression_origin(source, receiver)?,
                             request,
                         )?,
                     });

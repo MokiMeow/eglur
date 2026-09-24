@@ -209,8 +209,9 @@ Tensor determinism coverage additionally requires:
       8. private transparent aliases with public expansions, including concretely discharged private alias bounds, to remain valid across public contracts without hiding symbolic caller obligations, and
       9. public nominal types to retain private representation without recursively exposing that representation as a public contract,
       10. package-mode foreign nominal and trait contracts to require an exact canonical-target `pub import` in the contract-owning module,
-      11. aliased and chained public re-exports to preserve foreign canonical identity and remain usable through a direct dependency's public path even when the target owner is transitive-only, and
-      12. private imports, sibling-module re-exports, public transparent aliases or imports targeting them, and downstream direct dependencies not to substitute for that contract-local bridge.
+      11. aliased and chained public re-exports to preserve foreign canonical identity and remain usable through a direct dependency's public path even when the target owner is transitive-only,
+      12. private imports, sibling-module re-exports, public transparent aliases or imports targeting them, and downstream direct dependencies not to substitute for that contract-local bridge, and
+      13. imported or re-exported transparent aliases to preserve their expanded struct's inherent method identity and visibility without exposing private method families.
    11. Effect-summary coverage across module boundaries requires:
       1. a known localizable-state summary to preserve the non-bang
          local-mutation exception,

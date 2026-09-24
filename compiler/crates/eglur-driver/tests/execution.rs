@@ -1183,6 +1183,62 @@ fn generic_concrete_owner_methods_specialize_from_the_receiver() {
 }
 
 #[test]
+fn fully_applied_alias_owner_methods_execute_with_fixed_specialization() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Boxed[T] { field value: T\nfn read(self: &Self) -> T = self.value }\n",
+        "type IntBox = Boxed[i64]\n",
+        "type Alias = IntBox\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Boxed { value: 7 }\n",
+        "  let read: Fn(&IntBox) -> i64 = Alias.read\n",
+        "  let inferred = Alias.read\n",
+        "  let pair = wrapping_add(IntBox.read(&value), read(&value))\n",
+        "  yield Ok(to_str(wrapping_add(pair, inferred(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "21"
+    );
+}
+
+#[test]
+fn reexported_transparent_alias_preserves_underlying_method_target() {
+    let (program, catalog, profile) = compile_files(
+        [
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::IntBox\nimport dep::make\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let value = make()\n",
+                    "  let read: Fn(&IntBox) -> i64 = IntBox.read\n",
+                    "  yield Ok(to_str(wrapping_add(IntBox.read(&value), read(&value))))\n",
+                    "}\n",
+                ),
+            ),
+            ("bridge.eglur", "pub import dep::IntBox\n"),
+            (
+                "dep.eglur",
+                concat!(
+                    "pub struct Boxed[T] { field value: T\n",
+                    "pub fn read(self: &Self) -> T = self.value }\n",
+                    "pub type IntBox = Boxed[i64]\n",
+                    "pub fn make() -> IntBox = Boxed { value: 7 }\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "14"
+    );
+}
+
+#[test]
 fn imported_reexported_concrete_owner_preserves_its_method_target() {
     let (program, catalog, profile) = compile_files(
         [
