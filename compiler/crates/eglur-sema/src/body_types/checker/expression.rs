@@ -603,7 +603,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: TypeRequest,
         resolution: &ResolvedName,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext { source, .. } = context;
+        let BodyContext { module, source, .. } = context;
         match resolution {
             ResolvedName::Local(binding) => match self.locals.state(binding) {
                 FactState::Known(local) => Ok(Outcome::Known(TypedExpression {
@@ -644,6 +644,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     DeclarationSignature::Const { ty } => {
                         self.type_constant_reference(source, expression, &target, ty)
                     }
+                    DeclarationSignature::Callable(callable) => {
+                        self.type_named_callable_value(module, source, expression, callable)
+                    }
                     DeclarationSignature::Constructor(constructor)
                         if matches!(constructor.payload(), ConstructorPayloadSignature::Unit) =>
                     {
@@ -672,5 +675,52 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Err(BodyTypingError::WrongBodyExpression(expression))
             }
         }
+    }
+
+    fn type_named_callable_value(
+        &mut self,
+        module: ModuleId,
+        source: &SemanticSource<'_>,
+        expression: ExprId,
+        signature: CallableSignatureId,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        let origin = self.expression_origin(source, expression)?;
+        let callable = self
+            .signatures
+            .callable(signature)
+            .cloned()
+            .ok_or(BodyTypingError::UnknownCallable(signature))?;
+        if callable.is_bang() || !callable.generic_parameters().is_empty() {
+            return Ok(self.unsupported(TypecheckCapability::CheckClosures, source, origin));
+        }
+
+        let mut parameters = Vec::with_capacity(callable.parameters().len());
+        for parameter in callable.parameters() {
+            match self.normalize_type_at(source, origin, parameter.ty())? {
+                Outcome::Known(ty) => parameters.push(ty),
+                outcome => return Ok(outcome.map(|_| unreachable!())),
+            }
+        }
+        let result = match self.normalize_type_at(source, origin, callable.result())? {
+            Outcome::Known(ty) => ty,
+            outcome => return Ok(outcome.map(|_| unreachable!())),
+        };
+        if let Some(poison) = self.check_callable_requirements(
+            source,
+            origin,
+            callable.requirements(),
+            &BTreeMap::new(),
+        )? {
+            return Ok(Outcome::Poisoned(poison));
+        }
+
+        let ty = self.signatures.types_mut().callable(parameters, result)?;
+        let substitution = self.signatures.types_mut().intern_substitution([])?;
+        let instance = self.intern_callable_instance(signature, substitution)?;
+        self.callable_values.insert(
+            ExpressionKey::new(module, expression),
+            SemanticFact::Known(instance),
+        )?;
+        Ok(Outcome::Known(self.value_expression(ty)))
     }
 }

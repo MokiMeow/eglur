@@ -961,6 +961,7 @@ impl NodeHasher<'_> {
             },
         )?;
         self.write_member(builder, key)?;
+        self.write_callable_value(builder, key)?;
         self.write_invocation(builder, key)?;
         self.write_checked_numeric(builder, key)?;
         self.write_trait_evidence(builder, key)?;
@@ -1037,6 +1038,30 @@ impl NodeHasher<'_> {
             }
         }
         Ok(())
+    }
+
+    fn write_callable_value(
+        &self,
+        builder: &mut CanonicalFingerprintBuilder,
+        key: ExpressionKey,
+    ) -> Result<(), SemanticFingerprintError> {
+        match self.body_types.callable_value(key) {
+            FactState::Known(id) => {
+                builder.write_u8(1);
+                let instance = self
+                    .body_types
+                    .callable_instance(*id)
+                    .ok_or(SemanticFingerprintError::UnknownCallableInstance)?;
+                self.write_callable_instance(builder, instance)
+            }
+            FactState::Unperformed | FactState::NotApplicable => {
+                builder.write_u8(0);
+                Ok(())
+            }
+            FactState::Poisoned(_) => Err(SemanticFingerprintError::IncompleteBodyFact(
+                "callable value",
+            )),
+        }
     }
 
     fn write_invocation_fact(

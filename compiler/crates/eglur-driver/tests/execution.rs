@@ -1004,6 +1004,24 @@ fn property_reads_are_rejected_before_runtime_until_accessor_dispatch_is_lowered
 }
 
 #[test]
+fn named_function_values_are_refused_before_runtime_lowering() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn identity(value: i64) -> i64 = value\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(i64) -> i64 = identity\n",
+        "  yield Ok(\"ready\")\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        execute(&program, &profile, &catalog, EvaluationLimits::default()),
+        ExecutionAttempt::Unsupported(SupportReason::Feature(
+            eglur_driver::UnsupportedFeature::FunctionValue,
+        ))
+    );
+}
+
+#[test]
 fn runtime_abort_and_call_depth_limit_remain_distinct_outcomes() {
     let (program, catalog, profile) = compile_single(concat!(
         "import std::test::abort!\n",
