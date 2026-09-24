@@ -28,6 +28,7 @@ use super::overlap::{ImplBuckets, classify_overlap, target_bucket};
 mod applications;
 mod assembly;
 mod contracts;
+mod public_contracts;
 
 use assembly::{
     build_assumptions, build_buckets, collect_implementations, validate_checked_coherence,
@@ -79,6 +80,15 @@ pub fn build_trait_environment(
         &mut environment,
     )?;
     if !applications::validate_type_applications(
+        collection,
+        sources,
+        signatures,
+        diagnostics,
+        &mut environment,
+    )? {
+        return Ok(recorder.finish(PhaseProduct::Unperformed));
+    }
+    if !public_contracts::validate_public_type_contracts(
         collection,
         sources,
         signatures,

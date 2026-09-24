@@ -73,6 +73,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn finish(self) -> DeclarationSignatures {
         DeclarationSignatures {
             type_applications: self.type_applications,
+            public_contract_poisons: BTreeMap::new(),
             types: self.types,
             diagnostic_type_names: self.diagnostic_type_names,
             declarations: self.declarations,

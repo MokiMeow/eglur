@@ -98,7 +98,7 @@ fn propagate_poison(
     }
 }
 
-fn synchronize_implementations(
+pub(super) fn synchronize_implementations(
     signatures: &DeclarationSignatures,
     environment: &mut TraitEnvironment,
 ) -> bool {

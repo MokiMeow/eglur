@@ -191,7 +191,7 @@ impl TraitEnvironment {
         self.method_targets.extend(targets);
     }
 
-    fn clear_query_caches(&mut self) {
+    pub(super) fn clear_query_caches(&mut self) {
         self.owner_assumption_cache.clear();
         self.normalization_cache.clear();
         self.projection_cache.clear();

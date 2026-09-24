@@ -470,6 +470,7 @@ pub enum EnumVariantPayloadSignature {
 /// Completed canonical signature graph for one semantic compilation graph.
 pub struct DeclarationSignatures {
     pub(super) type_applications: super::applications::TypeApplicationFacts,
+    pub(super) public_contract_poisons: BTreeMap<CanonicalTarget, Poison>,
     pub(super) types: CanonicalTypeStore,
     pub(super) diagnostic_type_names: DiagnosticTypeNames,
     pub(super) declarations: FactTable<CanonicalTarget, DeclarationSignature>,
@@ -514,6 +515,9 @@ impl DeclarationSignatures {
         if let Some(poison) = self.application_poison(declaration) {
             return FactState::Poisoned(poison);
         }
+        if let Some(poison) = self.public_contract_poisons.get(declaration) {
+            return FactState::Poisoned(poison);
+        }
         declaration_fact_state(
             &self.declarations,
             &self.overload_family_poisons,
@@ -544,7 +548,12 @@ impl DeclarationSignatures {
         parameter: &GenericParameterId,
     ) -> FactState<'_, GenericParameterSignature> {
         if let GenericParameterId::Source(parameter) = parameter
-            && let Some(poison) = self.application_poison(&CanonicalTarget::Source(*parameter))
+            && let Some(poison) = self
+                .application_poison(&CanonicalTarget::Source(*parameter))
+                .or_else(|| {
+                    self.public_contract_poisons
+                        .get(&CanonicalTarget::Source(*parameter))
+                })
         {
             return FactState::Poisoned(poison);
         }
@@ -569,7 +578,24 @@ impl DeclarationSignatures {
         if let Some(poison) = self.application_poison(declaration) {
             return FactState::Poisoned(poison);
         }
+        if let Some(poison) = self.public_contract_poisons.get(declaration) {
+            return FactState::Poisoned(poison);
+        }
         self.impl_headers.state(declaration)
+    }
+
+    pub(crate) fn poison_public_contract(
+        &mut self,
+        declaration: CanonicalTarget,
+        poison: Poison,
+    ) -> bool {
+        match self.public_contract_poisons.entry(declaration) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(poison);
+                true
+            }
+            std::collections::btree_map::Entry::Occupied(_) => false,
+        }
     }
 
     pub(crate) fn impl_headers(
@@ -640,6 +666,7 @@ impl DeclarationSignatures {
 
     pub(crate) fn has_poisoned_facts(&self) -> bool {
         self.has_invalid_applications()
+            || !self.public_contract_poisons.is_empty()
             || self.declarations.has_poisoned()
             || !self.overload_family_poisons.is_empty()
             || self.generic_parameters.has_poisoned()

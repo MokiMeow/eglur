@@ -2,6 +2,7 @@ mod applications;
 mod error;
 mod generics;
 mod model;
+pub(crate) mod public_contracts;
 mod resolver;
 mod trusted;
 mod trusted_method_contracts;

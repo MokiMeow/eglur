@@ -245,7 +245,7 @@ fn shuffled_source_insertion_and_observation_do_not_change_fingerprints() {
 #[test]
 fn receiver_passing_fingerprints_ignore_labels_and_trivia_but_retain_call_semantics() {
     let declarations =
-        "struct Counter { field value: i64\nfn read(self: &Self) -> i64 = self.value\n}\n";
+        "pub struct Counter { field value: i64\nfn read(self: &Self) -> i64 = self.value\n}\n";
     let source = format!("{declarations}pub fn inspect(value: Counter) -> i64 = value.read()\n");
     let base = resolve([file("main.eglur", &source)], "main.eglur", false);
     let labeled = resolve(

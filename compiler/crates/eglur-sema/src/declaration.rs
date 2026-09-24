@@ -302,6 +302,51 @@ impl DeclarationCollection {
         self.module(id.module())?.declaration(id)
     }
 
+    pub(crate) fn has_externally_reachable_type_contract(&self, id: DefId) -> bool {
+        let Some(declaration) = self.declaration(id) else {
+            return false;
+        };
+        let parent = declaration
+            .parent()
+            .and_then(|parent| self.declaration(parent));
+        let public_owner = parent.is_some_and(|parent| parent.visibility().is_public());
+        match declaration.kind() {
+            DeclarationKind::Function | DeclarationKind::ExternFunction => match parent {
+                None => declaration.visibility().is_public(),
+                Some(parent) if parent.kind() == DeclarationKind::Trait => public_owner,
+                Some(parent) if parent.kind() == DeclarationKind::Struct => {
+                    public_owner && declaration.visibility().is_public()
+                }
+                Some(_) => false,
+            },
+            DeclarationKind::Trait
+            | DeclarationKind::Struct
+            | DeclarationKind::Enum
+            | DeclarationKind::TypeAlias
+            | DeclarationKind::Const => parent.is_none() && declaration.visibility().is_public(),
+            DeclarationKind::StorageField | DeclarationKind::Property => {
+                parent.is_some_and(|parent| parent.kind() == DeclarationKind::Struct)
+                    && public_owner
+                    && declaration.visibility().is_public()
+            }
+            DeclarationKind::EnumVariant => {
+                parent.is_some_and(|parent| parent.kind() == DeclarationKind::Enum) && public_owner
+            }
+            DeclarationKind::EnumVariantField => parent
+                .and_then(Declaration::parent)
+                .and_then(|owner| self.declaration(owner))
+                .is_some_and(|owner| {
+                    owner.kind() == DeclarationKind::Enum && owner.visibility().is_public()
+                }),
+            DeclarationKind::Impl
+            | DeclarationKind::OpaqueType
+            | DeclarationKind::IntrinsicConstructor
+            | DeclarationKind::AssociatedType
+            | DeclarationKind::AssociatedTypeBinding
+            | DeclarationKind::GenericParameter => false,
+        }
+    }
+
     /// Returns matching declarations directly owned by another declaration.
     #[must_use]
     pub fn child_candidates(

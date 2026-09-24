@@ -737,7 +737,7 @@ fn normalize_contract_bounds(
     Ok(ContractBounds::Known(normalized))
 }
 
-fn source_declaration_span(
+pub(super) fn source_declaration_span(
     collection: &DeclarationCollection,
     sources: &BTreeMap<FileId, &SemanticSource<'_>>,
     declaration: DefId,
