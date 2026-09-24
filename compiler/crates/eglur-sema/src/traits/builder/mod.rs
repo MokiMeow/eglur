@@ -69,6 +69,7 @@ pub fn build_trait_environment(
         signatures,
         diagnostics,
         &mut environment,
+        applications::ApplicationPass::BeforeImplMethods,
     )? {
         return Ok(recorder.finish(PhaseProduct::Unperformed));
     }
@@ -78,6 +79,16 @@ pub fn build_trait_environment(
         signatures,
         diagnostics,
         &mut environment,
+    )? {
+        return Ok(recorder.finish(PhaseProduct::Unperformed));
+    }
+    if !applications::validate_type_applications(
+        collection,
+        sources,
+        signatures,
+        diagnostics,
+        &mut environment,
+        applications::ApplicationPass::BeforeImplBodies,
     )? {
         return Ok(recorder.finish(PhaseProduct::Unperformed));
     }
@@ -94,6 +105,7 @@ pub fn build_trait_environment(
         signatures,
         diagnostics,
         &mut environment,
+        applications::ApplicationPass::All,
     )? {
         return Ok(recorder.finish(PhaseProduct::Unperformed));
     }

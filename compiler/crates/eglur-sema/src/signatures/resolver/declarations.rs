@@ -303,7 +303,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 if roots.is_empty() {
                     continue;
                 }
-                let context = self.source_context(owner.declaration, owner.allow_self)?;
+                let mut context = self.source_context(owner.declaration, owner.allow_self)?;
+                context.application_region =
+                    super::super::applications::TypeApplicationRegion::Body;
                 for (type_ref, position) in roots {
                     self.resolve_source_type(
                         owner.declaration,

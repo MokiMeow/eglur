@@ -430,6 +430,7 @@ struct SourceTypeContext {
     generics: BTreeMap<Box<str>, GenericParameterId>,
     self_binding: Option<SelfBinding>,
     structure_validation: TypeStructureValidation,
+    application_region: super::applications::TypeApplicationRegion,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

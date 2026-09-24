@@ -113,6 +113,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             generics,
             self_binding,
             structure_validation: TypeStructureValidation::Immediate,
+            application_region: super::super::applications::TypeApplicationRegion::Declaration,
         })
     }
 

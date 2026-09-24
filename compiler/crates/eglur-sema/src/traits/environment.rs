@@ -170,6 +170,8 @@ impl TraitEnvironment {
             .get_mut(implementation)
             .expect("collected implementation remains present")
             .poison = Some(poison);
+        self.method_targets
+            .retain(|(owner, _), _| owner != implementation);
         self.clear_query_caches();
     }
 

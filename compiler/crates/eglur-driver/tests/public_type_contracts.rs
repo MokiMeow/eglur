@@ -198,6 +198,62 @@ fn public_conformance_headers_are_checked_before_missing_bindings() {
 }
 
 #[test]
+fn public_conformance_binding_visibility_precedes_method_bound_errors() {
+    let source = concat!(
+        "pub trait Need {}\n",
+        "pub struct Boxed[T: Need] {}\n",
+        "pub trait Expose { type Item\nfn f(self: &Self) -> Unit }\n",
+        "struct Hidden {}\n",
+        "pub struct Carrier {}\n",
+        "impl Expose for Carrier {\n",
+        "  type Item = Hidden\n",
+        "  fn f(self: &Self, x: Boxed[i64]) -> Unit = ()\n",
+        "}\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["VISIBILITY_VIOLATION"], "{codes:?}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn public_conformance_method_mismatch_precedes_method_body_bounds() {
+    let source = concat!(
+        "pub trait Need {}\n",
+        "pub struct Boxed[T: Need] {}\n",
+        "pub trait Expose { fn f(self: &Self) -> Unit }\n",
+        "pub struct Carrier {}\n",
+        "impl Expose for Carrier {\n",
+        "  fn f(self: &Self) -> i64 {\n",
+        "    let x: Boxed[i64] = ()\n",
+        "    return 1\n",
+        "  }\n",
+        "}\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["TRAIT_IMPL_SIGNATURE_MISMATCH"], "{codes:?}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn public_conformance_method_body_bounds_remain_checked_after_matching() {
+    let source = concat!(
+        "pub trait Need {}\n",
+        "pub struct Boxed[T: Need] {}\n",
+        "pub trait Expose { fn f(self: &Self) -> Unit }\n",
+        "pub struct Carrier {}\n",
+        "impl Expose for Carrier {\n",
+        "  fn f(self: &Self) -> Unit {\n",
+        "    let x: Boxed[i64] = ()\n",
+        "    return\n",
+        "  }\n",
+        "}\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["TRAIT_BOUND_NOT_SATISFIED"], "{codes:?}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
 fn public_conformance_bindings_use_alias_expansion_and_nested_closure() {
     for item in ["Hidden", "Opt[Hidden]", "InternalHidden"] {
         let source = format!(

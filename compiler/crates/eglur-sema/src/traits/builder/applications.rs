@@ -4,14 +4,33 @@ use super::super::environment::ApplicationCheck;
 use super::*;
 use crate::signatures::{TypeApplication, TypeApplicationSite};
 
+#[derive(Clone, Copy)]
+pub(super) enum ApplicationPass {
+    BeforeImplMethods,
+    BeforeImplBodies,
+    All,
+}
+
 pub(super) fn validate_type_applications(
     collection: &DeclarationCollection,
     sources: &[SemanticSource<'_>],
     signatures: &mut DeclarationSignatures,
     diagnostics: &mut DiagnosticStore,
     environment: &mut TraitEnvironment,
+    pass: ApplicationPass,
 ) -> Result<bool, TraitEnvironmentError> {
-    let applications = signatures.type_applications().cloned().collect::<Vec<_>>();
+    let applications = signatures
+        .type_applications()
+        .filter(|application| {
+            !is_impl_method_application(collection, application.site())
+                || match pass {
+                    ApplicationPass::BeforeImplMethods => false,
+                    ApplicationPass::BeforeImplBodies => !application.site().is_body(),
+                    ApplicationPass::All => true,
+                }
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     let dependencies = signatures.application_dependencies(collection);
     let mut source_map = BTreeMap::new();
     for source in sources {
@@ -78,6 +97,32 @@ pub(super) fn validate_type_applications(
     }
 }
 
+fn is_impl_method_application(
+    collection: &DeclarationCollection,
+    site: &TypeApplicationSite,
+) -> bool {
+    let TypeApplicationSite::Source { owner, .. } = site else {
+        return false;
+    };
+    let mut current = *owner;
+    loop {
+        let Some(declaration) = collection.declaration(current) else {
+            return false;
+        };
+        let Some(parent) = declaration.parent() else {
+            return false;
+        };
+        if declaration.kind() == DeclarationKind::Function
+            && collection
+                .declaration(parent)
+                .is_some_and(|parent| parent.kind() == DeclarationKind::Impl)
+        {
+            return true;
+        }
+        current = parent;
+    }
+}
+
 fn propagate_poison(
     signatures: &mut DeclarationSignatures,
     dependencies: &BTreeMap<CanonicalTarget, BTreeSet<CanonicalTarget>>,
@@ -122,7 +167,10 @@ fn application_failure(
     application: &TypeApplication,
     failure: TraitNormalization,
 ) -> Result<Poison, TraitEnvironmentError> {
-    let TypeApplicationSite::Source { owner, occurrence } = application.site() else {
+    let TypeApplicationSite::Source {
+        owner, occurrence, ..
+    } = application.site()
+    else {
         return Err(TraitEnvironmentError::InvalidTrustedTypeApplication {
             owner: application.site().owner(),
             target: application.target().clone(),

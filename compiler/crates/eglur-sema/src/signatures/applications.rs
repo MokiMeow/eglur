@@ -13,8 +13,15 @@ pub(crate) enum TypeApplicationSite {
     Source {
         owner: DefId,
         occurrence: TypeOccurrenceId,
+        region: TypeApplicationRegion,
     },
     Trusted(ExternalDefId),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum TypeApplicationRegion {
+    Declaration,
+    Body,
 }
 
 impl TypeApplicationSite {
@@ -23,6 +30,16 @@ impl TypeApplicationSite {
             Self::Source { owner, .. } => CanonicalTarget::Source(*owner),
             Self::Trusted(owner) => CanonicalTarget::External(owner.clone()),
         }
+    }
+
+    pub(crate) fn is_body(&self) -> bool {
+        matches!(
+            self,
+            Self::Source {
+                region: TypeApplicationRegion::Body,
+                ..
+            }
+        )
     }
 }
 

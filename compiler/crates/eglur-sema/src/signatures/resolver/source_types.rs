@@ -8,6 +8,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         type_ref: TypeRefId,
         target: CanonicalTarget,
         arguments: Vec<TypeId>,
+        context: &SourceTypeContext,
     ) {
         self.type_applications
             .applications
@@ -15,6 +16,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 TypeApplicationSite::Source {
                     owner,
                     occurrence: TypeOccurrenceId::new(source.file(), type_ref),
+                    region: context.application_region,
                 },
                 target,
                 arguments,
@@ -119,6 +121,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                             type_ref,
                                             target.clone(),
                                             arguments.clone(),
+                                            context,
                                         );
                                         let substitution =
                                             self.types.intern_substitution(arguments)?;
@@ -608,6 +611,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             type_ref,
                             target.clone(),
                             arguments.clone(),
+                            context,
                         );
                         let ty = self.types.nominal(head, arguments)?;
                         self.validate_source_slot(
@@ -671,6 +675,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                     type_ref,
                                     CanonicalTarget::Source(alias),
                                     arguments.clone(),
+                                    context,
                                 );
                                 let replacements = template
                                     .generic_parameters
