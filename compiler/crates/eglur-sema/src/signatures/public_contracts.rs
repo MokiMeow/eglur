@@ -1,11 +1,37 @@
 use crate::{
-    CanonicalTarget, CanonicalTypeStore, DeclarationCollection, NominalHead, TraitRef, TypeId,
-    TypeKind, TypeStoreError,
+    CanonicalTarget, CanonicalTypeStore, DeclarationCollection, NominalHead, TraitImplHeader,
+    TraitRef, TypeId, TypeKind, TypeStoreError,
 };
 
 enum Component {
     Type(TypeId),
     Trait(TraitRef),
+}
+
+pub(crate) fn conformance_is_externally_reachable(
+    collection: &DeclarationCollection,
+    types: &CanonicalTypeStore,
+    header: &TraitImplHeader,
+) -> Result<bool, TypeStoreError> {
+    if !nameable(collection, header.trait_ref().declaration()) {
+        return Ok(false);
+    }
+    Ok(match types.kind(header.target())? {
+        TypeKind::Nominal { head, .. } => match head {
+            NominalHead::Intrinsic(_) => true,
+            NominalHead::Declaration(target) => nameable(collection, target),
+        },
+        TypeKind::SelfType(target) => nameable(collection, target),
+        TypeKind::AssociatedProjection(_) => false,
+        TypeKind::Never
+        | TypeKind::Primitive(_)
+        | TypeKind::GenericParameter(_)
+        | TypeKind::Reference { .. }
+        | TypeKind::RawPointer { .. }
+        | TypeKind::Tuple(_)
+        | TypeKind::Callable { .. }
+        | TypeKind::ErrorUnion(_) => true,
+    })
 }
 
 pub(crate) fn first_unnameable_type(

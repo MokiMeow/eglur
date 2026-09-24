@@ -620,6 +620,36 @@ fn public_impl_contract_changes_invalidate_unrelated_units() {
 }
 
 #[test]
+fn private_alias_spelling_does_not_change_public_conformance_fingerprints() {
+    let sources = |item: &str| {
+        [
+            file(
+                "model.eglur",
+                &format!(
+                    "pub trait Carries {{ type Item }}\npub struct Holder {{}}\ntype Count = i64\nimpl Carries for Holder {{ type Item = {item} }}\n"
+                ),
+            ),
+            file("unrelated.eglur", "pub fn untouched() -> Unit = ()\n"),
+        ]
+    };
+    let canonical = resolve(sources("i64"), "model.eglur", false);
+    let aliased = resolve(sources("Count"), "model.eglur", false);
+
+    assert_eq!(
+        canonical.analysis.conformance(),
+        aliased.analysis.conformance()
+    );
+    assert_eq!(
+        outputs(&canonical, "model").interface(),
+        outputs(&aliased, "model").interface()
+    );
+    assert_eq!(
+        unit_key(&canonical, "unrelated"),
+        unit_key(&aliased, "unrelated")
+    );
+}
+
+#[test]
 fn unrelated_interface_changes_do_not_change_global_conformance() {
     let sources = |result: &str| {
         [

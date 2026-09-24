@@ -182,6 +182,113 @@ fn structural_and_bound_failures_precede_public_visibility() {
 }
 
 #[test]
+fn public_conformance_headers_are_checked_before_missing_bindings() {
+    for header in [
+        "impl Marker[i64] for Carrier[Hidden] {}",
+        "impl Marker[Hidden] for Carrier[i64] {}",
+        "impl[T: Internal] Marker[i64] for GenericCarrier[T] {}",
+    ] {
+        let source = format!(
+            "trait Internal {{}}\nstruct Hidden {{}}\npub trait Marker[T] {{ type Item }}\npub struct Carrier[T] {{}}\npub struct GenericCarrier[T] {{}}\n{header}\n",
+        );
+        let (codes, disposition) = compile(&source);
+        assert_eq!(codes, ["VISIBILITY_VIOLATION"], "{source}");
+        assert_eq!(disposition, CompileDisposition::Rejected, "{source}");
+    }
+}
+
+#[test]
+fn public_conformance_bindings_use_alias_expansion_and_nested_closure() {
+    for item in ["Hidden", "Opt[Hidden]", "InternalHidden"] {
+        let source = format!(
+            "pub trait Expose {{ type Item }}\nstruct Hidden {{}}\ntype InternalHidden = Hidden\npub struct Carrier {{}}\nimpl Expose for Carrier {{ type Item = {item} }}\n",
+        );
+        let (codes, disposition) = compile(&source);
+        assert_eq!(codes, ["VISIBILITY_VIOLATION"], "{source}");
+        assert_eq!(disposition, CompileDisposition::Rejected, "{source}");
+    }
+    let normalized = concat!(
+        "pub trait Source { type Item }\n",
+        "pub trait Expose { type Item }\n",
+        "struct Hidden {}\n",
+        "struct PrivateCarrier {}\n",
+        "impl Source for PrivateCarrier { type Item = Hidden }\n",
+        "type Pick[T: Source] = T::Item\n",
+        "pub struct PublicCarrier {}\n",
+        "impl Expose for PublicCarrier { type Item = Pick[PrivateCarrier] }\n",
+    );
+    let (codes, disposition) = compile(normalized);
+    assert_eq!(codes, ["VISIBILITY_VIOLATION"], "{normalized}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+    for source in [
+        "pub trait Expose { type Item }\nstruct Hidden {}\nimpl Expose for i64 { type Item = Hidden }\n",
+        "pub trait Expose { type Item }\nstruct Hidden {}\nimpl Expose for &Hidden { type Item = i64 }\n",
+    ] {
+        let (codes, disposition) = compile(source);
+        assert_eq!(codes, ["VISIBILITY_VIOLATION"], "{source}");
+        assert_eq!(disposition, CompileDisposition::Rejected, "{source}");
+    }
+    for source in [
+        "pub trait Expose { type Item }\npub struct Carrier {}\ntype Count = i64\nimpl Expose for Carrier { type Item = Count }\n",
+        "pub trait Expose { type Item }\nstruct Hidden {}\nstruct Carrier {}\nimpl Expose for Carrier { type Item = Hidden }\n",
+        "trait Expose { type Item }\nstruct Hidden {}\npub struct Carrier {}\nimpl Expose for Carrier { type Item = Hidden }\n",
+        "trait Expose[T] { type Item }\nstruct Hidden {}\npub struct Carrier {}\nimpl Expose[Hidden] for Carrier { type Item = Hidden }\n",
+        "pub trait Source { type Item }\npub trait Expose { type Item }\npub struct Carrier[T: Source] {}\nimpl[T: Source] Expose for Carrier[T] { type Item = T::Item }\n",
+    ] {
+        let (codes, disposition) = compile(source);
+        assert!(codes.is_empty(), "{source}: {codes:?}");
+        assert_eq!(disposition, CompileDisposition::Succeeded, "{source}");
+    }
+}
+
+#[test]
+fn associated_binding_validation_precedes_visibility() {
+    let source = concat!(
+        "pub trait Expose { type Item }\n",
+        "struct Hidden {}\n",
+        "pub struct Carrier {}\n",
+        "impl Expose for Carrier { type Item = &Hidden }\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["REFERENCE_TYPE_POSITION_FORBIDDEN"]);
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn rejected_public_conformance_cannot_supply_checked_evidence() {
+    for source in [
+        "pub trait Expose { type Item }\nstruct Hidden {}\npub struct Carrier {}\nimpl Expose for Carrier { type Item = Hidden }\n",
+        "pub trait Expose { type Item }\nstruct Hidden {}\npub struct Carrier[T] {}\nimpl Expose for Carrier[Hidden] { type Item = i64 }\n",
+    ] {
+        let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
+        let mut session = CompilerSession::build(request, SessionOptions::new(false)).unwrap();
+        let catalog = TrustedCatalog::first_slice().unwrap();
+        let analysis = session
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        let resolution = analysis.resolution().unwrap();
+        let implementation = resolution
+            .declarations()
+            .modules()
+            .flat_map(|module| module.declarations())
+            .find(|declaration| declaration.kind() == DeclarationKind::Impl)
+            .unwrap();
+        let target = CanonicalTarget::Source(implementation.id());
+        assert!(matches!(
+            resolution.signatures().impl_header(&target),
+            FactState::Poisoned(_)
+        ));
+        assert!(
+            resolution
+                .trait_environment()
+                .checked_impl_target(&target)
+                .is_none()
+        );
+        assert!(resolution.fingerprints().is_none());
+    }
+}
+
+#[test]
 fn a_private_alias_user_is_poisoned_by_an_invalid_public_contract() {
     let source = concat!(
         "struct Hidden {}\n",
@@ -357,6 +464,76 @@ fn existing_module_fixtures_reject_public_type_leaks() {
             CompileDisposition::Rejected,
             "{}",
             case.id
+        );
+    }
+    assert_eq!(covered, expected);
+}
+
+#[test]
+fn existing_trait_fixtures_reject_public_conformance_leaks() {
+    let expected = [
+        "TRT-public-conformance-cannot-expose-private-associated-binding",
+        "TRT-public-conformance-on-intrinsic-target-checks-associated-visibility",
+        "TRT-associated-reference-error-precedes-public-visibility-error",
+        "TRT-public-conformance-header-cannot-contain-private-type-argument",
+        "TRT-public-conformance-trait-reference-cannot-contain-private-type-argument",
+        "TRT-public-conformance-bound-cannot-name-private-trait",
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/conformance/core/traits.yaml");
+    let suite: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+    let cases = suite
+        .get("tests")
+        .and_then(serde_yaml::Value::as_sequence)
+        .unwrap();
+    let mut covered = BTreeSet::new();
+
+    for case in cases {
+        let Some(id) = case.get("id").and_then(serde_yaml::Value::as_str) else {
+            continue;
+        };
+        if !expected.contains(id) {
+            continue;
+        }
+        covered.insert(id);
+        let request = if let Some(code) = case.get("code").and_then(serde_yaml::Value::as_str) {
+            FileSetRequest::single("main.eglur", code.as_bytes().to_vec()).unwrap()
+        } else {
+            let fixture: ModuleFixture = serde_yaml::from_value(case.clone()).unwrap();
+            FileSetRequest::new(
+                fixture
+                    .files
+                    .into_iter()
+                    .map(|(path, source)| FileInput::new(path, source.into_bytes())),
+                fixture.entry,
+                Some(fixture.file_set_root.as_str()),
+            )
+            .unwrap()
+        };
+        let mut session = CompilerSession::build(request, SessionOptions::new(false)).unwrap();
+        let catalog = TrustedCatalog::first_slice().unwrap();
+        session
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        let sealed = session.seal(None).unwrap();
+        let DiagnosticSnapshot::Rejected(snapshot) = sealed.diagnostics() else {
+            panic!("{id} was not rejected")
+        };
+        let expected_code = case["expect"]["compile_error"]["code"].as_str().unwrap();
+        assert_eq!(
+            snapshot.diagnostics()[0].code().as_str(),
+            expected_code,
+            "{id}"
+        );
+        assert_eq!(
+            CompileAttempt::finalize(sealed, None)
+                .unwrap()
+                .disposition(),
+            CompileDisposition::Rejected,
+            "{id}"
         );
     }
     assert_eq!(covered, expected);

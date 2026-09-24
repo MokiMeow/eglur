@@ -6,13 +6,100 @@ use super::*;
 use crate::ResolvedType;
 use crate::diagnostic::record_public_contract_visibility_violation;
 use crate::signatures::TypeOccurrenceId;
-use crate::signatures::public_contracts::{first_unnameable_trait, first_unnameable_type};
+use crate::signatures::public_contracts::{
+    conformance_is_externally_reachable, first_unnameable_trait, first_unnameable_type,
+};
 
 enum ContractCheck {
     Nameable,
     Unnameable,
     Poisoned(Poison),
     Unperformed,
+}
+
+pub(super) fn validate_public_impl_bindings(
+    collection: &DeclarationCollection,
+    sources: &[SemanticSource<'_>],
+    signatures: &mut DeclarationSignatures,
+    diagnostics: &mut DiagnosticStore,
+    environment: &mut TraitEnvironment,
+) -> Result<bool, TraitEnvironmentError> {
+    let source_map = sources
+        .iter()
+        .map(|source| (source.file(), source))
+        .collect::<BTreeMap<_, _>>();
+    let dependencies = signatures.application_dependencies(collection);
+
+    for input in environment.implementation_validation_inputs() {
+        let CanonicalTarget::Source(owner) = input.implementation else {
+            continue;
+        };
+        if input.existing_poison.is_some()
+            || !conformance_is_externally_reachable(collection, signatures.types(), &input.header)?
+        {
+            continue;
+        }
+        let target = CanonicalTarget::Source(owner);
+        let bindings = match signatures.declaration(&target) {
+            FactState::Known(DeclarationSignature::Impl {
+                associated_bindings,
+            }) => associated_bindings.to_vec(),
+            FactState::Poisoned(_) => continue,
+            FactState::Unperformed => return Ok(false),
+            FactState::Known(_) | FactState::NotApplicable => {
+                return Err(TraitEnvironmentError::UnexpectedImplSignature(target));
+            }
+        };
+        let module = collection
+            .module(owner.module())
+            .ok_or(TraitEnvironmentError::UnknownModule(owner.module()))?;
+        let source = source_map
+            .get(&module.file())
+            .copied()
+            .ok_or(TraitEnvironmentError::MissingSource(module.file()))?;
+        let hir = source
+            .hir()
+            .ok_or(TraitEnvironmentError::MissingHir(module.file()))?;
+
+        for binding in bindings {
+            let check = check_type(collection, signatures, environment, owner, binding.value())?;
+            let poison = match check {
+                ContractCheck::Nameable => continue,
+                ContractCheck::Unnameable => {
+                    let CanonicalTarget::Source(binding_id) = binding.declaration() else {
+                        unreachable!("source impl has source associated bindings")
+                    };
+                    let declaration = collection
+                        .declaration(*binding_id)
+                        .ok_or(TraitEnvironmentError::UnknownSourceDeclaration(*binding_id))?;
+                    let item = declaration
+                        .item()
+                        .ok_or(TraitEnvironmentError::MissingDeclarationItem(*binding_id))?;
+                    let ItemKind::AssociatedTypeBinding(value) = hir.item(item).kind() else {
+                        return Err(TraitEnvironmentError::WrongDeclarationItem(*binding_id));
+                    };
+                    let origin = hir.type_ref(value.value).origin();
+                    Some(record_public_contract_visibility_violation(
+                        diagnostics,
+                        source.origin_span(origin).cloned().ok_or(
+                            TraitEnvironmentError::MissingOriginSpan {
+                                file: source.file(),
+                                origin,
+                            },
+                        )?,
+                    )?)
+                }
+                ContractCheck::Poisoned(poison) => Some(poison),
+                ContractCheck::Unperformed => return Ok(false),
+            };
+            if let Some(poison) = poison {
+                poison_dependents(signatures, &dependencies, target.clone(), poison);
+                applications::synchronize_implementations(signatures, environment);
+            }
+            break;
+        }
+    }
+    Ok(true)
 }
 
 pub(super) fn validate_public_type_contracts(

@@ -8,7 +8,7 @@ use crate::{
     ConstructorPayloadSignature, Declaration, DeclarationCollection, DeclarationKind,
     DeclarationSignature, DeclarationSignatures, FactState, FingerprintDomain, GenericParameterId,
     InterfaceFingerprint, ModuleAddress, Namespace, ResolvedImports, StableDeclarationKeys,
-    StableTargetKey, TraitImplHeader, TraitRef, TypeId, TypeKind, TypeStoreError,
+    StableTargetKey, TraitImplHeader, TraitRef, TypeId,
 };
 
 use super::{BodyProjection, SemanticFingerprintError};
@@ -261,86 +261,12 @@ pub(super) fn impl_is_externally_reachable(
         return Err(SemanticFingerprintError::IncompleteSignature(declaration));
     };
     Ok(
-        type_trait_ref_is_public(signatures.types(), header.trait_ref(), declarations)?
-            && type_is_public(signatures.types(), header.target(), declarations)?,
+        crate::signatures::public_contracts::conformance_is_externally_reachable(
+            declarations,
+            signatures.types(),
+            header,
+        )?,
     )
-}
-
-fn target_is_public(target: &CanonicalTarget, declarations: &DeclarationCollection) -> bool {
-    match target {
-        CanonicalTarget::External(_) => true,
-        CanonicalTarget::Source(declaration) => declarations
-            .declaration(*declaration)
-            .is_some_and(|declaration| declaration.visibility().is_public()),
-    }
-}
-
-fn type_is_public(
-    types: &crate::CanonicalTypeStore,
-    ty: TypeId,
-    declarations: &DeclarationCollection,
-) -> Result<bool, TypeStoreError> {
-    Ok(match types.kind(ty)? {
-        TypeKind::Never | TypeKind::Primitive(_) | TypeKind::GenericParameter(_) => true,
-        TypeKind::Nominal { head, substitution } => {
-            let head_public = match head {
-                crate::NominalHead::Intrinsic(_) => true,
-                crate::NominalHead::Declaration(target) => target_is_public(target, declarations),
-            };
-            if !head_public {
-                return Ok(false);
-            }
-            for &argument in types.substitution(*substitution)? {
-                if !type_is_public(types, argument, declarations)? {
-                    return Ok(false);
-                }
-            }
-            true
-        }
-        TypeKind::SelfType(target) => target_is_public(target, declarations),
-        TypeKind::Reference { referent, .. } | TypeKind::RawPointer { referent, .. } => {
-            type_is_public(types, *referent, declarations)?
-        }
-        TypeKind::Tuple(elements) | TypeKind::ErrorUnion(elements) => {
-            for &element in elements {
-                if !type_is_public(types, element, declarations)? {
-                    return Ok(false);
-                }
-            }
-            true
-        }
-        TypeKind::Callable { parameters, result } => {
-            for &parameter in parameters {
-                if !type_is_public(types, parameter, declarations)? {
-                    return Ok(false);
-                }
-            }
-            type_is_public(types, *result, declarations)?
-        }
-        TypeKind::AssociatedProjection(projection) => {
-            type_trait_ref_is_public(types, projection.trait_ref(), declarations)?
-                && target_is_public(projection.associated(), declarations)
-                && type_is_public(types, projection.base(), declarations)?
-        }
-    })
-}
-
-// Trait-ref visibility only needs the canonical type store. This helper keeps
-// recursive type visibility free of a second semantic owner.
-fn type_trait_ref_is_public(
-    types: &crate::CanonicalTypeStore,
-    trait_ref: &TraitRef,
-    declarations: &DeclarationCollection,
-) -> Result<bool, TypeStoreError> {
-    if !target_is_public(trait_ref.declaration(), declarations) {
-        return Ok(false);
-    }
-    for &argument in types.substitution(trait_ref.substitution())? {
-        if !type_is_public(types, argument, declarations)? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
 }
 
 fn write_declaration_signature(

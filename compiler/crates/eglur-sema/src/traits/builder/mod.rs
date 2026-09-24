@@ -72,6 +72,15 @@ pub fn build_trait_environment(
     )? {
         return Ok(recorder.finish(PhaseProduct::Unperformed));
     }
+    if !public_contracts::validate_public_impl_bindings(
+        collection,
+        sources,
+        signatures,
+        diagnostics,
+        &mut environment,
+    )? {
+        return Ok(recorder.finish(PhaseProduct::Unperformed));
+    }
     validate_impl_methods(
         collection,
         sources,
