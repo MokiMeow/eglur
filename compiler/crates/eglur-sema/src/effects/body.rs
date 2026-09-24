@@ -13,9 +13,10 @@ use eglur_source::FileId;
 use crate::resolve::PatternBindingQueryError;
 use crate::{
     BodyTypes, CallableSignature, CallableSignatureId, CanonicalTarget, CheckedDispatch,
-    DeclarationCollection, DeclarationSignature, DeclarationSignatures, DefId, ExpressionKey,
-    FactState, InvocationTarget, LocalBindingId, ModuleId, NameResolution, ReduceByCommitment,
-    ReferenceMutability, SemanticSource, TraitEvidence, TypeKind, TypeStoreError,
+    CheckedInvocation, DeclarationCollection, DeclarationSignature, DeclarationSignatures, DefId,
+    ExpressionKey, FactState, InvocationTarget, LocalBindingId, ModuleId, NameResolution,
+    ReduceByCommitment, ReferenceMutability, SemanticSource, TraitEvidence, TypeKind,
+    TypeStoreError,
 };
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -53,6 +54,7 @@ pub(super) enum EffectDispatch {
     Target(CanonicalTarget),
     BoundRequirement { method: CanonicalTarget },
     Constructor,
+    CallableValue,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -353,37 +355,50 @@ impl BodyCollector<'_> {
                 constructor.is_bang(),
             ),
             InvocationTarget::Constructor { .. } => (EffectDispatch::Constructor, false),
-            InvocationTarget::Callable(_) => match checked.dispatch() {
-                CheckedDispatch::Direct(target) => {
-                    if let Some(adapter) = self.signatures.trait_adapter(target) {
-                        (
-                            EffectDispatch::BoundRequirement {
-                                method: adapter.method().clone(),
-                            },
-                            self.target_is_bang(adapter.method())?,
-                        )
-                    } else {
-                        (
-                            EffectDispatch::Target(target.clone()),
-                            self.target_is_bang(target)?,
-                        )
+            InvocationTarget::Callable(_) => {
+                let CheckedInvocation::Static { dispatch, .. } = checked else {
+                    return Err(EffectBodyError::CheckedInvocationMismatch(key));
+                };
+                match dispatch {
+                    CheckedDispatch::Direct(target) => {
+                        if let Some(adapter) = self.signatures.trait_adapter(target) {
+                            (
+                                EffectDispatch::BoundRequirement {
+                                    method: adapter.method().clone(),
+                                },
+                                self.target_is_bang(adapter.method())?,
+                            )
+                        } else {
+                            (
+                                EffectDispatch::Target(target.clone()),
+                                self.target_is_bang(target)?,
+                            )
+                        }
                     }
+                    CheckedDispatch::Bound { method, .. } => (
+                        EffectDispatch::BoundRequirement {
+                            method: method.clone(),
+                        },
+                        self.target_is_bang(method)?,
+                    ),
+                    CheckedDispatch::ImplTemplate { callable, .. } => (
+                        EffectDispatch::Target(callable.clone()),
+                        self.target_is_bang(callable)?,
+                    ),
                 }
-                CheckedDispatch::Bound { method, .. } => (
-                    EffectDispatch::BoundRequirement {
-                        method: method.clone(),
-                    },
-                    self.target_is_bang(method)?,
-                ),
-                CheckedDispatch::ImplTemplate { callable, .. } => (
-                    EffectDispatch::Target(callable.clone()),
-                    self.target_is_bang(callable)?,
-                ),
-            },
+            }
+            InvocationTarget::CallableValue { callee, ty } => {
+                if !matches!(checked, CheckedInvocation::Indirect { callee: found, ty: found_ty } if found == callee && found_ty == ty)
+                {
+                    return Err(EffectBodyError::CheckedInvocationMismatch(key));
+                }
+                (EffectDispatch::CallableValue, false)
+            }
         };
         let mutable_paths = match invocation.target() {
             InvocationTarget::TensorConstructor { .. } => Vec::new(),
             InvocationTarget::Constructor { .. } => Vec::new(),
+            InvocationTarget::CallableValue { .. } => Vec::new(),
             InvocationTarget::Callable(instance) => {
                 let instance = self
                     .body_types
@@ -643,6 +658,7 @@ pub(super) enum EffectBodyError {
     UnknownCallableInstance(crate::CallableInstanceId),
     UnknownCallableSignature(CallableSignatureId),
     InvocationArityMismatch(ExpressionKey),
+    CheckedInvocationMismatch(ExpressionKey),
     NonCallableDispatch(CanonicalTarget),
     DiagnosticStore(DiagnosticStoreError),
     TypeStore(TypeStoreError),

@@ -92,7 +92,7 @@ pub(super) fn authorize_effects(
 
 fn call_summary(facts: &EffectFacts, call: &EffectCall) -> Option<EffectSummary> {
     match call.dispatch() {
-        EffectDispatch::Constructor => Some(EffectSummary::pure()),
+        EffectDispatch::Constructor | EffectDispatch::CallableValue => Some(EffectSummary::pure()),
         EffectDispatch::BoundRequirement { .. } if call.is_bang() => Some(EffectSummary::Unknown),
         EffectDispatch::BoundRequirement { .. } => Some(EffectSummary::pure()),
         EffectDispatch::Target(target) => match facts.summary(target) {
@@ -157,6 +157,7 @@ fn call_target_name(
         EffectDispatch::Target(target) => target,
         EffectDispatch::BoundRequirement { method } => method,
         EffectDispatch::Constructor => return Ok("constructor".to_owned()),
+        EffectDispatch::CallableValue => return Ok("callable value".to_owned()),
     };
     match target {
         CanonicalTarget::Source(declaration) => source_callable_name(collection, *declaration),
@@ -183,7 +184,8 @@ fn call_related_span(
         | EffectDispatch::BoundRequirement {
             method: CanonicalTarget::External(_),
         }
-        | EffectDispatch::Constructor => return Ok(None),
+        | EffectDispatch::Constructor
+        | EffectDispatch::CallableValue => return Ok(None),
     };
     let source_declaration = collection.declaration(declaration).ok_or(
         EffectAuthorizationError::UnknownSourceDeclaration(declaration),

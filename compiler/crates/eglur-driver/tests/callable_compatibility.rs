@@ -1,7 +1,10 @@
 use eglur_driver::{
     CompilerSession, FileSetRequest, SessionOptions, SupportProfile, TrustedCatalog,
 };
-use eglur_sema::{CanonicalTarget, CompileCapability, TypecheckCapability};
+use eglur_sema::{
+    CanonicalTarget, CheckedInvocation, CompileCapability, FactState, PhaseProduct,
+    TypecheckCapability,
+};
 
 fn diagnostic_codes(source: &str) -> Vec<String> {
     let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
@@ -129,4 +132,58 @@ fn ordinary_named_function_value_infers_its_local_callable_type() {
         entry.capability() == CompileCapability::Typecheck(TypecheckCapability::CheckClosures)
     }));
     assert!(session.into_diagnostics(None).diagnostics().is_empty());
+}
+
+#[test]
+fn local_callable_value_call_has_indirect_checked_identity() {
+    let source = concat!(
+        "fn add_one(value: i64) -> i64 = value\n",
+        "fn forward(value: i64) -> i64 {\n",
+        "  let f: Fn(i64) -> i64 = add_one\n",
+        "  yield f(value)\n",
+        "}\n",
+    );
+    let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
+    let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let analysis = session
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+    let resolution = analysis.resolution().unwrap();
+    let PhaseProduct::Performed(evidence) = resolution.trait_evidence() else {
+        panic!("trait evidence must be performed");
+    };
+    assert!(
+        evidence.invocations().any(|(_, fact)| {
+            matches!(fact, FactState::Known(CheckedInvocation::Indirect { .. }))
+        })
+    );
+    assert!(analysis.fingerprints().is_some());
+    assert!(session.into_diagnostics(None).diagnostics().is_empty());
+}
+
+#[test]
+fn indirect_callable_calls_use_the_exposed_fn_argument_contract() {
+    assert_eq!(
+        diagnostic_codes("fn use(f: Fn(Str) -> Str) -> Str = f(7)\n"),
+        ["CALL_ARG_TYPE_MISMATCH"]
+    );
+    assert_eq!(
+        diagnostic_codes("fn use(f: Fn(Str) -> Str) -> Str = f()\n"),
+        ["CALL_MISSING_ARG"]
+    );
+    assert_eq!(
+        diagnostic_codes("fn use(f: Fn(Str) -> Str) -> Str = f(\"a\", \"b\")\n"),
+        ["CALL_TOO_MANY_ARGS"]
+    );
+}
+
+#[test]
+fn named_callable_value_incompatible_with_expected_fn_is_rejected() {
+    let source = concat!(
+        "fn identity(value: i64) -> i64 = value\n",
+        "fn accept(f: Fn(Str) -> Str) -> Unit = ()\n",
+        "fn use() -> Unit = accept(identity)\n",
+    );
+    assert_eq!(diagnostic_codes(source), ["CALL_ARG_TYPE_MISMATCH"]);
 }

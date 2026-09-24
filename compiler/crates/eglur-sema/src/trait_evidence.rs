@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use eglur_diagnostics::{DiagnosticDataValue, DiagnosticStore, DiagnosticStoreError, Poison};
+use eglur_hir::ExprId;
 use eglur_source::FileId;
 
 use crate::capability::{
@@ -163,14 +164,27 @@ impl MethodFrameRoute {
     }
 }
 
-/// One invocation paired with its checked dispatch and evidence vector.
+/// A checked static call or a call through a typed runtime callable value.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CheckedInvocation {
+pub enum CheckedInvocation {
+    Static {
+        dispatch: CheckedDispatch,
+        evidence_environment: EvidenceEnvironmentId,
+    },
+    Indirect {
+        callee: ExprId,
+        ty: TypeId,
+    },
+}
+
+/// Dispatch and witnesses fixed when a named callable value is constructed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckedCallableValue {
     dispatch: CheckedDispatch,
     evidence_environment: EvidenceEnvironmentId,
 }
 
-impl CheckedInvocation {
+impl CheckedCallableValue {
     #[must_use]
     pub const fn dispatch(&self) -> &CheckedDispatch {
         &self.dispatch
@@ -185,6 +199,7 @@ impl CheckedInvocation {
 /// Post-body checked dispatch and evidence facts.
 pub struct TraitEvidence {
     invocations: FactTable<ExpressionKey, CheckedInvocation>,
+    callable_values: FactTable<ExpressionKey, CheckedCallableValue>,
     environments: Box<[EvidenceEnvironment]>,
     proofs: Box<[EvidenceSource]>,
     method_routes: BTreeMap<(CanonicalTarget, CanonicalTarget), MethodFrameRoute>,
@@ -194,6 +209,11 @@ impl TraitEvidence {
     #[must_use]
     pub fn invocation(&self, key: ExpressionKey) -> FactState<'_, CheckedInvocation> {
         self.invocations.state(&key)
+    }
+
+    #[must_use]
+    pub fn callable_value(&self, key: ExpressionKey) -> FactState<'_, CheckedCallableValue> {
+        self.callable_values.state(&key)
     }
 
     #[must_use]
@@ -231,6 +251,7 @@ impl TraitEvidence {
     #[must_use]
     pub fn fact_count(&self) -> usize {
         self.invocations.iter().len()
+            + self.callable_values.iter().len()
             + self.proofs.len()
             + self.method_routes.len()
             + self
@@ -243,6 +264,8 @@ impl TraitEvidence {
     pub(crate) fn is_complete_for(&self, body_types: &BodyTypes) -> bool {
         self.invocations.iter().len() == body_types.invocations().len()
             && self.invocations.all_known()
+            && self.callable_values.iter().len() == body_types.callable_values().len()
+            && self.callable_values.all_known()
     }
 }
 
@@ -268,6 +291,12 @@ pub fn resolve_trait_evidence(
         supported &= recorder.require(
             capability,
             invocation_location(collection, &source_map, *key)?,
+        );
+    }
+    for (key, _) in body_types.callable_values() {
+        supported &= recorder.require(
+            capability,
+            invocation_location(collection, &source_map, key)?,
         );
     }
     if !supported {
@@ -297,6 +326,19 @@ pub fn resolve_trait_evidence(
     let mut environment_ids = BTreeMap::<Box<[EvidenceEntry]>, EvidenceEnvironmentId>::new();
     let mut proofs = ProofArena::default();
     for (key, invocation) in invocations {
+        if let InvocationTarget::CallableValue { callee, ty } = invocation.target() {
+            if obligations.contains_key(&key) || method_dispatches.contains_key(&key) {
+                return Err(TraitEvidenceError::UnexpectedIndirectEvidence(key));
+            }
+            checked.insert(
+                key,
+                SemanticFact::Known(CheckedInvocation::Indirect {
+                    callee: *callee,
+                    ty: *ty,
+                }),
+            )?;
+            continue;
+        }
         let mut entries = Vec::new();
         let mut poison = None;
         for pending in obligations.get(&key).map_or(&[][..], Vec::as_slice) {
@@ -413,8 +455,25 @@ pub fn resolve_trait_evidence(
         )?;
         checked.insert(
             key,
-            SemanticFact::Known(CheckedInvocation {
+            SemanticFact::Known(CheckedInvocation::Static {
                 dispatch,
+                evidence_environment: environment,
+            }),
+        )?;
+    }
+
+    let mut callable_values = FactTable::new();
+    for (key, instance) in body_types.callable_values() {
+        if obligations.contains_key(&key) || method_dispatches.contains_key(&key) {
+            return Err(TraitEvidenceError::UnexpectedCallableValueEvidence(key));
+        }
+        let target = callable_declaration(instance, body_types, signatures)?;
+        let environment =
+            intern_environment(Box::new([]), &mut environments, &mut environment_ids)?;
+        callable_values.insert(
+            key,
+            SemanticFact::Known(CheckedCallableValue {
+                dispatch: CheckedDispatch::Direct(target),
                 evidence_environment: environment,
             }),
         )?;
@@ -423,6 +482,7 @@ pub fn resolve_trait_evidence(
     let method_routes = build_method_routes(collection, signatures, trait_environment)?;
     Ok(recorder.finish(PhaseProduct::Performed(TraitEvidence {
         invocations: checked,
+        callable_values,
         environments: environments.into_boxed_slice(),
         proofs: proofs.into_nodes(),
         method_routes,
@@ -471,6 +531,9 @@ fn direct_dispatch(
     let declaration = match invocation.target() {
         InvocationTarget::Callable(instance) => {
             callable_declaration(*instance, body_types, signatures)?
+        }
+        InvocationTarget::CallableValue { .. } => {
+            unreachable!("indirect calls have no static dispatch")
         }
         InvocationTarget::Constructor { declaration, .. }
         | InvocationTarget::TensorConstructor { declaration, .. } => declaration.clone(),
@@ -611,6 +674,8 @@ pub enum TraitEvidenceError {
     UnknownCallableInstance(CallableInstanceId),
     UnknownCallableSignature(crate::CallableSignatureId),
     DuplicateMethodDispatch(ExpressionKey),
+    UnexpectedIndirectEvidence(ExpressionKey),
+    UnexpectedCallableValueEvidence(ExpressionKey),
     MissingCheckedImplMethod {
         implementation: CanonicalTarget,
         method: CanonicalTarget,
@@ -654,6 +719,15 @@ impl fmt::Display for TraitEvidenceError {
                 write!(
                     formatter,
                     "invocation {invocation:?} has duplicate method dispatch"
+                )
+            }
+            Self::UnexpectedIndirectEvidence(key) => {
+                write!(formatter, "indirect call {key:?} has static trait evidence")
+            }
+            Self::UnexpectedCallableValueEvidence(key) => {
+                write!(
+                    formatter,
+                    "callable value {key:?} has unchecked trait evidence"
                 )
             }
             Self::MissingCheckedImplMethod {

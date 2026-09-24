@@ -1004,21 +1004,121 @@ fn property_reads_are_rejected_before_runtime_until_accessor_dispatch_is_lowered
 }
 
 #[test]
-fn named_function_values_are_refused_before_runtime_lowering() {
+fn named_function_values_execute_through_local_bindings() {
     let (program, catalog, profile) = compile_single(concat!(
         "fn identity(value: i64) -> i64 = value\n",
         "fn main!() -> Res[Str, Str] {\n",
         "  let f: Fn(i64) -> i64 = identity\n",
-        "  yield Ok(\"ready\")\n",
+        "  yield Ok(to_str(f(7)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn named_function_values_execute_through_locals_and_parameters() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn identity(value: Str) -> Str = value\n",
+        "fn invoke(f: Fn(Str) -> Str) -> Str = f(\"passed\")\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(Str) -> Str = identity\n",
+        "  yield Ok(invoke(f))\n",
         "}\n",
     ));
 
     assert_eq!(
-        execute(&program, &profile, &catalog, EvaluationLimits::default()),
-        ExecutionAttempt::Unsupported(SupportReason::Feature(
-            eglur_driver::UnsupportedFeature::FunctionValue,
-        ))
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "passed"
     );
+}
+
+#[test]
+fn reexported_named_function_value_keeps_its_source_target() {
+    let (program, catalog, profile) = compile_files(
+        [
+            ("dep.eglur", "pub fn identity(value: Str) -> Str = value\n"),
+            ("bridge.eglur", "pub import dep::identity as routed\n"),
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::routed\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let f: Fn(Str) -> Str = routed\n",
+                    "  yield Ok(f(\"reexported\"))\n",
+                    "}\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "reexported"
+    );
+}
+
+#[test]
+fn callable_value_variance_preserves_reference_argument_passing() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn read(value: &i64) -> i64 = *value\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let mut value = 7\n",
+        "  let f: Fn(&mut i64) -> i64 = read\n",
+        "  yield Ok(to_str(f(&mut value)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn callable_value_target_is_selected_by_runtime_control_flow() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn left(value: Str) -> Str = value\n",
+        "fn right(value: Str) -> Str = \"right\"\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(Str) -> Str = if false { yield left } else { yield right }\n",
+        "  yield Ok(f(\"left\"))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "right"
+    );
+}
+
+#[test]
+fn callable_values_in_public_carriers_are_refused_before_execution() {
+    for (declaration, expression) in [
+        ("", "Some(identity)"),
+        ("", "Some((identity,))"),
+        (
+            "struct Holder { field callback: Fn(Str) -> Str }\n",
+            "Holder { callback: identity }",
+        ),
+    ] {
+        let source = format!(
+            "import std::test::emit!\n\
+             fn identity(value: Str) -> Str = value\n\
+             {declaration}\
+             fn main!() -> Res[Str, Str] {{\n\
+               emit!(\"before\")\n\
+               let wrapped = {expression}\n\
+               yield Ok(\"ready\")\n\
+             }}\n"
+        );
+        let (program, catalog, profile) = compile_single(&source);
+        assert_eq!(
+            execute(&program, &profile, &catalog, EvaluationLimits::default()),
+            ExecutionAttempt::Unsupported(SupportReason::Feature(
+                eglur_driver::UnsupportedFeature::FunctionValue,
+            )),
+            "{expression}"
+        );
+    }
 }
 
 #[test]

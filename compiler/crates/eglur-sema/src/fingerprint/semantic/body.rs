@@ -1041,27 +1041,42 @@ impl NodeHasher<'_> {
     }
 
     fn write_callable_value(
-        &self,
+        &mut self,
         builder: &mut CanonicalFingerprintBuilder,
         key: ExpressionKey,
     ) -> Result<(), SemanticFingerprintError> {
-        match self.body_types.callable_value(key) {
-            FactState::Known(id) => {
-                builder.write_u8(1);
-                let instance = self
-                    .body_types
-                    .callable_instance(*id)
-                    .ok_or(SemanticFingerprintError::UnknownCallableInstance)?;
-                self.write_callable_instance(builder, instance)
-            }
+        let selected = match self.body_types.callable_value(key) {
+            FactState::Known(id) => *id,
             FactState::Unperformed | FactState::NotApplicable => {
                 builder.write_u8(0);
-                Ok(())
+                return Ok(());
             }
-            FactState::Poisoned(_) => Err(SemanticFingerprintError::IncompleteBodyFact(
-                "callable value",
-            )),
-        }
+            FactState::Poisoned(_) => {
+                return Err(SemanticFingerprintError::IncompleteBodyFact(
+                    "callable value",
+                ));
+            }
+        };
+        builder.write_u8(1);
+        let instance = self
+            .body_types
+            .callable_instance(selected)
+            .ok_or(SemanticFingerprintError::UnknownCallableInstance)?;
+        self.write_callable_instance(builder, instance)?;
+        let checked = match self.trait_evidence.callable_value(key) {
+            FactState::Known(checked) => checked.clone(),
+            FactState::Poisoned(_) => {
+                return Err(SemanticFingerprintError::IncompleteTraitEvidence);
+            }
+            FactState::Unperformed | FactState::NotApplicable => {
+                return Err(SemanticFingerprintError::IncompleteTraitEvidence);
+            }
+        };
+        self.write_checked_static_dispatch(
+            builder,
+            checked.dispatch(),
+            checked.evidence_environment(),
+        )
     }
 
     fn write_invocation_fact(
@@ -1097,6 +1112,13 @@ impl NodeHasher<'_> {
                     .callable_instance(*id)
                     .ok_or(SemanticFingerprintError::UnknownCallableInstance)?;
                 self.write_callable_instance(builder, instance)?;
+            }
+            InvocationTarget::CallableValue { callee, ty } => {
+                builder.write_u8(3);
+                builder.write_digest(self.expression_digest(*callee)?);
+                self.keys
+                    .stable_type(self.signatures, *ty, &self.binders)?
+                    .write_to(builder);
             }
             InvocationTarget::Constructor {
                 declaration,
@@ -1212,9 +1234,34 @@ impl NodeHasher<'_> {
         builder: &mut CanonicalFingerprintBuilder,
         invocation: &CheckedInvocation,
     ) -> Result<(), SemanticFingerprintError> {
+        let CheckedInvocation::Static {
+            dispatch,
+            evidence_environment,
+        } = invocation
+        else {
+            let CheckedInvocation::Indirect { callee, ty } = invocation else {
+                unreachable!()
+            };
+            builder.write_u8(1);
+            builder.write_digest(self.expression_digest(*callee)?);
+            self.keys
+                .stable_type(self.signatures, *ty, &self.binders)?
+                .write_to(builder);
+            return Ok(());
+        };
+        builder.write_u8(0);
+        self.write_checked_static_dispatch(builder, dispatch, *evidence_environment)
+    }
+
+    fn write_checked_static_dispatch(
+        &mut self,
+        builder: &mut CanonicalFingerprintBuilder,
+        dispatch: &CheckedDispatch,
+        evidence_environment: crate::EvidenceEnvironmentId,
+    ) -> Result<(), SemanticFingerprintError> {
         let environment = self
             .trait_evidence
-            .environment(invocation.evidence_environment())
+            .environment(evidence_environment)
             .ok_or(SemanticFingerprintError::UnknownEvidenceEnvironment)?;
         let mut entries = environment
             .entries()
@@ -1228,7 +1275,7 @@ impl NodeHasher<'_> {
             entry.write_to(builder);
         }
 
-        match invocation.dispatch() {
+        match dispatch {
             CheckedDispatch::Direct(target) => {
                 builder.write_u8(0);
                 self.keys

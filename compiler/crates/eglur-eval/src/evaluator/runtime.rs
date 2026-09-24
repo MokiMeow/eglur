@@ -360,7 +360,18 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_name(&self, frame: &Frame, expression: ExprId) -> Flow {
+    fn eval_name(&mut self, frame: &Frame, expression: ExprId) -> Flow {
+        let value_key = ExpressionKey::new(frame.module, expression);
+        if matches!(
+            self.view
+                .program
+                .resolution()
+                .body_types()
+                .callable_value(value_key),
+            FactState::Known(_)
+        ) {
+            return self.eval_callable_value(frame, value_key);
+        }
         let key = ResolutionKey::Expression {
             module: frame.module,
             expression,
@@ -379,6 +390,46 @@ impl<'a> Evaluator<'a> {
             }
             _ => invalid_flow(),
         }
+    }
+
+    fn eval_callable_value(&mut self, frame: &Frame, key: ExpressionKey) -> Flow {
+        let Some(evidence) = self.view.trait_evidence() else {
+            return invalid_flow();
+        };
+        let FactState::Known(checked) = evidence.callable_value(key) else {
+            return invalid_flow();
+        };
+        let Some(environment) = evidence.environment(checked.evidence_environment()) else {
+            return invalid_flow();
+        };
+        let Some(selected) = self.view.selected_call(
+            checked.dispatch(),
+            &frame.witnesses,
+            &mut self.witness_store,
+        ) else {
+            return invalid_flow();
+        };
+        let witnesses = if selected.method.is_some() {
+            let Some(frame_witnesses) =
+                self.witness_store
+                    .method_frame(evidence, &selected, environment, &frame.witnesses)
+            else {
+                return invalid_flow();
+            };
+            frame_witnesses
+        } else {
+            let Some(child) =
+                self.witness_store
+                    .child_witnesses(evidence, environment, &frame.witnesses)
+            else {
+                return invalid_flow();
+            };
+            child
+        };
+        Flow::Value(RuntimeValue::Callable(RuntimeCallable {
+            target: selected.target,
+            witnesses,
+        }))
     }
 
     fn eval_literal(&self, module: ModuleId, expression: ExprId, literal: &Literal) -> Flow {
@@ -447,6 +498,15 @@ impl<'a> Evaluator<'a> {
         let Some((invocation, checked)) = self.view.invocation(frame.module, expression) else {
             return invalid_flow();
         };
+        let callable = if let CheckedInvocation::Indirect { callee, ty } = checked {
+            if !matches!(invocation.target(), InvocationTarget::CallableValue { callee: found, ty: found_ty } if found == callee && found_ty == ty)
+            {
+                return invalid_flow();
+            }
+            Some(flow_value!(self.eval_expr(frame, *callee)))
+        } else {
+            None
+        };
         let mut evaluated = BTreeMap::new();
         for argument in invocation.evaluation_order() {
             let value = flow_value!(self.eval_argument(frame, *argument));
@@ -464,10 +524,32 @@ impl<'a> Evaluator<'a> {
         if !evaluated.is_empty() {
             return invalid_flow();
         }
+        if let Some(callable) = callable {
+            let RuntimeValue::Callable(callable) = callable else {
+                return invalid_flow();
+            };
+            return match callable.target {
+                CanonicalTarget::Source(declaration) => {
+                    self.call_source(declaration, arguments, callable.witnesses)
+                }
+                CanonicalTarget::External(declaration) => self.eval_hook(
+                    &declaration,
+                    CanonicalTarget::External(declaration.clone()),
+                    arguments,
+                ),
+            };
+        }
+        let CheckedInvocation::Static {
+            dispatch,
+            evidence_environment,
+        } = checked
+        else {
+            unreachable!()
+        };
         let Some(evidence) = self.view.trait_evidence() else {
             return invalid_flow();
         };
-        let Some(environment) = evidence.environment(checked.evidence_environment()) else {
+        let Some(environment) = evidence.environment(*evidence_environment) else {
             return invalid_flow();
         };
         let Some(child) =
@@ -477,16 +559,16 @@ impl<'a> Evaluator<'a> {
             return invalid_flow();
         };
         match invocation.target() {
+            InvocationTarget::CallableValue { .. } => invalid_flow(),
             InvocationTarget::TensorConstructor { .. } => invalid_flow(),
             InvocationTarget::Constructor { declaration, .. } => {
-                self.eval_constructor(declaration, checked.dispatch(), arguments)
+                self.eval_constructor(declaration, dispatch, arguments)
             }
             InvocationTarget::Callable(_) => {
-                let Some(selected) = self.view.selected_call(
-                    checked.dispatch(),
-                    &frame.witnesses,
-                    &mut self.witness_store,
-                ) else {
+                let Some(selected) =
+                    self.view
+                        .selected_call(dispatch, &frame.witnesses, &mut self.witness_store)
+                else {
                     return invalid_flow();
                 };
                 let selected = match self.view.trait_adapter_dispatch(
@@ -867,7 +949,9 @@ impl<'a> Evaluator<'a> {
         };
         match self.store.read(&place).ok_or_else(invalid_flow)? {
             RuntimeValue::Reference(referent) => Ok(Some(referent)),
-            RuntimeValue::Value(_) | RuntimeValue::Tuple(_) => Ok(Some(place)),
+            RuntimeValue::Value(_) | RuntimeValue::Callable(_) | RuntimeValue::Tuple(_) => {
+                Ok(Some(place))
+            }
         }
     }
 
