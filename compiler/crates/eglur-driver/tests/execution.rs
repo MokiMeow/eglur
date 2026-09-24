@@ -1149,6 +1149,140 @@ fn qualified_trait_method_value_executes_checked_impl() {
 }
 
 #[test]
+fn concrete_owner_method_call_and_value_execute_the_same_target() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count { field value: i64\nfn read(self: &Self) -> i64 = self.value }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Count { value: 7 }\n",
+        "  let read: Fn(&Count) -> i64 = Count.read\n",
+        "  yield Ok(to_str(wrapping_add(Count.read(&value), read(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "14"
+    );
+}
+
+#[test]
+fn generic_concrete_owner_methods_specialize_from_the_receiver() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Boxed[T] { field value: T\nfn read(self: &Self) -> T = self.value }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Boxed { value: 7 }\n",
+        "  let read: Fn(&Boxed[i64]) -> i64 = Boxed.read\n",
+        "  yield Ok(to_str(wrapping_add(Boxed.read(&value), read(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "14"
+    );
+}
+
+#[test]
+fn imported_reexported_concrete_owner_preserves_its_method_target() {
+    let (program, catalog, profile) = compile_files(
+        [
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::Count\nimport dep::make\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let value = make()\n",
+                    "  let read: Fn(&Count) -> i64 = Count.read\n",
+                    "  yield Ok(to_str(wrapping_add(Count.read(&value), read(&value))))\n",
+                    "}\n",
+                ),
+            ),
+            ("bridge.eglur", "pub import dep::Count\n"),
+            (
+                "dep.eglur",
+                concat!(
+                    "pub struct Count { field value: i64\npub fn read(self: &Self) -> i64 = self.value }\n",
+                    "pub fn make() -> Count = Count { value: 7 }\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "14"
+    );
+}
+
+#[test]
+fn concrete_owner_overloads_select_direct_and_function_value_targets() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count {\n",
+        "  overload fn read(self: &Self, value: i64) -> i64 = value\n",
+        "  overload fn read(self: &Self, value: Str) -> i64 = 99\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Count {}\n",
+        "  let read: Fn(&Count, i64) -> i64 = Count.read\n",
+        "  yield Ok(to_str(wrapping_add(Count.read(&value, 7), read(&value, 8))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "15"
+    );
+}
+
+#[test]
+fn monomorphic_concrete_owner_method_value_infers_without_annotation() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count { fn read(self: &Self) -> i64 = 7 }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Count {}\n",
+        "  let read = Count.read\n",
+        "  yield Ok(to_str(read(&value)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn concrete_owner_bang_method_uses_explicit_mutable_receiver() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count { field mut value: i64\n",
+        "  fn set!(self: &mut Self, value: i64) -> Unit { self.value = value\nyield () }\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let mut value = Count { value: 0 }\n",
+        "  Count.set!(&mut value, 7)\n",
+        "  yield Ok(to_str(value.value))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn concrete_owner_generic_method_uses_explicit_or_expected_type_arguments() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count { fn echo[T](self: &Self, value: T) -> T = value }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Count {}\n",
+        "  let echo: Fn(&Count, i64) -> i64 = Count.echo\n",
+        "  yield Ok(to_str(wrapping_add(Count.echo::[i64](&value, 7), echo(&value, 8))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "15"
+    );
+}
+
+#[test]
 fn qualified_trait_method_call_executes_checked_impl() {
     let (program, catalog, profile) = compile_single(concat!(
         "trait Link { fn forward(self: &Self) -> i64 }\n",

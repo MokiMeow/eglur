@@ -206,7 +206,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     let owner = owner.clone();
                     return Ok(ExpressionPlan::Publish {
                         key,
-                        outcome: self.type_qualified_trait_method_value(
+                        outcome: self.type_qualified_member_value(
                             module,
                             source,
                             expression_id,

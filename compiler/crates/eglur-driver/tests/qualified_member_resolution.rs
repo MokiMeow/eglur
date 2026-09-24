@@ -375,3 +375,98 @@ fn qualified_trait_value_requires_method_resolution_capability() {
         demand.capability() == CompileCapability::Typecheck(TypecheckCapability::ResolveMethods)
     }));
 }
+
+#[test]
+fn concrete_owner_method_keeps_its_type_identity() {
+    let (fact, module, diagnostics, missing) = inspect(
+        &[(
+            "main.eglur",
+            "struct Count { fn read(self: &Self) -> i64 = 7 }\nfn use_read(f: Fn(&Count) -> i64) -> Unit = ()\nfn source() -> Unit = use_read(Count.read)\n",
+        )],
+        "read",
+    );
+    assert!(matches!(
+        fact,
+        Some(ResolvedName::TypeMemberOwner(CanonicalTarget::Source(owner))) if owner.module() == module
+    ));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(missing.is_empty(), "{missing:?}");
+}
+
+#[test]
+fn concrete_owner_does_not_inherit_trait_impl_methods() {
+    let prefix = "trait Rank { fn rank(self: &Self) -> i64 }\nstruct Count {}\nimpl Rank for Count { fn rank(self: &Self) -> i64 = 1 }\n";
+    for expression in ["Count.rank(&value)", "Count.rank"] {
+        let source = format!("{prefix}fn source(value: &Count) -> i64 = {expression}\n");
+        assert_eq!(
+            diagnostic_codes(&source),
+            ["METHOD_NOT_FOUND"],
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn inaccessible_concrete_owner_method_precedes_applicability() {
+    let (fact, _, diagnostics, _) = inspect(
+        &[
+            (
+                "main.eglur",
+                "import dep::Count\nfn source(value: &Count) -> i64 = Count.read(value)\n",
+            ),
+            (
+                "dep.eglur",
+                "pub struct Count { fn read(self: &Self) -> i64 = 7 }\n",
+            ),
+        ],
+        "read",
+    );
+    assert!(matches!(fact, Some(ResolvedName::TypeMemberOwner(_))));
+    assert_eq!(diagnostics, ["VISIBILITY_VIOLATION"]);
+}
+
+#[test]
+fn concrete_owner_missing_member_is_not_a_missing_value_name() {
+    assert_eq!(
+        diagnostic_codes("struct Count {}\nfn source(value: &Count) -> i64 = Count.read(value)\n"),
+        ["METHOD_NOT_FOUND"]
+    );
+}
+
+#[test]
+fn local_value_receiver_wins_over_a_same_spelled_concrete_owner() {
+    let (fact, _, diagnostics, missing) = inspect(
+        &[(
+            "main.eglur",
+            "struct Count { fn read(self: &Self) -> i64 = 7 }\nfn source(Count: Count) -> i64 = Count.read()\n",
+        )],
+        "read",
+    );
+    assert!(fact.is_none(), "local value became a type owner: {fact:?}");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(missing.is_empty(), "{missing:?}");
+}
+
+#[test]
+fn concrete_owner_call_requires_the_owner_receiver_type() {
+    assert_eq!(
+        diagnostic_codes(concat!(
+            "struct Count { fn read(self: &Self) -> i64 = 7 }\n",
+            "struct Other {}\n",
+            "fn source(value: &Other) -> i64 = Count.read(value)\n",
+        )),
+        ["CALL_ARG_TYPE_MISMATCH"]
+    );
+}
+
+#[test]
+fn single_concrete_method_value_uses_the_enclosing_type_mismatch() {
+    assert_eq!(
+        diagnostic_codes(concat!(
+            "struct Count { fn read(self: &Self) -> i64 = 7 }\n",
+            "fn accept(f: Fn(&Count) -> Str) -> Unit = ()\n",
+            "fn source() -> Unit = accept(Count.read)\n",
+        )),
+        ["CALL_ARG_TYPE_MISMATCH"]
+    );
+}

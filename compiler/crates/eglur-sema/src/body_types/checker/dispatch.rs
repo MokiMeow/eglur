@@ -8,7 +8,7 @@ struct DispatchRequest {
     ty: TypeRequest,
 }
 
-pub(super) struct QualifiedTraitCallRequest<'a> {
+pub(super) struct QualifiedMemberCallRequest<'a> {
     pub(super) expression: ExprId,
     pub(super) origin: OriginId,
     pub(super) call: &'a CallExpr,
@@ -49,6 +49,11 @@ enum DispatchSelection {
         member: Name,
         candidates: Vec<OverloadCandidate>,
     },
+    QualifiedConcrete {
+        owner: CanonicalTarget,
+        member: Name,
+        candidates: Vec<OverloadCandidate>,
+    },
 }
 
 struct MethodSelection {
@@ -83,10 +88,10 @@ impl DispatchArgumentsFrame {
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn prepare_qualified_trait_call(
+    pub(super) fn prepare_qualified_member_call(
         &mut self,
         context: BodyContext<'_, '_>,
-        request: QualifiedTraitCallRequest<'_>,
+        request: QualifiedMemberCallRequest<'_>,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let source = context.source;
         if !request.member.is_valid() {
@@ -100,16 +105,28 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     })?,
             )));
         }
-        if !matches!(
-            self.signatures.declaration(&request.owner),
-            FactState::Known(DeclarationSignature::Trait { .. })
-        ) {
-            return Ok(InvocationPlan::Complete(self.unsupported(
-                TypecheckCapability::CheckClosures,
-                source,
-                request.origin,
-            )));
-        }
+        let concrete = match self.signatures.declaration(&request.owner) {
+            FactState::Known(DeclarationSignature::Trait { .. }) => false,
+            FactState::Known(DeclarationSignature::Struct { .. }) => true,
+            FactState::Known(DeclarationSignature::Nominal { .. })
+                if matches!(&request.owner, CanonicalTarget::External(_)) =>
+            {
+                return Ok(InvocationPlan::Complete(self.unsupported(
+                    TypecheckCapability::CheckClosures,
+                    source,
+                    request.origin,
+                )));
+            }
+            FactState::Known(_) | FactState::NotApplicable => {
+                return self
+                    .method_not_found(source, request.member)
+                    .map(InvocationPlan::Complete);
+            }
+            FactState::Poisoned(poison) => {
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
+            }
+            FactState::Unperformed => return Ok(InvocationPlan::Complete(Outcome::Unperformed)),
+        };
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::ResolveMethods),
             SemanticLocation::origin(source.file(), request.member.origin()),
@@ -119,16 +136,52 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
         let name =
             NameKey::from_hir(request.member).expect("valid method name has canonical spelling");
-        let methods = self
-            .signatures
-            .trait_methods(&request.owner)
-            .iter()
-            .filter(|method| method.name() == &name)
-            .map(|method| method.declaration().clone())
-            .collect::<Vec<_>>();
+        let source_methods = if concrete {
+            let CanonicalTarget::Source(owner) = &request.owner else {
+                return Ok(InvocationPlan::Complete(self.unsupported(
+                    TypecheckCapability::CheckClosures,
+                    source,
+                    request.origin,
+                )));
+            };
+            Some(
+                self.collection
+                    .child_candidates(*owner, &name, DeclarationKind::Function),
+            )
+        } else {
+            None
+        };
+        let methods = if let Some(source_methods) = &source_methods {
+            source_methods
+                .iter()
+                .copied()
+                .map(CanonicalTarget::Source)
+                .collect::<Vec<_>>()
+        } else {
+            self.signatures
+                .trait_methods(&request.owner)
+                .iter()
+                .filter(|method| method.name() == &name)
+                .map(|method| method.declaration().clone())
+                .collect::<Vec<_>>()
+        };
         if methods.is_empty() {
             return self
                 .method_not_found(source, request.member)
+                .map(InvocationPlan::Complete);
+        }
+        if let Some(source_methods) = &source_methods
+            && self.inherent_family_is_inaccessible(context.module, source_methods)?
+        {
+            return self
+                .type_error(
+                    source,
+                    request.member.origin(),
+                    "VISIBILITY_VIOLATION",
+                    "visibility violation: inherent method family is private",
+                    BTreeMap::new(),
+                )
+                .map(Outcome::Poisoned)
                 .map(InvocationPlan::Complete);
         }
         let mut candidates = Vec::with_capacity(methods.len());
@@ -178,10 +231,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     call: request.call.clone(),
                     ty: request.ty,
                 },
-                DispatchSelection::QualifiedTrait {
-                    owner: request.owner,
-                    member: request.member.clone(),
-                    candidates,
+                if concrete {
+                    DispatchSelection::QualifiedConcrete {
+                        owner: request.owner,
+                        member: request.member.clone(),
+                        candidates,
+                    }
+                } else {
+                    DispatchSelection::QualifiedTrait {
+                        owner: request.owner,
+                        member: request.member.clone(),
+                        candidates,
+                    }
                 },
                 NormalContinuation::Present,
             )),
@@ -435,6 +496,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 candidates,
                 frame.typed,
             ),
+            DispatchSelection::QualifiedConcrete {
+                owner,
+                member,
+                candidates,
+            } => self.select_qualified_concrete(
+                context,
+                frame.request,
+                &owner,
+                &member,
+                candidates,
+                frame.typed,
+            ),
         }
     }
 
@@ -635,49 +708,150 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .method_not_found(source, member)
                 .map(InvocationPlan::Complete),
             [candidate] => {
-                let candidate = candidate.clone();
-                let slots = match self.bind_call_slots(
-                    source,
-                    request.origin,
-                    &candidate.callable,
-                    &request.call.arguments,
-                )? {
-                    Outcome::Known(slots) => slots,
-                    outcome => {
-                        return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!())));
-                    }
-                };
-                let plan = self.prepare_application(
-                    source,
-                    ApplicationRequest {
-                        origin: request.origin,
-                        generic_parameters: candidate.callable.generic_parameters(),
-                        slots: &slots,
-                        result_template: candidate.callable.result(),
-                        explicit_arguments: &request.call.type_arguments,
-                        explicit_parameters: Some(&candidate.explicit_parameters),
-                        preset_replacements: Some(&candidate.preset_replacements),
-                        allowed_ownership_parameter: None,
-                        ty: request.ty,
-                        defer_underconstrained: false,
-                    },
-                )?;
-                Ok(InvocationPlan::Application {
-                    plan,
-                    continuation: Box::new(InvocationFrame::qualified_trait(
-                        request.expression,
-                        request.origin,
-                        slots,
-                        request.call.callee,
-                        candidate,
-                        member.origin(),
-                    )),
-                })
+                self.prepare_selected_qualified_method(context, request, member, candidate.clone())
             }
             _ => self
                 .method_ambiguous(source, member, &applicable, true)
                 .map(InvocationPlan::Complete),
         }
+    }
+
+    fn select_qualified_concrete(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        request: DispatchRequest,
+        owner: &CanonicalTarget,
+        member: &Name,
+        candidates: Vec<OverloadCandidate>,
+        typed_arguments: BTreeMap<ExprId, TypedExpression>,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
+        let presented = candidates
+            .iter()
+            .map(|candidate| candidate.callable.clone())
+            .collect::<Vec<_>>();
+        let explicit =
+            match self.resolve_explicit_method_arguments(source, &request.call.type_arguments)? {
+                Outcome::Known(arguments) => arguments,
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+
+        let mut applicable = Vec::new();
+        for OverloadCandidate { callable, bindings } in candidates {
+            let Some(bindings) = bindings else {
+                continue;
+            };
+            let receiver_ty = typed_arguments[&request.call.arguments[bindings[0]].value].ty;
+            let subject = self.method_subject(receiver_ty)?;
+            let TypeKind::Nominal {
+                head: NominalHead::Declaration(found),
+                ..
+            } = self.signatures.types().kind(subject)?
+            else {
+                continue;
+            };
+            if found != owner {
+                continue;
+            }
+            let CanonicalTarget::Source(method) = callable.declaration() else {
+                unreachable!("source struct child is a source method");
+            };
+            let methods = match self.inherent_method_candidates(subject, &[*method])? {
+                Outcome::Known(methods) => methods,
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+            for candidate in methods
+                .into_iter()
+                .filter(|candidate| candidate.callable.id() == callable.id())
+            {
+                if !explicit.is_empty() && explicit.len() != candidate.explicit_parameters.len() {
+                    continue;
+                }
+                let actual = bindings
+                    .iter()
+                    .map(|&index| typed_arguments[&request.call.arguments[index].value].ty)
+                    .collect::<Vec<_>>();
+                let mut replacements = candidate.preset_replacements.clone();
+                replacements.extend(
+                    candidate
+                        .explicit_parameters
+                        .iter()
+                        .cloned()
+                        .zip(explicit.iter().copied()),
+                );
+                if exact_parameter_match(
+                    self.signatures.types(),
+                    &candidate.callable,
+                    &actual,
+                    &mut replacements,
+                )? {
+                    applicable.push(candidate);
+                }
+            }
+        }
+
+        match applicable.as_slice() {
+            [] => self
+                .overload_no_match(
+                    source,
+                    request.origin,
+                    &request.call,
+                    &presented,
+                    &typed_arguments,
+                )
+                .map(InvocationPlan::Complete),
+            [candidate] => {
+                self.prepare_selected_qualified_method(context, request, member, candidate.clone())
+            }
+            _ => self
+                .method_ambiguous(source, member, &applicable, false)
+                .map(InvocationPlan::Complete),
+        }
+    }
+
+    fn prepare_selected_qualified_method(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        request: DispatchRequest,
+        member: &Name,
+        candidate: MethodCandidate,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
+        let slots = match self.bind_call_slots(
+            source,
+            request.origin,
+            &candidate.callable,
+            &request.call.arguments,
+        )? {
+            Outcome::Known(slots) => slots,
+            outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+        };
+        let plan = self.prepare_application(
+            source,
+            ApplicationRequest {
+                origin: request.origin,
+                generic_parameters: candidate.callable.generic_parameters(),
+                slots: &slots,
+                result_template: candidate.callable.result(),
+                explicit_arguments: &request.call.type_arguments,
+                explicit_parameters: Some(&candidate.explicit_parameters),
+                preset_replacements: Some(&candidate.preset_replacements),
+                allowed_ownership_parameter: None,
+                ty: request.ty,
+                defer_underconstrained: false,
+            },
+        )?;
+        Ok(InvocationPlan::Application {
+            plan,
+            continuation: Box::new(InvocationFrame::qualified_method(
+                request.expression,
+                request.origin,
+                slots,
+                request.call.callee,
+                candidate,
+                member.origin(),
+            )),
+        })
     }
 
     fn select_overload(

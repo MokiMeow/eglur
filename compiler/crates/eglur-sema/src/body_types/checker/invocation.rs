@@ -1,5 +1,5 @@
 use super::application::ApplicationPlan;
-use super::dispatch::{DispatchContinuation, QualifiedTraitCallRequest};
+use super::dispatch::{DispatchContinuation, QualifiedMemberCallRequest};
 use super::tensor::TensorConstructorFrame;
 use super::*;
 
@@ -31,7 +31,7 @@ pub(super) struct InvocationFrame {
 }
 
 impl InvocationFrame {
-    pub(super) fn qualified_trait(
+    pub(super) fn qualified_method(
         expression: ExprId,
         origin: OriginId,
         slots: Vec<ApplicationSlot>,
@@ -149,9 +149,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     expression: callee_id,
                 })
             {
-                return self.prepare_qualified_trait_call(
+                return self.prepare_qualified_member_call(
                     context,
-                    QualifiedTraitCallRequest {
+                    QualifiedMemberCallRequest {
                         expression,
                         origin,
                         call,
