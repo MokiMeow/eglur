@@ -10,8 +10,8 @@ use eglur_hir::{
 use crate::{
     BodyTypes, ControlRegionKey, ControlTransfer, ControlTransferSource, DeclarationSignatures,
     DefId, ExpressionKey, FactState, IfBranch, LocalBindingId, ModuleId, NameResolution,
-    NormalContinuation, ReduceByCommitment, StatementKey, TypeKind, TypedOwnershipOperationKind,
-    TypedPlaceKind,
+    NormalContinuation, ReduceByCommitment, ResolutionKey, ResolvedName, StatementKey, TypeKind,
+    TypedOwnershipOperationKind, TypedPlaceKind,
 };
 
 use super::analysis::OwnershipAnalysisError;

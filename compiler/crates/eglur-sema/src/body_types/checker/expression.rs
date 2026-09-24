@@ -197,20 +197,23 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
             ExprKind::Member { receiver, member } => {
-                if matches!(
+                if let FactState::Known(ResolvedName::TypeMemberOwner(owner)) =
                     self.names.fact(ResolutionKey::Expression {
                         module,
                         expression: expression_id,
-                    }),
-                    FactState::Known(ResolvedName::TypeMemberOwner(_))
-                ) {
+                    })
+                {
+                    let owner = owner.clone();
                     return Ok(ExpressionPlan::Publish {
                         key,
-                        outcome: self.unsupported(
-                            TypecheckCapability::CheckClosures,
+                        outcome: self.type_qualified_trait_method_value(
+                            module,
                             source,
-                            origin,
-                        ),
+                            expression_id,
+                            &member,
+                            &owner,
+                            request,
+                        )?,
                     });
                 }
                 return Ok(ExpressionPlan::Value {

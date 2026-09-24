@@ -153,13 +153,15 @@ impl NodeHasher<'_> {
             | ExprKind::Unsafe(operand)
             | ExprKind::Result(operand)
             | ExprKind::Checked(operand)
-            | ExprKind::Member {
-                receiver: operand, ..
-            }
             | ExprKind::TupleProjection {
                 receiver: operand, ..
             } => {
                 children.push(BodyNode::Expression(*operand));
+            }
+            ExprKind::Member { receiver, .. } => {
+                if !self.is_type_member_owner(id) {
+                    children.push(BodyNode::Expression(*receiver));
+                }
             }
             ExprKind::Call(call) => {
                 children.push(BodyNode::Expression(call.callee));

@@ -1,5 +1,5 @@
 use super::application::ApplicationPlan;
-use super::dispatch::DispatchContinuation;
+use super::dispatch::{DispatchContinuation, QualifiedTraitCallRequest};
 use super::tensor::TensorConstructorFrame;
 use super::*;
 
@@ -31,6 +31,26 @@ pub(super) struct InvocationFrame {
 }
 
 impl InvocationFrame {
+    pub(super) fn qualified_trait(
+        expression: ExprId,
+        origin: OriginId,
+        slots: Vec<ApplicationSlot>,
+        callee: ExprId,
+        candidate: MethodCandidate,
+        member_origin: OriginId,
+    ) -> Self {
+        Self {
+            expression,
+            origin,
+            slots,
+            contract: InvocationContract::Method {
+                candidate: Box::new(candidate),
+                member_origin,
+                callee,
+            },
+        }
+    }
+
     pub(super) fn construction(
         expression: ExprId,
         origin: OriginId,
@@ -123,18 +143,23 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .last()
             .ok_or(BodyTypingError::WrongBodyExpression(call.callee))?;
         if let ExprKind::Member { receiver, member } = callee.kind() {
-            if matches!(
+            if let FactState::Known(ResolvedName::TypeMemberOwner(owner)) =
                 self.names.fact(ResolutionKey::Expression {
                     module,
                     expression: callee_id,
-                }),
-                FactState::Known(ResolvedName::TypeMemberOwner(_))
-            ) {
-                return Ok(InvocationPlan::Complete(self.unsupported(
-                    TypecheckCapability::CheckClosures,
-                    source,
-                    origin,
-                )));
+                })
+            {
+                return self.prepare_qualified_trait_call(
+                    context,
+                    QualifiedTraitCallRequest {
+                        expression,
+                        origin,
+                        call,
+                        ty: request,
+                        member,
+                        owner: owner.clone(),
+                    },
+                );
             }
             return self.prepare_method_call(
                 context,
@@ -718,7 +743,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .current_owner
                 .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
             self.method_dispatches.push(PendingMethodDispatch {
-                invocation: key,
+                site: MethodDispatchSite::Invocation(key),
                 owner,
                 location: SemanticLocation::origin(source.file(), *member_origin),
                 subject: *subject,

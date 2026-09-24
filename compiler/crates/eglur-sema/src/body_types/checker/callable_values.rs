@@ -15,6 +15,190 @@ enum CandidateOutcome {
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
+    pub(super) fn type_qualified_trait_method_value(
+        &mut self,
+        module: ModuleId,
+        source: &SemanticSource<'_>,
+        expression: ExprId,
+        member: &Name,
+        trait_target: &CanonicalTarget,
+        request: TypeRequest,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        let origin = self.expression_origin(source, expression)?;
+        let Some(expected) = request.expected else {
+            return self.missing_callable_value_context(source, origin, request);
+        };
+        let TypeKind::Callable { parameters, .. } = self.signatures.types().kind(expected)? else {
+            return self.missing_callable_value_context(source, origin, request);
+        };
+        let Some(&receiver_type) = parameters.first() else {
+            return self.type_argument_inference_failure(source, origin);
+        };
+        let Some(name) = NameKey::from_hir(member) else {
+            return Ok(Outcome::Poisoned(
+                source.invalid_poison(member.origin()).cloned().ok_or(
+                    BodyTypingError::MissingOriginSpan {
+                        file: source.file(),
+                        origin: member.origin(),
+                    },
+                )?,
+            ));
+        };
+        if !matches!(
+            self.signatures.declaration(trait_target),
+            FactState::Known(DeclarationSignature::Trait { .. })
+        ) {
+            return Ok(self.unsupported(TypecheckCapability::CheckClosures, source, origin));
+        }
+        if !self.recorder.require(
+            CompileCapability::Typecheck(TypecheckCapability::ResolveMethods),
+            SemanticLocation::origin(source.file(), member.origin()),
+        ) {
+            return Ok(Outcome::Unperformed);
+        }
+        let methods = self
+            .signatures
+            .trait_methods(trait_target)
+            .iter()
+            .filter(|method| method.name() == &name)
+            .map(|method| method.declaration().clone())
+            .collect::<Vec<_>>();
+        if methods.is_empty() {
+            return self.method_not_found(source, member);
+        }
+        if member.is_bang() {
+            return Ok(self.unsupported(TypecheckCapability::CheckClosures, source, origin));
+        }
+
+        let mut matched = Vec::new();
+        let mut presented = Vec::new();
+        let mut underconstrained = false;
+        let mut failed_normalization = None;
+        let mut receiver_matched = false;
+        let mut missing_subject = None;
+        for method in methods {
+            let callable = match self.signatures.declaration(&method) {
+                FactState::Known(DeclarationSignature::Callable(id)) => self
+                    .signatures
+                    .callable(*id)
+                    .cloned()
+                    .ok_or(BodyTypingError::UnknownCallable(*id))?,
+                FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
+                FactState::Unperformed => return Ok(Outcome::Unperformed),
+                _ => continue,
+            };
+            if callable.is_bang() {
+                continue;
+            }
+            let Some(subject) =
+                self.qualified_receiver_subject(trait_target, &callable, receiver_type)?
+            else {
+                continue;
+            };
+            receiver_matched = true;
+            missing_subject = Some(subject);
+            let candidates = match self.trait_method_candidates_for_owner(
+                source,
+                member.origin(),
+                subject,
+                &name,
+                trait_target,
+            )? {
+                Outcome::Known(candidates) => candidates,
+                outcome => return Ok(outcome.map(|_| unreachable!())),
+            };
+            for candidate in candidates
+                .into_iter()
+                .filter(|candidate| candidate.callable.id() == callable.id())
+            {
+                let specialized = candidate
+                    .callable
+                    .with_specialized_contract(
+                        candidate.explicit_parameters.iter().cloned(),
+                        candidate
+                            .callable
+                            .parameters()
+                            .iter()
+                            .map(CallableParameter::ty),
+                        candidate.callable.result(),
+                    )
+                    .ok_or(BodyTypingError::MethodSpecializationArityMismatch(
+                        callable.id(),
+                    ))?;
+                presented.push(specialized.clone());
+                match self.candidate_callable_value(specialized, Some(expected), true)? {
+                    CandidateOutcome::Ready(mut value)
+                        if self.signatures.types().is_assignable(value.ty, expected)? =>
+                    {
+                        value
+                            .replacements
+                            .extend(candidate.preset_replacements.clone());
+                        matched.push((candidate, value));
+                    }
+                    CandidateOutcome::Underconstrained => underconstrained = true,
+                    CandidateOutcome::NormalizationFailed(failure) => {
+                        failed_normalization = Some(failure);
+                    }
+                    CandidateOutcome::Ready(_) | CandidateOutcome::Mismatch => {}
+                }
+            }
+        }
+
+        let (candidate, selected) = match matched.len() {
+            1 => matched.pop().expect("one compatible method"),
+            n if n > 1 => {
+                let callables = matched
+                    .iter()
+                    .map(|(_, value)| value.callable.clone())
+                    .collect::<Vec<_>>();
+                return self.overload_ambiguous(source, origin, &callables);
+            }
+            _ if !receiver_matched || underconstrained => {
+                return self.type_argument_inference_failure(source, origin);
+            }
+            _ if presented.is_empty() => {
+                return self.qualified_trait_impl_missing(
+                    source,
+                    member.origin(),
+                    trait_target,
+                    missing_subject.expect("matched receiver determines Self"),
+                );
+            }
+            _ if failed_normalization.is_some() => {
+                return self.normalization_failure_at(
+                    source,
+                    origin,
+                    failed_normalization.expect("normalization failure exists"),
+                );
+            }
+            _ => return self.callable_value_no_match(source, origin, Some(expected), &presented),
+        };
+        let result =
+            self.publish_callable_value(module, source, expression, origin, selected.clone())?;
+        if matches!(result, Outcome::Known(_)) {
+            let MethodDispatchTemplate::Trait {
+                subject,
+                trait_ref,
+                method,
+            } = candidate.dispatch
+            else {
+                unreachable!("qualified trait method retains a trait dispatch");
+            };
+            let trait_ref = self.specialize_trait_ref(&trait_ref, &selected.replacements)?;
+            self.method_dispatches.push(PendingMethodDispatch {
+                site: MethodDispatchSite::CallableValue(ExpressionKey::new(module, expression)),
+                owner: self
+                    .current_owner
+                    .ok_or(BodyTypingError::MissingDiagnosticOwner)?,
+                location: SemanticLocation::origin(source.file(), member.origin()),
+                subject,
+                trait_ref,
+                method,
+            });
+        }
+        Ok(result)
+    }
+
     pub(super) fn type_named_callable_value(
         &mut self,
         module: ModuleId,
@@ -113,6 +297,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             _ => return self.callable_value_no_match(source, origin, expected, &candidates),
         };
 
+        self.publish_callable_value(module, source, expression, origin, selected)
+    }
+
+    fn publish_callable_value(
+        &mut self,
+        module: ModuleId,
+        source: &SemanticSource<'_>,
+        expression: ExprId,
+        origin: OriginId,
+        selected: CallableValueCandidate,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
         if let Some(poison) = self.validate_type_arguments(
             source,
             origin,

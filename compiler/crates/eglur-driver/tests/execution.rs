@@ -1131,6 +1131,179 @@ fn generic_display_adapter_value_resolves_builtin_impl() {
 }
 
 #[test]
+fn qualified_trait_method_value_executes_checked_impl() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link { fn forward(self: &Self) -> i64 }\n",
+        "impl Link for Bool { fn forward(self: &Self) -> i64 = 17 }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  let f: Fn(&Bool) -> i64 = Link.forward\n",
+        "  yield Ok(to_str(f(&value)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "17"
+    );
+}
+
+#[test]
+fn qualified_trait_method_call_executes_checked_impl() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link { fn forward(self: &Self) -> i64 }\n",
+        "impl Link for Bool { fn forward(self: &Self) -> i64 = 19 }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  yield Ok(to_str(Link.forward(&value)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "19"
+    );
+}
+
+#[test]
+fn qualified_trait_default_method_keeps_its_witness() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link[A] {\n",
+        "  fn linked(self: &Self, value: A) -> A\n",
+        "  fn forward(self: &Self, value: A) -> A = self.linked(value)\n",
+        "}\n",
+        "impl Link[i64] for Bool { fn linked(self: &Self, value: i64) -> i64 = value }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  let f: Fn(&Bool, i64) -> i64 = Link.forward\n",
+        "  yield Ok(to_str(wrapping_add(f(&value, 7), Link.forward(&value, 8))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "15"
+    );
+}
+
+#[test]
+fn qualified_trait_methods_keep_generic_bound_witnesses() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Rank { fn rank(self: &Self) -> i64 }\n",
+        "impl Rank for Bool { fn rank(self: &Self) -> i64 = 11 }\n",
+        "fn direct[T: Rank](value: &T) -> i64 = Rank.rank(value)\n",
+        "fn indirect[T: Rank](value: &T) -> i64 {\n",
+        "  let f: Fn(&T) -> i64 = Rank.rank\n",
+        "  yield f(value)\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  yield Ok(to_str(wrapping_add(direct(&value), indirect(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "22"
+    );
+}
+
+#[test]
+fn qualified_trait_calls_bypass_visible_method_ambiguity() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Left { fn read(self: &Self) -> i64 }\n",
+        "trait Right { fn read(self: &Self) -> i64 }\n",
+        "impl Left for Bool { fn read(self: &Self) -> i64 = 1 }\n",
+        "impl Right for Bool { fn read(self: &Self) -> i64 = 2 }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  yield Ok(to_str(wrapping_add(Left.read(&value), Right.read(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "3");
+}
+
+#[test]
+fn qualified_trait_method_normalizes_associated_result() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Readable { type Elem\nfn read(self: &Self) -> Self::Elem }\n",
+        "struct Good {}\n",
+        "impl Readable for Good {\n",
+        "  type Elem = i64\n",
+        "  fn read(self: &Self) -> Self::Elem = 8\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Good{}\n",
+        "  let f: Fn(&Good) -> i64 = Readable.read\n",
+        "  yield Ok(to_str(wrapping_add(f(&value), Readable.read(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "16"
+    );
+}
+
+#[test]
+fn reexported_qualified_trait_method_retains_impl_identity() {
+    let (program, catalog, profile) = compile_files(
+        [
+            (
+                "dep.eglur",
+                concat!(
+                    "pub trait Rank { fn rank(self: &Self) -> i64 }\n",
+                    "pub struct Count {}\n",
+                    "impl Rank for Count { fn rank(self: &Self) -> i64 = 5 }\n",
+                ),
+            ),
+            ("bridge.eglur", "pub import dep::Rank as PublicRank\n"),
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::PublicRank\n",
+                    "import dep::Count\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let value = Count{}\n",
+                    "  let f: Fn(&Count) -> i64 = PublicRank.rank\n",
+                    "  let direct = PublicRank.rank(&value)\n",
+                    "  let module_qualified = dep::Rank.rank(&value)\n",
+                    "  yield Ok(to_str(wrapping_add(wrapping_add(f(&value), direct), module_qualified)))\n",
+                    "}\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "15"
+    );
+}
+
+#[test]
+fn trusted_qualified_display_method_uses_checked_builtin_route() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = 7\n",
+        "  let f: Fn(&i64) -> Str = Display.to_str\n",
+        "  yield Ok(f(&value))\n",
+        "}\n",
+    ));
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = 8\n",
+        "  yield Ok(Display.to_str(&value))\n",
+        "}\n",
+    ));
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "8");
+}
+
+#[test]
 fn display_adapter_value_keeps_its_route_when_passed_to_a_function() {
     let (program, catalog, profile) = compile_single(concat!(
         "struct Label { field value: i64 }\n",

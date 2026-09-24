@@ -15,8 +15,8 @@ use crate::{
     BodyTypes, CallableSignature, CallableSignatureId, CanonicalTarget, CheckedDispatch,
     CheckedInvocation, DeclarationCollection, DeclarationSignature, DeclarationSignatures, DefId,
     ExpressionKey, FactState, InvocationTarget, LocalBindingId, ModuleId, NameResolution,
-    ReduceByCommitment, ReferenceMutability, SemanticSource, TraitEvidence, TypeKind,
-    TypeStoreError,
+    ReduceByCommitment, ReferenceMutability, ResolutionKey, ResolvedName, SemanticSource,
+    TraitEvidence, TypeKind, TypeStoreError,
 };
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -584,9 +584,18 @@ impl BodyCollector<'_> {
                 | ExprKind::Unsafe(value)
                 | ExprKind::Result(value)
                 | ExprKind::Checked(value) => pending.push(*value),
-                ExprKind::Member { receiver, .. } | ExprKind::TupleProjection { receiver, .. } => {
-                    pending.push(*receiver)
+                ExprKind::Member { receiver, .. } => {
+                    if !matches!(
+                        self.names.fact(ResolutionKey::Expression {
+                            module: self.module,
+                            expression: id,
+                        }),
+                        FactState::Known(ResolvedName::TypeMemberOwner(_))
+                    ) {
+                        pending.push(*receiver);
+                    }
                 }
+                ExprKind::TupleProjection { receiver, .. } => pending.push(*receiver),
                 ExprKind::Tuple(values) | ExprKind::Array(values) => {
                     pending.extend(values.iter().rev().copied())
                 }

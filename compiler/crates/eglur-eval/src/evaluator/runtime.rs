@@ -168,7 +168,21 @@ impl<'a> Evaluator<'a> {
                 Ok(None) => invalid_flow(),
                 Err(flow) => flow,
             },
-            ExprKind::Member { receiver, .. } => self.eval_member(frame, expression, receiver),
+            ExprKind::Member { receiver, .. } => {
+                let key = ExpressionKey::new(frame.module, expression);
+                if matches!(
+                    self.view
+                        .program
+                        .resolution()
+                        .body_types()
+                        .callable_value(key),
+                    FactState::Known(_)
+                ) {
+                    self.eval_callable_value(frame, key)
+                } else {
+                    self.eval_member(frame, expression, receiver)
+                }
+            }
             ExprKind::TupleProjection { receiver, index } => {
                 let Ok(index) = index.parse::<usize>() else {
                     return invalid_flow();

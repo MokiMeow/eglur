@@ -1,5 +1,6 @@
 use eglur_driver::{
-    CompilerSession, FileInput, FileSetRequest, SessionOptions, SupportProfile, TrustedCatalog,
+    CompilerSession, FileInput, FileSetRequest, SessionOptions, SupportProfile, SupportProfileId,
+    SupportSchemaVersion, TrustedCatalog,
 };
 use eglur_hir::ExprKind;
 use eglur_sema::{
@@ -98,7 +99,12 @@ fn trait_qualified_member_keeps_a_type_owner_without_a_runtime_trait_value() {
     };
     assert_eq!(owner.module(), module);
     assert!(!diagnostics.iter().any(|code| code == "NAME_NOT_FOUND"));
-    assert!(missing.contains(&CompileCapability::Typecheck(
+    assert!(
+        diagnostics
+            .iter()
+            .any(|code| code == "TRAIT_BOUND_NOT_SATISFIED")
+    );
+    assert!(!missing.contains(&CompileCapability::Typecheck(
         TypecheckCapability::CheckClosures
     )));
 }
@@ -123,7 +129,12 @@ fn imported_trait_qualified_member_keeps_the_original_owner() {
     };
     assert_ne!(owner.module(), module);
     assert!(!diagnostics.iter().any(|code| code == "NAME_NOT_FOUND"));
-    assert!(missing.contains(&CompileCapability::Typecheck(
+    assert!(
+        diagnostics
+            .iter()
+            .any(|code| code == "TRAIT_BOUND_NOT_SATISFIED")
+    );
+    assert!(!missing.contains(&CompileCapability::Typecheck(
         TypecheckCapability::CheckClosures
     )));
 }
@@ -148,7 +159,12 @@ fn module_qualified_trait_member_keeps_the_original_owner() {
     };
     assert_ne!(owner.module(), module);
     assert!(!diagnostics.iter().any(|code| code == "NAME_NOT_FOUND"));
-    assert!(missing.contains(&CompileCapability::Typecheck(
+    assert!(
+        diagnostics
+            .iter()
+            .any(|code| code == "TRAIT_BOUND_NOT_SATISFIED")
+    );
+    assert!(!missing.contains(&CompileCapability::Typecheck(
         TypecheckCapability::CheckClosures
     )));
 }
@@ -209,7 +225,12 @@ fn reexported_trait_member_keeps_the_original_type_owner() {
     };
     assert_ne!(owner.module(), module);
     assert!(!diagnostics.iter().any(|code| code == "NAME_NOT_FOUND"));
-    assert!(missing.contains(&CompileCapability::Typecheck(
+    assert!(
+        diagnostics
+            .iter()
+            .any(|code| code == "TRAIT_BOUND_NOT_SATISFIED")
+    );
+    assert!(!missing.contains(&CompileCapability::Typecheck(
         TypecheckCapability::CheckClosures
     )));
 }
@@ -225,7 +246,12 @@ fn grouped_trait_qualifier_keeps_its_type_identity() {
     );
     assert!(matches!(fact, Some(ResolvedName::TypeMemberOwner(_))));
     assert!(!diagnostics.iter().any(|code| code == "NAME_NOT_FOUND"));
-    assert!(missing.contains(&CompileCapability::Typecheck(
+    assert!(
+        diagnostics
+            .iter()
+            .any(|code| code == "TRAIT_BOUND_NOT_SATISFIED")
+    );
+    assert!(!missing.contains(&CompileCapability::Typecheck(
         TypecheckCapability::CheckClosures
     )));
 }
@@ -273,7 +299,79 @@ fn trusted_trait_member_keeps_external_owner() {
         Some(ResolvedName::TypeMemberOwner(CanonicalTarget::External(_)))
     ));
     assert!(!diagnostics.iter().any(|code| code == "NAME_NOT_FOUND"));
-    assert!(missing.contains(&CompileCapability::Typecheck(
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(!missing.contains(&CompileCapability::Typecheck(
         TypecheckCapability::CheckClosures
     )));
+}
+
+#[test]
+fn qualified_trait_method_without_impl_reports_unsatisfied_bound() {
+    let prefix = "trait Rank { fn rank(self: &Self) -> i64 }\nstruct Count {}\n";
+    for body in [
+        "fn source(value: &Count) -> i64 = Rank.rank(value)\n",
+        "fn source() -> Unit { let f: Fn(&Count) -> i64 = Rank.rank\nyield () }\n",
+    ] {
+        let codes = diagnostic_codes(&format!("{prefix}{body}"));
+        assert_eq!(codes, ["TRAIT_BOUND_NOT_SATISFIED"], "{body}");
+    }
+}
+
+#[test]
+fn generic_qualified_trait_method_without_impl_reports_unsatisfied_bound() {
+    let prefix = "trait Link[A] { fn forward(self: &Self, value: A) -> A }\nstruct Count {}\n";
+    for body in [
+        "fn source(value: &Count) -> i64 = Link.forward(value, 1)\n",
+        "fn source() -> Unit { let f: Fn(&Count, i64) -> i64 = Link.forward\nyield () }\n",
+    ] {
+        let codes = diagnostic_codes(&format!("{prefix}{body}"));
+        assert_eq!(codes, ["TRAIT_BOUND_NOT_SATISFIED"], "{body}");
+    }
+}
+
+#[test]
+fn qualified_trait_call_shape_precedes_argument_typing() {
+    let codes = diagnostic_codes(concat!(
+        "trait Link { fn forward(self: &Self, extra: i64) -> i64 }\n",
+        "impl Link for Bool { fn forward(self: &Self, extra: i64) -> i64 = extra }\n",
+        "fn bad(value: &Bool) -> i64 = Link.forward(extra=1, \"not checked\")\n",
+    ));
+    assert_eq!(codes, ["CALL_POSITIONAL_AFTER_NAMED"]);
+}
+
+#[test]
+fn qualified_trait_value_requires_an_expected_receiver_type() {
+    let codes = diagnostic_codes(concat!(
+        "trait Rank { fn rank(self: &Self) -> i64 }\n",
+        "impl Rank for Bool { fn rank(self: &Self) -> i64 = 1 }\n",
+        "fn source() -> Unit { let f = Rank.rank\nyield () }\n",
+    ));
+    assert_eq!(codes, ["TYPE_ARG_INFERENCE_FAILED"]);
+}
+
+#[test]
+fn qualified_trait_value_requires_method_resolution_capability() {
+    let source = concat!(
+        "trait Rank { fn rank(self: &Self) -> i64 }\n",
+        "impl Rank for Bool { fn rank(self: &Self) -> i64 = 1 }\n",
+        "fn source() -> Unit { let f: Fn(&Bool) -> i64 = Rank.rank\nyield () }\n",
+    );
+    let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
+    let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let profile = SupportProfile::compile_only(
+        SupportSchemaVersion::V1,
+        SupportProfileId::new("without-methods-v1").unwrap(),
+        SupportProfile::semantic_core_v1()
+            .compile_capabilities()
+            .filter(|capability| {
+                *capability != CompileCapability::Typecheck(TypecheckCapability::ResolveMethods)
+            }),
+    )
+    .unwrap();
+
+    let analysis = session.resolve(&profile, Some(&catalog)).unwrap();
+    assert!(analysis.trace().missing().any(|demand| {
+        demand.capability() == CompileCapability::Typecheck(TypecheckCapability::ResolveMethods)
+    }));
 }

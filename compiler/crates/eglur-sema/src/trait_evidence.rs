@@ -15,9 +15,9 @@ use crate::{
     BodyTypes, CallableInstanceId, CanonicalTarget, DeclarationCollection, DeclarationSignatures,
     DefId, DuplicateFact, EvidenceEnvironmentId, EvidenceProofId, ExpressionKey, FactState,
     FactTable, GenericParameterId, IdentityOverflow, InvocationFact, InvocationTarget,
-    PendingMethodDispatch, PendingTraitObligation, SemanticFact, SemanticLocation, SemanticSource,
-    SubstId, TraitEnvironment, TraitEnvironmentError, TraitImplEvidence, TraitObligation,
-    TraitProof, TraitRef, TypeId, WitnessSlotId,
+    MethodDispatchSite, PendingMethodDispatch, PendingTraitObligation, SemanticFact,
+    SemanticLocation, SemanticSource, SubstId, TraitEnvironment, TraitEnvironmentError,
+    TraitImplEvidence, TraitObligation, TraitProof, TraitRef, TypeId, WitnessSlotId,
 };
 
 mod proof;
@@ -310,15 +310,16 @@ pub fn resolve_trait_evidence(
             .or_default()
             .push(obligation);
     }
-    let mut method_dispatches = BTreeMap::new();
+    let mut invocation_dispatches = BTreeMap::new();
+    let mut callable_dispatches = BTreeMap::new();
     for dispatch in body_types.method_dispatches() {
-        if method_dispatches
-            .insert(dispatch.invocation(), dispatch)
-            .is_some()
-        {
-            return Err(TraitEvidenceError::DuplicateMethodDispatch(
-                dispatch.invocation(),
-            ));
+        let site = dispatch.site();
+        let target = match site {
+            MethodDispatchSite::Invocation(_) => &mut invocation_dispatches,
+            MethodDispatchSite::CallableValue(_) => &mut callable_dispatches,
+        };
+        if target.insert(site.key(), dispatch).is_some() {
+            return Err(TraitEvidenceError::DuplicateMethodDispatch(site.key()));
         }
     }
     let mut checked = FactTable::new();
@@ -327,7 +328,7 @@ pub fn resolve_trait_evidence(
     let mut proofs = ProofArena::default();
     for (key, invocation) in invocations {
         if let InvocationTarget::CallableValue { callee, ty } = invocation.target() {
-            if obligations.contains_key(&key) || method_dispatches.contains_key(&key) {
+            if obligations.contains_key(&key) || invocation_dispatches.contains_key(&key) {
                 return Err(TraitEvidenceError::UnexpectedIndirectEvidence(key));
             }
             checked.insert(
@@ -354,51 +355,18 @@ pub fn resolve_trait_evidence(
                 continue;
             }
         };
-        let dispatch = if let Some(pending) = method_dispatches.get(&key) {
-            let obligation = TraitObligation::new(pending.subject(), pending.trait_ref().clone());
-            match trait_environment.prove_for_owner(
-                pending.owner(),
+        let dispatch = if let Some(pending) = invocation_dispatches.get(&key) {
+            match resolve_method_dispatch(
+                pending,
+                collection,
+                &source_map,
                 signatures,
-                obligation.clone(),
+                trait_environment,
+                diagnostics,
+                &mut proofs,
             )? {
-                TraitProof::Bound(witness) => CheckedDispatch::Bound {
-                    witness,
-                    method: pending.method().clone(),
-                },
-                TraitProof::Implementation(evidence) => {
-                    let proof = proofs.materialize(
-                        pending.owner(),
-                        obligation,
-                        TraitProof::Implementation(evidence.clone()),
-                        signatures,
-                        trait_environment,
-                    )?;
-                    checked_impl_dispatch(trait_environment, pending, evidence, proof)?
-                }
-                TraitProof::Poisoned(found) => {
-                    checked.insert(key, SemanticFact::Poisoned(found))?;
-                    continue;
-                }
-                TraitProof::InvalidArgument(violation) => {
-                    let poison = record_invalid_impl_argument(
-                        &source_map,
-                        pending.location(),
-                        violation,
-                        diagnostics,
-                    )?;
-                    checked.insert(key, SemanticFact::Poisoned(poison))?;
-                    continue;
-                }
-                TraitProof::Unsatisfied(failed) | TraitProof::Ambiguous(failed) => {
-                    let poison = record_unsatisfied_bound(
-                        collection,
-                        &source_map,
-                        signatures,
-                        pending.owner(),
-                        pending.location(),
-                        &failed,
-                        diagnostics,
-                    )?;
+                Ok(dispatch) => dispatch,
+                Err(poison) => {
                     checked.insert(key, SemanticFact::Poisoned(poison))?;
                     continue;
                 }
@@ -422,9 +390,6 @@ pub fn resolve_trait_evidence(
 
     let mut callable_values = FactTable::new();
     for (key, instance) in body_types.callable_values() {
-        if method_dispatches.contains_key(&key) {
-            return Err(TraitEvidenceError::UnexpectedCallableValueEvidence(key));
-        }
         let entries = match resolve_obligations(
             collection,
             &source_map,
@@ -440,7 +405,25 @@ pub fn resolve_trait_evidence(
                 continue;
             }
         };
-        let target = callable_declaration(instance, body_types, signatures)?;
+        let dispatch = if let Some(pending) = callable_dispatches.get(&key) {
+            match resolve_method_dispatch(
+                pending,
+                collection,
+                &source_map,
+                signatures,
+                trait_environment,
+                diagnostics,
+                &mut proofs,
+            )? {
+                Ok(dispatch) => dispatch,
+                Err(poison) => {
+                    callable_values.insert(key, SemanticFact::Poisoned(poison))?;
+                    continue;
+                }
+            }
+        } else {
+            CheckedDispatch::Direct(callable_declaration(instance, body_types, signatures)?)
+        };
         let environment = intern_environment(
             entries.into_boxed_slice(),
             &mut environments,
@@ -449,7 +432,7 @@ pub fn resolve_trait_evidence(
         callable_values.insert(
             key,
             SemanticFact::Known(CheckedCallableValue {
-                dispatch: CheckedDispatch::Direct(target),
+                dispatch,
                 evidence_environment: environment,
             }),
         )?;
@@ -549,6 +532,63 @@ fn checked_impl_dispatch(
         method: pending.method().clone(),
         proof,
     })
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "trait proof construction retains the semantic and diagnostic owners"
+)]
+fn resolve_method_dispatch(
+    pending: &PendingMethodDispatch,
+    collection: &DeclarationCollection,
+    source_map: &BTreeMap<FileId, &SemanticSource<'_>>,
+    signatures: &mut DeclarationSignatures,
+    trait_environment: &mut TraitEnvironment,
+    diagnostics: &mut DiagnosticStore,
+    proofs: &mut ProofArena,
+) -> Result<Result<CheckedDispatch, Poison>, TraitEvidenceError> {
+    let obligation = TraitObligation::new(pending.subject(), pending.trait_ref().clone());
+    Ok(
+        match trait_environment.prove_for_owner(pending.owner(), signatures, obligation.clone())? {
+            TraitProof::Bound(witness) => Ok(CheckedDispatch::Bound {
+                witness,
+                method: pending.method().clone(),
+            }),
+            TraitProof::Implementation(evidence) => {
+                let proof = proofs.materialize(
+                    pending.owner(),
+                    obligation,
+                    TraitProof::Implementation(evidence.clone()),
+                    signatures,
+                    trait_environment,
+                )?;
+                Ok(checked_impl_dispatch(
+                    trait_environment,
+                    pending,
+                    evidence,
+                    proof,
+                )?)
+            }
+            TraitProof::Poisoned(poison) => Err(poison),
+            TraitProof::InvalidArgument(violation) => Err(record_invalid_impl_argument(
+                source_map,
+                pending.location(),
+                violation,
+                diagnostics,
+            )?),
+            TraitProof::Unsatisfied(failed) | TraitProof::Ambiguous(failed) => {
+                Err(record_unsatisfied_bound(
+                    collection,
+                    source_map,
+                    signatures,
+                    pending.owner(),
+                    pending.location(),
+                    &failed,
+                    diagnostics,
+                )?)
+            }
+        },
+    )
 }
 
 fn intern_environment(

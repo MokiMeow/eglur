@@ -142,6 +142,47 @@ fn bound_priority_does_not_change_semantic_contract_or_evidence_fingerprints() {
 }
 
 #[test]
+fn qualified_trait_aliases_share_the_same_body_fingerprint() {
+    let resolve_alias = |import: &str, owner: &str| {
+        let main = format!(
+            concat!(
+                "import {import}\nimport dep::Count\n",
+                "pub fn score(value: &Count) -> i64 = {owner}.rank(value)\n",
+                "pub fn from_value(value: &Count) -> i64 {{\n",
+                "  let f: Fn(&Count) -> i64 = {owner}.rank\n",
+                "  yield f(value)\n",
+                "}}\n",
+            ),
+            import = import,
+            owner = owner,
+        );
+        resolve(
+            [
+                file(
+                    "dep.eglur",
+                    concat!(
+                        "pub trait Rank { fn rank(self: &Self) -> i64 }\n",
+                        "pub struct Count {}\n",
+                        "impl Rank for Count { fn rank(self: &Self) -> i64 = 3 }\n",
+                    ),
+                ),
+                file("bridge.eglur", "pub import dep::Rank as PublicRank\n"),
+                file("main.eglur", &main),
+            ],
+            "main.eglur",
+            false,
+        )
+    };
+
+    let direct = resolve_alias("dep::Rank", "Rank");
+    let reexported = resolve_alias("bridge::PublicRank", "PublicRank");
+    assert_eq!(
+        outputs(&direct, "main").body(),
+        outputs(&reexported, "main").body()
+    );
+}
+
+#[test]
 fn normalized_owner_evidence_fingerprints_ignore_declaration_order() {
     let snapshot = |prefix: &str| {
         let source = format!(

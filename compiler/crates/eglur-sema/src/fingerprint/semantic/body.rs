@@ -247,6 +247,16 @@ struct NodeHasher<'a> {
 }
 
 impl NodeHasher<'_> {
+    fn is_type_member_owner(&self, id: ExprId) -> bool {
+        matches!(
+            self.names.fact(ResolutionKey::Expression {
+                module: self.module,
+                expression: id,
+            }),
+            FactState::Known(ResolvedName::TypeMemberOwner(_))
+        )
+    }
+
     fn expression(&mut self, id: ExprId) -> Result<FingerprintDigest, SemanticFingerprintError> {
         self.hash_body_nodes(BodyNode::Expression(id))
     }
@@ -459,7 +469,19 @@ impl NodeHasher<'_> {
             }
             ExprKind::Member { receiver, member } => {
                 builder.write_u8(9);
-                builder.write_digest(self.expression_digest(*receiver)?);
+                if self.is_type_member_owner(id) {
+                    builder.write_u8(1);
+                    self.write_resolution(
+                        builder,
+                        ResolutionKey::Expression {
+                            module: self.module,
+                            expression: id,
+                        },
+                    )?;
+                } else {
+                    builder.write_u8(0);
+                    builder.write_digest(self.expression_digest(*receiver)?);
+                }
                 write_hir_name(builder, member);
             }
             ExprKind::TupleProjection { receiver, index } => {

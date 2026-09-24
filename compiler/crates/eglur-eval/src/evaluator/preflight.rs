@@ -166,6 +166,16 @@ impl<'a> Planner<'a> {
             }
             ExprKind::Member { receiver, .. } => {
                 let key = ExpressionKey::new(module, expression);
+                if matches!(
+                    self.view
+                        .program
+                        .resolution()
+                        .body_types()
+                        .callable_value(key),
+                    FactState::Known(_)
+                ) {
+                    return self.plan_callable_value(key, witnesses);
+                }
                 let FactState::Known(member) =
                     self.view.program.resolution().body_types().member(key)
                 else {

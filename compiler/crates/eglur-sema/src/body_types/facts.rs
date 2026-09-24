@@ -340,9 +340,25 @@ impl PendingTraitObligation {
 }
 
 /// Trait-method target selected during body typing and proved after the body.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MethodDispatchSite {
+    Invocation(ExpressionKey),
+    CallableValue(ExpressionKey),
+}
+
+impl MethodDispatchSite {
+    #[must_use]
+    pub const fn key(self) -> ExpressionKey {
+        match self {
+            Self::Invocation(key) | Self::CallableValue(key) => key,
+        }
+    }
+}
+
+/// Trait-method target selected during body typing and proved after the body.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PendingMethodDispatch {
-    pub(super) invocation: ExpressionKey,
+    pub(super) site: MethodDispatchSite,
     pub(super) owner: DefId,
     pub(super) location: SemanticLocation,
     pub(super) subject: TypeId,
@@ -352,8 +368,8 @@ pub struct PendingMethodDispatch {
 
 impl PendingMethodDispatch {
     #[must_use]
-    pub const fn invocation(&self) -> ExpressionKey {
-        self.invocation
+    pub const fn site(&self) -> MethodDispatchSite {
+        self.site
     }
 
     #[must_use]
