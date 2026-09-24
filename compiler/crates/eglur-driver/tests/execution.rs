@@ -1047,6 +1047,22 @@ fn bounded_generic_function_value_carries_witness_into_indirect_call() {
 }
 
 #[test]
+fn trusted_wrapping_hook_executes_through_a_function_value() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let add: Fn(i8, i8) -> i8 = wrapping_add\n",
+        "  let maximum: i8 = 127\n",
+        "  yield Ok(to_str(add(maximum, 1)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "-128"
+    );
+}
+
+#[test]
 fn named_function_values_execute_through_locals_and_parameters() {
     let (program, catalog, profile) = compile_single(concat!(
         "fn identity(value: Str) -> Str = value\n",
