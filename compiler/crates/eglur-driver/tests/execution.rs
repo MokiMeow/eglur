@@ -1063,6 +1063,137 @@ fn trusted_wrapping_hook_executes_through_a_function_value() {
 }
 
 #[test]
+fn trusted_display_adapter_value_executes_scalar_hook() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let stringify: Fn(i64) -> Str = to_str\n",
+        "  yield Ok(stringify(7))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn trusted_display_adapter_value_captures_source_impl() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "import std::test::emit!\n",
+        "struct Label { field value: i64 }\n",
+        "impl Display for Label {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(self.value)\n",
+        "}\n",
+        "fn make!() -> Label { emit!(\"make\")\nyield Label { value: 8 } }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let stringify: Fn(Label) -> Str = to_str\n",
+        "  yield Ok(stringify(make!()))\n",
+        "}\n",
+    ));
+
+    let result = completed(&program, &catalog, &profile);
+    assert_eq!(ok_str(result.value()), "8");
+    assert_eq!(
+        result.events(),
+        [eglur_driver::RuntimeEvent::Emitted("make".into())]
+    );
+}
+
+#[test]
+fn generic_display_adapter_value_preserves_bound_witness() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Label { field value: i64 }\n",
+        "impl Display for Label {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(self.value)\n",
+        "}\n",
+        "fn stringify[T: Display](value: T) -> Str {\n",
+        "  let f: Fn(T) -> Str = to_str\n",
+        "  yield f(value)\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] = Ok(stringify(Label { value: 9 }))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "9");
+}
+
+#[test]
+fn generic_display_adapter_value_resolves_builtin_impl() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn stringify[T: Display](value: T) -> Str {\n",
+        "  let f: Fn(T) -> Str = to_str\n",
+        "  yield f(value)\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] = Ok(stringify(11))\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "11"
+    );
+}
+
+#[test]
+fn display_adapter_value_keeps_its_route_when_passed_to_a_function() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Label { field value: i64 }\n",
+        "impl Display for Label {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(self.value)\n",
+        "}\n",
+        "fn invoke(f: Fn(Label) -> Str) -> Str = f(Label { value: 12 })\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let stringify: Fn(Label) -> Str = to_str\n",
+        "  yield Ok(invoke(stringify))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "12"
+    );
+}
+
+#[test]
+fn display_adapter_value_rejects_unsupported_impl_before_effects() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "import std::test::emit!\n",
+        "struct Label {\n",
+        "  field value: i64\n",
+        "  prop count: i64 { fn get_count(self: &Self) -> i64 = self.value }\n",
+        "}\n",
+        "impl Display for Label {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(self.count)\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  emit!(\"before\")\n",
+        "  let stringify: Fn(Label) -> Str = to_str\n",
+        "  yield Ok(stringify(Label { value: 5 }))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        execute(&program, &profile, &catalog, EvaluationLimits::default()),
+        ExecutionAttempt::Unsupported(SupportReason::Feature(
+            eglur_driver::UnsupportedFeature::PropertyRead,
+        ))
+    );
+}
+
+#[test]
+fn display_adapter_value_rejects_unsupported_scalar_hook() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let stringify: Fn(f32) -> Str = to_str\n",
+        "  yield Ok(\"unused\")\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        execute(&program, &profile, &catalog, EvaluationLimits::default()),
+        ExecutionAttempt::Unsupported(SupportReason::Feature(
+            eglur_driver::UnsupportedFeature::HookArgumentType,
+        ))
+    );
+}
+
+#[test]
 fn named_function_values_execute_through_locals_and_parameters() {
     let (program, catalog, profile) = compile_single(concat!(
         "fn identity(value: Str) -> Str = value\n",

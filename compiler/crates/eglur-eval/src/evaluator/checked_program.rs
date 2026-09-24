@@ -182,6 +182,47 @@ impl<'a> ProgramView<'a> {
         else {
             return Err(InvalidTraitAdapterDispatch);
         };
+        self.trait_adapter_dispatch_for_subject(callable, typed.ty(), environment, witnesses, store)
+    }
+
+    pub(super) fn trait_adapter_value_dispatch(
+        &self,
+        callable: &CanonicalTarget,
+        key: ExpressionKey,
+        environment: &EvidenceEnvironment,
+        witnesses: &Witnesses,
+        store: &mut WitnessStore,
+    ) -> Result<Option<TraitAdapterDispatch>, InvalidTraitAdapterDispatch> {
+        let resolution = self.program.resolution();
+        let Some(adapter) = resolution.signatures().trait_adapter(callable) else {
+            return Ok(None);
+        };
+        let FactState::Known(typed) = resolution.body_types().expression(key) else {
+            return Err(InvalidTraitAdapterDispatch);
+        };
+        let Ok(TypeKind::Callable { parameters, .. }) =
+            resolution.signatures().types().kind(typed.ty())
+        else {
+            return Err(InvalidTraitAdapterDispatch);
+        };
+        let subject = *parameters
+            .get(adapter.argument())
+            .ok_or(InvalidTraitAdapterDispatch)?;
+        self.trait_adapter_dispatch_for_subject(callable, subject, environment, witnesses, store)
+    }
+
+    fn trait_adapter_dispatch_for_subject(
+        &self,
+        callable: &CanonicalTarget,
+        subject: TypeId,
+        environment: &EvidenceEnvironment,
+        witnesses: &Witnesses,
+        store: &mut WitnessStore,
+    ) -> Result<Option<TraitAdapterDispatch>, InvalidTraitAdapterDispatch> {
+        let resolution = self.program.resolution();
+        let Some(adapter) = resolution.signatures().trait_adapter(callable) else {
+            return Ok(None);
+        };
         let owner = resolution
             .signatures()
             .trait_method_owner(adapter.method())
@@ -190,9 +231,7 @@ impl<'a> ProgramView<'a> {
         let mut implementations = environment
             .entries()
             .iter()
-            .filter(|entry| {
-                entry.subject() == typed.ty() && entry.trait_ref().declaration() == owner
-            })
+            .filter(|entry| entry.subject() == subject && entry.trait_ref().declaration() == owner)
             .map(|entry| {
                 let value = store
                     .resolve_proof(evidence, entry.proof(), witnesses)

@@ -12,6 +12,7 @@ pub(super) enum RuntimeValue {
 pub(super) struct RuntimeCallable {
     pub(super) target: CanonicalTarget,
     pub(super) witnesses: Witnesses,
+    pub(super) borrow_argument: Option<usize>,
 }
 
 impl RuntimeValue {

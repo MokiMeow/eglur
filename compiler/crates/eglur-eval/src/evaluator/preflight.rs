@@ -673,6 +673,24 @@ impl<'a> Planner<'a> {
             .ok_or(SupportReason::Feature(
                 UnsupportedFeature::InvalidCheckedProgram,
             ))?;
+        let adapter = self
+            .view
+            .trait_adapter_value_dispatch(
+                &selected.target,
+                key,
+                environment,
+                witnesses,
+                &mut self.witness_store,
+            )
+            .map_err(|_| SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram))?;
+        let selected = if let Some(adapter) = adapter {
+            if adapter.borrow_argument.is_some() {
+                self.require(ExecutionCapability::ReferencesAndMutation)?;
+            }
+            adapter.selected
+        } else {
+            selected
+        };
         match &selected.target {
             CanonicalTarget::Source(declaration) => {
                 let frame = if selected.method.is_some() {
@@ -702,7 +720,11 @@ impl<'a> Planner<'a> {
                         return Err(SupportReason::Feature(UnsupportedFeature::FunctionValue));
                     }
                 }
-                self.plan_hook(declaration).map(|_| ())
+                let hook = self.plan_hook(declaration)?;
+                if hook == RuntimeHook::ToStr {
+                    self.plan_to_str_hook_subject(declaration)?;
+                }
+                Ok(())
             }
         }
     }
@@ -748,6 +770,10 @@ impl<'a> Planner<'a> {
                 UnsupportedFeature::InvalidCheckedProgram,
             ));
         }
+        self.plan_to_str_hook_subject(declaration)
+    }
+
+    fn plan_to_str_hook_subject(&self, declaration: &ExternalDefId) -> Result<(), SupportReason> {
         let signature = self
             .view
             .callable_signature(&CanonicalTarget::External(declaration.clone()))

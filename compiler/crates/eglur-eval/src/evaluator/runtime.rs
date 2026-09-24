@@ -409,7 +409,20 @@ impl<'a> Evaluator<'a> {
         ) else {
             return invalid_flow();
         };
-        let witnesses = if selected.method.is_some() {
+        let (selected, borrow_argument) = match self.view.trait_adapter_value_dispatch(
+            &selected.target,
+            key,
+            environment,
+            &frame.witnesses,
+            &mut self.witness_store,
+        ) {
+            Ok(Some(adapter)) => (adapter.selected, adapter.borrow_argument),
+            Ok(None) => (selected, None),
+            Err(_) => return invalid_flow(),
+        };
+        let witnesses = if matches!(selected.target, CanonicalTarget::Source(_))
+            && selected.method.is_some()
+        {
             let Some(frame_witnesses) =
                 self.witness_store
                     .method_frame(evidence, &selected, environment, &frame.witnesses)
@@ -429,6 +442,7 @@ impl<'a> Evaluator<'a> {
         Flow::Value(RuntimeValue::Callable(RuntimeCallable {
             target: selected.target,
             witnesses,
+            borrow_argument,
         }))
     }
 
@@ -528,6 +542,13 @@ impl<'a> Evaluator<'a> {
             let RuntimeValue::Callable(callable) = callable else {
                 return invalid_flow();
             };
+            if let Some(index) = callable.borrow_argument {
+                let Some(argument) = arguments.get_mut(index) else {
+                    return invalid_flow();
+                };
+                let value = std::mem::replace(argument, RuntimeValue::Value(Value::Unit));
+                *argument = self.store.borrow_temporary(value);
+            }
             return match callable.target {
                 CanonicalTarget::Source(declaration) => {
                     self.call_source(declaration, arguments, callable.witnesses)
