@@ -238,7 +238,13 @@ Rules:
    disjointness uses exact call applicability instead, so a legal overload set
    can still contain multiple members compatible with one expected `Fn`; that
    coercion fails with `OVERLOAD_AMBIGUOUS`.
-   Generic instantiation from expected `Fn` context MUST also satisfy every declared trait bound; a structurally selected generic function whose inferred argument fails a bound MUST fail with `TRAIT_BOUND_NOT_SATISFIED`.
+   Declared trait bounds MUST NOT remove or rank candidates whose instantiated
+   callable types satisfy Rule 2. If multiple such candidates remain, coercion
+   MUST fail with `OVERLOAD_AMBIGUOUS` even when an inferred type argument of
+   one candidate would fail its bound. Only after exactly one compatible
+   candidate remains are its declared bounds checked. A bound failure on that
+   selected candidate MUST fail with `TRAIT_BOUND_NOT_SATISFIED`; it MUST NOT
+   fall back to another overload.
    A generic named function is monomorphized at this coercion and does not create a polymorphic function value. If no expected `Fn` type fully determines its type arguments, the function-value expression MUST fail with `TYPE_ARG_INFERENCE_FAILED`.
    An expected `Fn` component matched only against a projection such as `T::Item` does not determine `T`. Because a standalone function-value specialization expression such as `f::[Concrete]` without a call is outside v0.1, a projection-only generic parameter can participate in an immediate explicitly typed call but cannot be specialized into a function value without another non-projected position that determines it.
    A fully qualified non-bang trait method reference is a named function value

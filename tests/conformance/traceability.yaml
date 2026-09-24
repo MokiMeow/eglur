@@ -1550,7 +1550,7 @@ coverage:
     asserted_in:
       - id: core-typecheck
         file: core/typecheck.yaml
-        test_ids: [TYC-overload-function-value-coercion-rejects-multiple-compatible-candidates]
+        test_ids: [TYC-expected-fn-bound-failure-does-not-prune-compatible-overload, TYC-overload-function-value-coercion-rejects-multiple-compatible-candidates]
     mentioned_only_in: []
   - code: OVERLOAD_MARKER_REQUIRED
     severity: error

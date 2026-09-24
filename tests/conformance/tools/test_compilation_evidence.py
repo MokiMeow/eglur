@@ -552,14 +552,14 @@ class CompileEvidenceTests(unittest.TestCase):
                 suite_document_bytes,
             )
         )
-        self.assertEqual(len(inventory.fixtures), 1942)
+        self.assertEqual(len(inventory.fixtures), 1943)
         self.assertEqual(
             sum(item.expected_diagnostic is None for item in inventory.fixtures),
             970,
         )
         self.assertEqual(
             sum(item.expected_diagnostic is not None for item in inventory.fixtures),
-            972,
+            973,
         )
         invalid_utf8 = next(
             item

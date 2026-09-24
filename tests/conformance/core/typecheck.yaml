@@ -3047,6 +3047,31 @@ tests:
       - overload
       - ambiguous
       data_keys: []
+- id: TYC-expected-fn-bound-failure-does-not-prune-compatible-overload
+  category: typecheck
+  title: unsatisfied generic bound does not remove a callable-compatible overload
+  code: |
+    trait Mark {}
+    struct Plain {}
+    struct NarrowError {}
+    struct OtherError {}
+
+    overload fn inspect[T: Mark](_value: Res[T, NarrowError]) -> i64 = 1
+    overload fn inspect(_value: Res[Plain, Union[NarrowError, OtherError]]) -> i64 = 2
+
+    fn accept(_f: Fn(Res[Plain, NarrowError]) -> i64) -> Unit = ()
+
+    fn main!() -> Res[Str, Str] {
+      _ = accept(inspect)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: OVERLOAD_AMBIGUOUS
+      message_contains:
+      - overload
+      - ambiguous
+      data_keys: []
 - id: TYC-expected-fn-overload-value-without-compatible-candidate
   category: typecheck
   title: expected Fn overload value reports no matching candidate

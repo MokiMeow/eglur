@@ -259,6 +259,31 @@ fn expected_fn_rejects_ambiguous_assignable_overloads() {
 }
 
 #[test]
+fn failed_generic_bound_does_not_prune_an_expected_fn_overload() {
+    let declarations = concat!(
+        "trait Mark {}\n",
+        "struct Plain {}\n",
+        "struct NarrowError {}\n",
+        "struct OtherError {}\n",
+        "overload fn inspect[T: Mark](value: Res[T, NarrowError]) -> i64 = 1\n",
+        "overload fn inspect(value: Res[Plain, Union[NarrowError, OtherError]]) -> i64 = 2\n",
+    );
+    let coercion = concat!(
+        "fn accept(f: Fn(Res[Plain, NarrowError]) -> i64) -> Unit = ()\n",
+        "fn use() -> Unit = accept(inspect)\n",
+    );
+
+    for marker_impl in ["", "impl Mark for Plain {}\n"] {
+        let source = format!("{declarations}{marker_impl}{coercion}");
+        assert_eq!(
+            supported_diagnostic_codes(&source),
+            ["OVERLOAD_AMBIGUOUS"],
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn expected_fn_without_compatible_overload_has_its_own_diagnostic() {
     let source = concat!(
         "overload fn identity(value: i64) -> i64 = value\n",

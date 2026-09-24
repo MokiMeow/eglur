@@ -24516,6 +24516,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-expected-fn-bound-failure-does-not-prune-compatible-overload"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Mark {}\nstruct Plain {}\nstruct NarrowError {}\nstruct OtherError {}\n\noverload fn inspect[T: Mark](_value: Res[T, NarrowError]) -> i64 = 1\noverload fn inspect(_value: Res[Plain, Union[NarrowError, OtherError]]) -> i64 = 2\n\nfn accept(_f: Fn(Res[Plain, NarrowError]) -> i64) -> Unit = ()\n\nfn main!() -> Res[Str, Str] {\n  _ = accept(inspect)\n  yield Ok(\"unreachable\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-expected-fn-cannot-instantiate-generic-with-reference"
       },
       "public_examples": [],
@@ -39040,6 +39058,6 @@
       }
     }
   ],
-  "input_digest": "sha256:7856100f6a7328e74c073c1afffbd3bbac623d8f823991695556e8773adc15f1",
+  "input_digest": "sha256:7644c2c15b8a2a633f03540cdf0708ac37b87a94960a7e55b3377f264e1182fa",
   "schema_version": "0.1"
 }

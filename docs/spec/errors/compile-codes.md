@@ -647,7 +647,9 @@ Severity: `error`
 
 Trigger: overload resolution for a call leaves more than one applicable
 candidate after v0.1 applicability filtering, or expected-`Fn` coercion of a
-named overload set leaves more than one callable-compatible candidate.
+named overload set leaves more than one callable-compatible candidate before
+checking their declared trait bounds. A bound failure does not remove a
+callable-compatible candidate from this ambiguity check.
 
 Message contract summary:
 
