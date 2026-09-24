@@ -1300,7 +1300,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
     pub(super) fn record_trait_obligations(
         &mut self,
-        invocation: ExpressionKey,
+        site: ExpressionKey,
         source: &SemanticSource<'_>,
         origin: OriginId,
         parameters: &[GenericParameterId],
@@ -1349,7 +1349,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 };
                 let obligation = bound.into_obligation();
                 self.obligations.push(PendingTraitObligation {
-                    invocation,
+                    site,
                     owner,
                     location: SemanticLocation::origin(source.file(), origin),
                     parameter: parameter.clone(),

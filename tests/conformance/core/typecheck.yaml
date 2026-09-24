@@ -3047,6 +3047,32 @@ tests:
       - overload
       - ambiguous
       data_keys: []
+- id: TYC-expected-fn-overload-value-without-compatible-candidate
+  category: typecheck
+  title: expected Fn overload value reports no matching candidate
+  code: |
+    overload fn identity(value: i64) -> i64 = value
+    overload fn identity(value: Str) -> Str = value
+
+    fn accept(f: Fn(Bool) -> Bool) -> Unit = ()
+
+    fn main!() -> Res[Str, Str] {
+      _ = accept(identity)
+      yield Ok("unreachable")
+    }
+  expect:
+    compile_error:
+      code: CALLABLE_VALUE_NO_MATCH
+      message_contains:
+      - callable
+      - value
+      - no matching candidate
+      data_keys:
+      - expected_type
+      - candidates
+      data_equals:
+        expected_type: Fn(Bool) -> Bool
+        candidates: 'fn identity(value: i64) -> i64; fn identity(value: Str) -> Str'
 - id: TYC-assignment-to-field-mut-member-writes-raw-storage-directly
   category: typecheck
   title: assignment to field mut member writes raw storage directly

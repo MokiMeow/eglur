@@ -122,7 +122,7 @@ class DiagnosticContractTests(unittest.TestCase):
         document = diagnostic_contracts.load_contract_document(CONTRACT_PATH)
         contracts = document.codes
 
-        self.assertEqual(len(contracts), 272)
+        self.assertEqual(len(contracts), 273)
         self.assertEqual(
             contracts["EFFECT_VIOLATION"].message_any_of,
             (("non-bang", "Fn", "pure"),),

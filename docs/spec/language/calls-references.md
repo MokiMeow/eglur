@@ -232,7 +232,7 @@ Rules:
    3. its result type is assignable to `R`,
    4. invoking it does not require an effectful/bang callable.
 3. A named non-bang function value is compatible with `Fn(P0, ..., Pn) -> R` when Rule 2 holds after overload resolution and generic instantiation.
-   If an overload set is used as a function value, expected `Fn` type context MUST select exactly one compatible overload; multiple compatible overloads fail with `OVERLOAD_AMBIGUOUS`, and no compatible overload fails with `CALL_ARG_TYPE_MISMATCH` when the value appears as a bound call argument.
+   If an overload set is used as a function value, expected `Fn` type context MUST select exactly one compatible overload. Multiple compatible overloads fail with `OVERLOAD_AMBIGUOUS`; no compatible overload fails with `CALLABLE_VALUE_NO_MATCH`, including when the value appears as a bound call argument.
    Callable-value selection uses the complete assignability relation from
    Rule 2, including `Res` error-union assignability. Declaration-time overload
    disjointness uses exact call applicability instead, so a legal overload set

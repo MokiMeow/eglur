@@ -34,7 +34,7 @@ class DiagnosticRegistryTests(unittest.TestCase):
         )
 
     def test_registry_covers_every_diagnostic_contract(self) -> None:
-        self.assertEqual(len(self.registry), 272)
+        self.assertEqual(len(self.registry), 273)
         self.assertTrue(
             all(
                 entry.channels.allowed_channels <= diagnostic_model.CHANNELS

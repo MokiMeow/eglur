@@ -1017,6 +1017,36 @@ fn named_function_values_execute_through_local_bindings() {
 }
 
 #[test]
+fn selected_overload_function_value_executes_the_selected_target() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "overload fn identity(value: i64) -> i64 = value\n",
+        "overload fn identity(value: Str) -> Str = \"wrong\"\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(i64) -> i64 = identity\n",
+        "  yield Ok(to_str(f(7)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn bounded_generic_function_value_carries_witness_into_indirect_call() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Readable {\n  type Elem\n  fn read(self: &Self) -> Self::Elem\n}\n",
+        "struct Good {}\n",
+        "impl Readable for Good {\n  type Elem = i64\n  fn read(self: &Self) -> Self::Elem = 8\n}\n",
+        "fn bounded[T: Readable](value: T) -> T::Elem = value.read()\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(Good) -> i64 = bounded\n",
+        "  yield Ok(to_str(f(Good{})))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "8");
+}
+
+#[test]
 fn named_function_values_execute_through_locals_and_parameters() {
     let (program, catalog, profile) = compile_single(concat!(
         "fn identity(value: Str) -> Str = value\n",
@@ -1057,6 +1087,35 @@ fn reexported_named_function_value_keeps_its_source_target() {
         ok_str(completed(&program, &catalog, &profile).value()),
         "reexported"
     );
+}
+
+#[test]
+fn reexported_overload_function_value_selects_the_expected_fn_target() {
+    let (program, catalog, profile) = compile_files(
+        [
+            (
+                "dep.eglur",
+                concat!(
+                    "pub overload fn identity(value: i64) -> i64 = value\n",
+                    "pub overload fn identity(value: Str) -> Str = \"wrong\"\n",
+                ),
+            ),
+            ("bridge.eglur", "pub import dep::identity as routed\n"),
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::routed\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let f: Fn(i64) -> i64 = routed\n",
+                    "  yield Ok(to_str(f(7)))\n",
+                    "}\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
 }
 
 #[test]

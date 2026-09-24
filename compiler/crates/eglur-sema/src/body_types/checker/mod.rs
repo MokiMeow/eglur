@@ -36,6 +36,7 @@ use super::{BodyTypes, BodyTypingError, *};
 
 mod application;
 mod branching;
+mod callable_values;
 mod calls;
 mod constants;
 mod construction;

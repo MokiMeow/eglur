@@ -24552,6 +24552,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-expected-fn-overload-value-without-compatible-candidate"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "overload fn identity(value: i64) -> i64 = value\noverload fn identity(value: Str) -> Str = value\n\nfn accept(f: Fn(Bool) -> Bool) -> Unit = ()\n\nfn main!() -> Res[Str, Str] {\n  _ = accept(identity)\n  yield Ok(\"unreachable\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-expected-fn-projection-does-not-reverse-infer-base"
       },
       "public_examples": [],
@@ -39022,6 +39040,6 @@
       }
     }
   ],
-  "input_digest": "sha256:6ed8073693a3d7aaa46360005a071ff83bfd9768dda710b7d9b4eaa94524a041",
+  "input_digest": "sha256:7856100f6a7328e74c073c1afffbd3bbac623d8f823991695556e8773adc15f1",
   "schema_version": "0.1"
 }

@@ -450,6 +450,33 @@ The producer MUST NOT select an arbitrary overload or family member merely to
 emit `expected_type`.
 
 
+### `CALLABLE_VALUE_NO_MATCH`
+
+Severity: `error`
+
+Trigger: an expected `Fn(...) -> ...` type is available for a named overload
+set used as a function value, but no candidate is compatible after complete
+generic instantiation and directional callable assignability. A single
+non-generic function already has a callable type, so its incompatibility uses
+the enclosing assignment or call-argument diagnostic. A single generic
+function whose type arguments cannot be determined uses
+`TYPE_ARG_INFERENCE_FAILED`.
+
+Message contract summary:
+
+1. `callable`.
+2. `value`.
+3. `no matching candidate`.
+
+Data contract summary:
+
+1. `expected_type`: the canonical expected `Fn` type.
+2. `candidates`: the rejected callable signatures in declaration-candidate
+   order.
+
+The producer MUST NOT invent an `actual_type` for an unselected overload set.
+
+
 ### `CONSTRUCTOR_TARGET_KIND_MISMATCH`
 
 Severity: `error`

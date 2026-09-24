@@ -589,7 +589,10 @@ Tensor determinism coverage additionally requires:
    4. `OVERLOAD_OVERLAP` for non-disjoint overload declarations;
    5. `OVERLOAD_AMBIGUOUS` when a call leaves multiple applicable overload
       candidates or expected-`Fn` coercion leaves multiple compatible overload
-      candidates.
+      candidates;
+   6. `CALLABLE_VALUE_NO_MATCH` when expected-`Fn` coercion of an overload set
+      leaves no compatible candidate. This is distinct from a call whose typed
+      argument vector matches no overload.
 27. Ownership-flow suites in v0.1 conformance baseline assume ownership surface enabled and require:
    1. per-path discharge mismatches require `OWNERSHIP_PATH_UNBALANCED`, including bang bodies, direct/conditional local roots, lexical normal exits, nested `yield`, inner `result`/`checked` early exits, and loop-control edges; enclosing-region roots remain live when an inner edge does not exit their obligation region;
    2. forbidden nested or ordinary-generic ownership positions require `OWNERSHIP_TYPE_POSITION_FORBIDDEN`;

@@ -286,7 +286,7 @@ impl InvocationFact {
 /// First-order trait proof request emitted only after complete local inference.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PendingTraitObligation {
-    pub(super) invocation: ExpressionKey,
+    pub(super) site: ExpressionKey,
     pub(super) owner: DefId,
     pub(super) location: SemanticLocation,
     pub(super) parameter: GenericParameterId,
@@ -298,8 +298,8 @@ pub struct PendingTraitObligation {
 
 impl PendingTraitObligation {
     #[must_use]
-    pub const fn invocation(&self) -> ExpressionKey {
-        self.invocation
+    pub const fn site(&self) -> ExpressionKey {
+        self.site
     }
 
     #[must_use]

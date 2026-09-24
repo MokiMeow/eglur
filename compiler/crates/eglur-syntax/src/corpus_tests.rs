@@ -47,7 +47,7 @@ fn projected_corpus_has_exact_lexical_outcomes() {
     let corpus = read_corpus();
     assert_eq!(corpus.schema_version, "0.1");
     assert!(corpus.input_digest.starts_with("sha256:"));
-    assert_eq!(corpus.cases.len(), 2147);
+    assert_eq!(corpus.cases.len(), 2148);
 
     let mut lexical_failures = 0;
     for (index, case) in corpus.cases.into_iter().enumerate() {

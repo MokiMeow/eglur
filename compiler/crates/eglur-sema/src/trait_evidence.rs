@@ -15,9 +15,9 @@ use crate::{
     BodyTypes, CallableInstanceId, CanonicalTarget, DeclarationCollection, DeclarationSignatures,
     DefId, DuplicateFact, EvidenceEnvironmentId, EvidenceProofId, ExpressionKey, FactState,
     FactTable, GenericParameterId, IdentityOverflow, InvocationFact, InvocationTarget,
-    PendingMethodDispatch, SemanticFact, SemanticLocation, SemanticSource, SubstId,
-    TraitEnvironment, TraitEnvironmentError, TraitImplEvidence, TraitObligation, TraitProof,
-    TraitRef, TypeId, WitnessSlotId,
+    PendingMethodDispatch, PendingTraitObligation, SemanticFact, SemanticLocation, SemanticSource,
+    SubstId, TraitEnvironment, TraitEnvironmentError, TraitImplEvidence, TraitObligation,
+    TraitProof, TraitRef, TypeId, WitnessSlotId,
 };
 
 mod proof;
@@ -306,7 +306,7 @@ pub fn resolve_trait_evidence(
     let mut obligations = BTreeMap::<ExpressionKey, Vec<_>>::new();
     for obligation in body_types.obligations() {
         obligations
-            .entry(obligation.invocation())
+            .entry(obligation.site())
             .or_default()
             .push(obligation);
     }
@@ -339,63 +339,21 @@ pub fn resolve_trait_evidence(
             )?;
             continue;
         }
-        let mut entries = Vec::new();
-        let mut poison = None;
-        for pending in obligations.get(&key).map_or(&[][..], Vec::as_slice) {
-            let obligation = TraitObligation::new(pending.subject(), pending.trait_ref().clone());
-            match trait_environment.prove_for_owner(
-                pending.owner(),
-                signatures,
-                obligation.clone(),
-            )? {
-                selected @ (TraitProof::Bound(_) | TraitProof::Implementation(_)) => {
-                    let proof = proofs.materialize(
-                        pending.owner(),
-                        obligation,
-                        selected,
-                        signatures,
-                        trait_environment,
-                    )?;
-                    entries.push(EvidenceEntry {
-                        parameter: pending.parameter().clone(),
-                        bound_index: pending.bound_index(),
-                        subject: pending.subject(),
-                        trait_ref: pending.trait_ref().clone(),
-                        proof,
-                        destination: pending.destination(),
-                    });
-                }
-                TraitProof::Poisoned(found) => {
-                    poison = Some(found);
-                    break;
-                }
-                TraitProof::InvalidArgument(violation) => {
-                    poison = Some(record_invalid_impl_argument(
-                        &source_map,
-                        pending.location(),
-                        violation,
-                        diagnostics,
-                    )?);
-                    break;
-                }
-                TraitProof::Unsatisfied(failed) | TraitProof::Ambiguous(failed) => {
-                    poison = Some(record_unsatisfied_bound(
-                        collection,
-                        &source_map,
-                        signatures,
-                        pending.owner(),
-                        pending.location(),
-                        &failed,
-                        diagnostics,
-                    )?);
-                    break;
-                }
+        let entries = match resolve_obligations(
+            collection,
+            &source_map,
+            signatures,
+            trait_environment,
+            diagnostics,
+            &mut proofs,
+            obligations.get(&key).map_or(&[][..], Vec::as_slice),
+        )? {
+            ObligationResolution::Known(entries) => entries,
+            ObligationResolution::Poisoned(poison) => {
+                checked.insert(key, SemanticFact::Poisoned(poison))?;
+                continue;
             }
-        }
-        if let Some(poison) = poison {
-            checked.insert(key, SemanticFact::Poisoned(poison))?;
-            continue;
-        }
+        };
         let dispatch = if let Some(pending) = method_dispatches.get(&key) {
             let obligation = TraitObligation::new(pending.subject(), pending.trait_ref().clone());
             match trait_environment.prove_for_owner(
@@ -464,12 +422,30 @@ pub fn resolve_trait_evidence(
 
     let mut callable_values = FactTable::new();
     for (key, instance) in body_types.callable_values() {
-        if obligations.contains_key(&key) || method_dispatches.contains_key(&key) {
+        if method_dispatches.contains_key(&key) {
             return Err(TraitEvidenceError::UnexpectedCallableValueEvidence(key));
         }
+        let entries = match resolve_obligations(
+            collection,
+            &source_map,
+            signatures,
+            trait_environment,
+            diagnostics,
+            &mut proofs,
+            obligations.get(&key).map_or(&[][..], Vec::as_slice),
+        )? {
+            ObligationResolution::Known(entries) => entries,
+            ObligationResolution::Poisoned(poison) => {
+                callable_values.insert(key, SemanticFact::Poisoned(poison))?;
+                continue;
+            }
+        };
         let target = callable_declaration(instance, body_types, signatures)?;
-        let environment =
-            intern_environment(Box::new([]), &mut environments, &mut environment_ids)?;
+        let environment = intern_environment(
+            entries.into_boxed_slice(),
+            &mut environments,
+            &mut environment_ids,
+        )?;
         callable_values.insert(
             key,
             SemanticFact::Known(CheckedCallableValue {
@@ -487,6 +463,72 @@ pub fn resolve_trait_evidence(
         proofs: proofs.into_nodes(),
         method_routes,
     })))
+}
+
+enum ObligationResolution {
+    Known(Vec<EvidenceEntry>),
+    Poisoned(Poison),
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "trait proof resolution keeps distinct semantic owners explicit"
+)]
+fn resolve_obligations(
+    collection: &DeclarationCollection,
+    source_map: &BTreeMap<FileId, &SemanticSource<'_>>,
+    signatures: &mut DeclarationSignatures,
+    trait_environment: &mut TraitEnvironment,
+    diagnostics: &mut DiagnosticStore,
+    proofs: &mut ProofArena,
+    pending: &[&PendingTraitObligation],
+) -> Result<ObligationResolution, TraitEvidenceError> {
+    let mut entries = Vec::with_capacity(pending.len());
+    for pending in pending {
+        let obligation = TraitObligation::new(pending.subject(), pending.trait_ref().clone());
+        match trait_environment.prove_for_owner(pending.owner(), signatures, obligation.clone())? {
+            selected @ (TraitProof::Bound(_) | TraitProof::Implementation(_)) => {
+                let proof = proofs.materialize(
+                    pending.owner(),
+                    obligation,
+                    selected,
+                    signatures,
+                    trait_environment,
+                )?;
+                entries.push(EvidenceEntry {
+                    parameter: pending.parameter().clone(),
+                    bound_index: pending.bound_index(),
+                    subject: pending.subject(),
+                    trait_ref: pending.trait_ref().clone(),
+                    proof,
+                    destination: pending.destination(),
+                });
+            }
+            TraitProof::Poisoned(poison) => return Ok(ObligationResolution::Poisoned(poison)),
+            TraitProof::InvalidArgument(violation) => {
+                let poison = record_invalid_impl_argument(
+                    source_map,
+                    pending.location(),
+                    violation,
+                    diagnostics,
+                )?;
+                return Ok(ObligationResolution::Poisoned(poison));
+            }
+            TraitProof::Unsatisfied(failed) | TraitProof::Ambiguous(failed) => {
+                let poison = record_unsatisfied_bound(
+                    collection,
+                    source_map,
+                    signatures,
+                    pending.owner(),
+                    pending.location(),
+                    &failed,
+                    diagnostics,
+                )?;
+                return Ok(ObligationResolution::Poisoned(poison));
+            }
+        }
+    }
+    Ok(ObligationResolution::Known(entries))
 }
 
 fn checked_impl_dispatch(
