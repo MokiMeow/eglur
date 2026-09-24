@@ -325,7 +325,7 @@ coverage:
     asserted_in:
       - id: core-typecheck
         file: core/typecheck.yaml
-        test_ids: [TYC-unknown-named-argument-binding-is-rejected]
+        test_ids: [TYC-fn-value-call-rejects-underlying-declaration-name, TYC-unknown-named-argument-binding-is-rejected]
     mentioned_only_in: []
   - code: CAST_INVALID_DTYPE_PAIR
     severity: error

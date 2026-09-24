@@ -91,12 +91,12 @@ class FrontendCorpusTests(unittest.TestCase):
         origin_counts = Counter(type(case.origin) for case in self.corpus.cases)
         source_counts = Counter(type(case.source) for case in self.corpus.cases)
 
-        self.assertEqual(len(self.corpus.cases), 2146)
-        self.assertEqual(origin_counts[model.InlineConformanceOrigin], 1766)
+        self.assertEqual(len(self.corpus.cases), 2147)
+        self.assertEqual(origin_counts[model.InlineConformanceOrigin], 1767)
         self.assertEqual(origin_counts[model.FileConformanceOrigin], 323)
         self.assertEqual(origin_counts[model.RegistryConformanceOrigin], 4)
         self.assertEqual(origin_counts[model.SyntaxCaseOrigin], 53)
-        self.assertEqual(source_counts[model.Utf8Text], 2145)
+        self.assertEqual(source_counts[model.Utf8Text], 2146)
         self.assertEqual(source_counts[model.RawBytes], 1)
 
     def test_entrypoints_and_public_provenance_remain_independent_axes(self) -> None:
@@ -106,7 +106,7 @@ class FrontendCorpusTests(unittest.TestCase):
             example for case in self.corpus.cases for example in case.public_examples
         )
 
-        self.assertEqual(entrypoint_counts[model.EntryPoint.COMPILATION_UNIT], 2093)
+        self.assertEqual(entrypoint_counts[model.EntryPoint.COMPILATION_UNIT], 2094)
         self.assertEqual(entrypoint_counts[model.EntryPoint.TOKENS], 7)
         self.assertEqual(entrypoint_counts[model.EntryPoint.EXPRESSION], 29)
         self.assertEqual(entrypoint_counts[model.EntryPoint.EXPRESSION_SEQUENCE], 3)

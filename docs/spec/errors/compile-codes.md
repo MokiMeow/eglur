@@ -372,7 +372,7 @@ Data contract summary (if `data` is present):
 
 Severity: `error`
 
-Trigger: a call provides a named argument that does not match any declared callee parameter.
+Trigger: a call provides a named argument that does not match any exposed callee parameter name, including any named argument on a `Fn`-typed value call because `Fn` types expose no parameter names.
 
 Message contract summary:
 

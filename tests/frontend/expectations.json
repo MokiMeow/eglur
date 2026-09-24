@@ -25452,6 +25452,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-fn-value-call-rejects-underlying-declaration-name"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn identity(value: i64) -> i64 = value\n\nfn main!() -> Res[Str, Str] {\n  let f: Fn(i64) -> i64 = identity\n  _ = f(value=1)\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-for-binder-and-body-shadowing-have-nested-scopes"
       },
       "public_examples": [],
@@ -39004,6 +39022,6 @@
       }
     }
   ],
-  "input_digest": "sha256:3857ef96ef9252405b7b2fdef6687bf8577f44ff4fa1976a008e3fe248efbec2",
+  "input_digest": "sha256:6ed8073693a3d7aaa46360005a071ff83bfd9768dda710b7d9b4eaa94524a041",
   "schema_version": "0.1"
 }

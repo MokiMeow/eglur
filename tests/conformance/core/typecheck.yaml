@@ -5126,6 +5126,25 @@ tests:
       - named
       - unknown
       data_keys: []
+- id: TYC-fn-value-call-rejects-underlying-declaration-name
+  category: typecheck
+  title: Fn value call rejects a named argument matching its underlying declaration
+  code: |
+    fn identity(value: i64) -> i64 = value
+
+    fn main!() -> Res[Str, Str] {
+      let f: Fn(i64) -> i64 = identity
+      _ = f(value=1)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: CALL_UNKNOWN_NAMED_ARG
+      message_contains:
+      - call
+      - named
+      - unknown
+      data_keys: []
 - id: TYC-call-missing-required-argument-is-rejected
   category: typecheck
   title: call missing required argument is rejected

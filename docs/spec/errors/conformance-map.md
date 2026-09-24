@@ -448,7 +448,7 @@ Tensor determinism coverage additionally requires:
    17. call argument binding, constructor form, and typing validation paths require:
       1. `CALL_POSITIONAL_AFTER_NAMED`,
       2. `CALL_DUPLICATE_NAMED_ARG`,
-      3. `CALL_UNKNOWN_NAMED_ARG`,
+      3. `CALL_UNKNOWN_NAMED_ARG`, including a named argument on a `Fn`-typed value whose underlying declaration uses the same parameter name,
       4. `CALL_MISSING_ARG`,
       5. `CALL_TOO_MANY_ARGS`,
       6. `CALL_ARG_TYPE_MISMATCH`,

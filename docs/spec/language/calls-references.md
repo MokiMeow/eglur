@@ -61,6 +61,7 @@ Assignable target semantics:
 ### Named and Trailing Arguments
 
 v0.1 call surface includes positional arguments, named arguments, and trailing closure arguments.
+Named argument availability depends on the callee's exposed parameter names; calls through `Fn` values follow the restriction in Callable Type Compatibility Rule 9.
 
 Rules:
 
@@ -262,7 +263,9 @@ Rules:
 7. If callable compatibility fails because of arity, parameter type, or result type at a call argument binding, compilation MUST fail with `CALL_ARG_TYPE_MISMATCH` unless a more specific diagnostic from this section applies.
 8. A `Fn(...) -> ...` value is an escaping value when it is assigned to a `Fn`-typed binding, returned, stored, or passed as an argument.
    Capturing an explicit reference inside a closure or partial application that becomes such an escaping `Fn` value MUST fail with `REF_ESCAPE_FORBIDDEN`.
-9. Calling a value whose static type is `Fn(P0, ..., Pn) -> R` follows ordinary call argument typing rules from `type-system.md`.
+9. Calling a value whose static type is `Fn(P0, ..., Pn) -> R` follows ordinary positional call argument typing rules from `type-system.md`.
+   `Fn` types do not expose parameter names, so any named argument in such a call MUST fail with `CALL_UNKNOWN_NAMED_ARG`, even if the value's underlying function declaration has a parameter with that spelling.
+   Calling a function declaration directly retains its named-call surface.
 10. v0.1 bang APIs that accept effectful callbacks MUST specify those callback contracts directly in their API rules; they are not expressed as a surface `Fn!` type.
 11. A closure or partial application that captures an ownership root or a reference derived from one is an ownership-capable callable value and MUST fail with `OWNERSHIP_TYPE_POSITION_FORBIDDEN` under `ownership-boundary.md`.
 12. Rule 11 takes precedence over `REF_ESCAPE_FORBIDDEN` when the same capture is both ownership-bearing and reference-escaping.

@@ -179,6 +179,33 @@ fn indirect_callable_calls_use_the_exposed_fn_argument_contract() {
 }
 
 #[test]
+fn fn_value_calls_do_not_expose_declaration_parameter_names() {
+    let declaration = "fn identity(value: i64) -> i64 = value\n";
+
+    assert!(
+        diagnostic_codes(&format!(
+            "{declaration}fn use() -> i64 = identity(value=1)\n"
+        ))
+        .is_empty()
+    );
+
+    for body in [
+        "fn use() -> i64 { let f: Fn(i64) -> i64 = identity\nyield f(value=1) }\n",
+        "fn use() -> i64 { let f = identity\nyield f(value=1) }\n",
+    ] {
+        assert_eq!(
+            diagnostic_codes(&format!("{declaration}{body}")),
+            ["CALL_UNKNOWN_NAMED_ARG"]
+        );
+    }
+
+    assert_eq!(
+        diagnostic_codes("fn use(f: Fn(i64) -> i64) -> i64 = f(value=1)\n"),
+        ["CALL_UNKNOWN_NAMED_ARG"]
+    );
+}
+
+#[test]
 fn named_callable_value_incompatible_with_expected_fn_is_rejected() {
     let source = concat!(
         "fn identity(value: i64) -> i64 = value\n",

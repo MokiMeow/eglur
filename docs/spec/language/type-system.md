@@ -86,7 +86,7 @@ Return statement typing:
 Call argument typing:
 
 1. Positional arguments bind parameters by declared parameter order.
-2. Named arguments bind parameters by declared parameter name.
+2. Named arguments bind parameters by declared parameter name; calls through `Fn` values use the positional-only rule in `calls-references.md`.
 3. Positional-after-named usage is forbidden and MUST be rejected during static checking (`CALL_POSITIONAL_AFTER_NAMED`).
 4. Duplicate named bindings to one parameter are forbidden and MUST be rejected during static checking (`CALL_DUPLICATE_NAMED_ARG`).
 5. Unknown named argument identifiers are forbidden and MUST be rejected during static checking (`CALL_UNKNOWN_NAMED_ARG`).

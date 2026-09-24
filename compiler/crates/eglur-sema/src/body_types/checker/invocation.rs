@@ -318,16 +318,34 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         result: TypeId,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let source = context.source;
-        if call
+        if let Some((argument, name)) = call
             .arguments
             .iter()
-            .any(|argument| argument.name.is_some())
+            .find_map(|argument| argument.name.as_ref().map(|name| (argument, name)))
         {
-            return Ok(InvocationPlan::Complete(self.unsupported(
-                TypecheckCapability::CheckClosures,
-                source,
-                origin,
-            )));
+            let Some(spelling) = name.text() else {
+                let poison = source.invalid_poison(name.origin()).cloned().ok_or(
+                    BodyTypingError::MissingOriginSpan {
+                        file: source.file(),
+                        origin: name.origin(),
+                    },
+                )?;
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
+            };
+            let data = BTreeMap::from([(
+                Box::<str>::from("name"),
+                DiagnosticDataValue::from(spelling),
+            )]);
+            return self
+                .type_error(
+                    source,
+                    argument.origin,
+                    "CALL_UNKNOWN_NAMED_ARG",
+                    format!("call has unknown named argument `{spelling}` on a Fn value"),
+                    data,
+                )
+                .map(Outcome::Poisoned)
+                .map(InvocationPlan::Complete);
         }
         if call.arguments.len() > parameters.len() {
             return self
