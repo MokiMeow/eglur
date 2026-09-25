@@ -198,6 +198,59 @@ fn public_conformance_headers_are_checked_before_missing_bindings() {
 }
 
 #[test]
+fn public_conformance_header_bounds_can_use_other_impl_bindings() {
+    let declarations = concat!(
+        "pub trait Has { type Item }\n",
+        "pub trait Uses[A] {}\n",
+        "pub trait Marker {}\n",
+        "pub struct Carrier {}\n",
+        "pub struct Boxed[T: Has + Uses[T::Item]] {}\n",
+    );
+    let support = "impl Has for Carrier { type Item = i64 }\nimpl Uses[i64] for Carrier {}\n";
+    let conformance = "impl Marker for Boxed[Carrier] {}\n";
+    for source in [
+        format!("{declarations}{support}{conformance}"),
+        format!("{declarations}{conformance}{support}"),
+    ] {
+        let (codes, disposition) = compile(&source);
+        assert!(codes.is_empty(), "{source}: {codes:?}");
+        assert_eq!(disposition, CompileDisposition::Succeeded, "{source}");
+    }
+}
+
+#[test]
+fn invalid_supporting_binding_does_not_create_a_derivative_header_bound_error() {
+    let source = concat!(
+        "trait Has { type Item }\n",
+        "trait Uses[A] {}\n",
+        "trait Marker {}\n",
+        "struct Carrier {}\n",
+        "struct Boxed[T: Has + Uses[T::Item]] {}\n",
+        "impl Has for Carrier { type Item = Own[i64] }\n",
+        "impl Uses[i64] for Carrier {}\n",
+        "impl Marker for Boxed[Carrier] {}\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["OWNERSHIP_TYPE_POSITION_FORBIDDEN"], "{codes:?}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn invalid_supporting_method_does_not_create_a_derivative_header_bound_error() {
+    let source = concat!(
+        "trait Ready { fn ready(self: &Self) -> Unit }\n",
+        "trait Marker {}\n",
+        "struct Carrier {}\n",
+        "struct Boxed[T: Ready] {}\n",
+        "impl Ready for Carrier {}\n",
+        "impl Marker for Boxed[Carrier] {}\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["TRAIT_IMPL_MISSING_METHOD"], "{codes:?}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
 fn public_conformance_binding_visibility_precedes_method_bound_errors() {
     let source = concat!(
         "pub trait Need {}\n",
