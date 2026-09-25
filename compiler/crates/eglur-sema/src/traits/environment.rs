@@ -875,28 +875,31 @@ impl TraitEnvironment {
 
         let mut candidates = self.candidates(signatures.types(), &obligation)?;
         candidates.sort_by(|left, right| left.0.cmp(&right.0));
-        let outcome = if candidates.is_empty() {
-            SelectionOutcome::Unsatisfied(obligation.clone())
-        } else if candidates.len() > 1 {
-            let mut poison: Option<Poison> = None;
-            for (implementation, _) in &candidates {
-                if let Some(found) = self
-                    .implementations
-                    .get(implementation)
-                    .and_then(|candidate| candidate.poison.as_ref())
-                {
-                    poison = Some(match poison {
-                        Some(existing) => existing.merge(found)?,
-                        None => found.clone(),
-                    });
-                }
+        let mut rejected = None;
+        let mut viable = Vec::new();
+        for candidate in candidates {
+            if let Some(poison) = self
+                .implementations
+                .get(&candidate.0)
+                .and_then(|implementation| implementation.poison.as_ref())
+            {
+                rejected = Some(match rejected {
+                    Some(existing) => Poison::merge(&existing, poison)?,
+                    None => poison.clone(),
+                });
+            } else {
+                viable.push(candidate);
             }
-            poison.map_or_else(
-                || SelectionOutcome::Ambiguous(obligation.clone()),
+        }
+        let outcome = if viable.is_empty() {
+            rejected.clone().map_or_else(
+                || SelectionOutcome::Unsatisfied(obligation.clone()),
                 SelectionOutcome::Poisoned,
             )
+        } else if viable.len() > 1 {
+            SelectionOutcome::Ambiguous(obligation.clone())
         } else {
-            let (declaration, replacements) = candidates.pop().expect("one candidate exists");
+            let (declaration, replacements) = viable.pop().expect("one viable candidate exists");
             let implementation = self
                 .implementations
                 .get(&declaration)
@@ -980,6 +983,12 @@ impl TraitEnvironment {
                     replacements,
                 }))
             }
+        };
+        let outcome = match (outcome, rejected) {
+            (SelectionOutcome::Unsatisfied(_) | SelectionOutcome::Ambiguous(_), Some(poison)) => {
+                SelectionOutcome::Poisoned(poison)
+            }
+            (outcome, _) => outcome,
         };
         active.remove(&obligation);
         if let Some(owner) = owner {

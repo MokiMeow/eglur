@@ -326,7 +326,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         declaration_id: DefId,
         poison: Poison,
     ) -> Result<(), SignatureResolutionError> {
-        self.impl_headers.remove(&declaration_id);
+        let header = self
+            .impl_headers
+            .remove(&declaration_id)
+            .expect("rejected impl has a parsed header");
+        self.rejected_impl_headers
+            .insert(CanonicalTarget::Source(declaration_id), header);
+        self.impl_later_roots.insert(declaration_id, poison.clone());
         self.impl_header_poison
             .insert(declaration_id, poison.clone());
         self.retained_impl_headers.insert(

@@ -285,6 +285,8 @@ struct SignatureResolver<'input, 'hir> {
     impl_headers: BTreeMap<DefId, TraitImplHeader>,
     impl_header_poison: BTreeMap<DefId, Poison>,
     retained_impl_headers: FactTable<CanonicalTarget, TraitImplHeader>,
+    rejected_impl_headers: BTreeMap<CanonicalTarget, TraitImplHeader>,
+    impl_later_roots: BTreeMap<DefId, Poison>,
 }
 
 impl TraitHeaderFacts for SignatureResolver<'_, '_> {

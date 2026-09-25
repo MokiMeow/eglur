@@ -198,6 +198,111 @@ fn public_conformance_headers_are_checked_before_missing_bindings() {
 }
 
 #[test]
+fn header_bound_failures_precede_later_impl_validation_classes() {
+    let prelude = concat!(
+        "pub trait Need {}\n",
+        "pub struct Boxed[T: Need] {}\n",
+        "pub trait Marker { type Item }\n",
+        "struct Hidden {}\n",
+    );
+    for implementation in [
+        "impl Marker for Boxed[Hidden] {}\n",
+        "impl Marker for Boxed[Hidden] { type Item = Missing }\n",
+        "impl[U] Marker for Boxed[i64] { type Item = i64 }\n",
+    ] {
+        let source = format!("{prelude}{implementation}");
+        let (codes, disposition) = compile(&source);
+        assert_eq!(codes, ["TRAIT_BOUND_NOT_SATISFIED"], "{source}: {codes:?}");
+        assert_eq!(disposition, CompileDisposition::Rejected, "{source}");
+    }
+}
+
+#[test]
+fn header_bound_failure_precedes_duplicate_impl_classification() {
+    let source = concat!(
+        "trait Need {}\n",
+        "struct Boxed[T: Need] {}\n",
+        "trait Marker {}\n",
+        "struct Hidden {}\n",
+        "impl Marker for Boxed[Hidden] {}\n",
+        "impl Marker for Boxed[Hidden] {}\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(
+        codes,
+        ["TRAIT_BOUND_NOT_SATISFIED", "TRAIT_BOUND_NOT_SATISFIED"],
+        "{codes:?}"
+    );
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn impl_generic_bound_applications_are_header_checks() {
+    let source = concat!(
+        "pub trait Need {}\n",
+        "pub trait Wrap[T: Need] {}\n",
+        "pub trait Marker { type Item }\n",
+        "pub struct Carrier {}\n",
+        "struct Hidden {}\n",
+        "impl[T: Wrap[Hidden]] Marker for Carrier { type Item = i64 }\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["TRAIT_BOUND_NOT_SATISFIED"], "{codes:?}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn implemented_trait_arguments_are_header_checks() {
+    let source = concat!(
+        "pub trait Need {}\n",
+        "pub trait Marker[T: Need] {}\n",
+        "pub struct Carrier {}\n",
+        "struct Hidden {}\n",
+        "impl Marker[Hidden] for Carrier {}\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["TRAIT_BOUND_NOT_SATISFIED"], "{codes:?}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn independent_errors_outside_a_rejected_impl_remain_retained() {
+    let source = concat!(
+        "pub trait Need {}\n",
+        "pub struct Boxed[T: Need] {}\n",
+        "pub trait Marker { type Item }\n",
+        "struct Hidden {}\n",
+        "impl Marker for Boxed[Hidden] { type Item = Missing }\n",
+        "fn separate() -> Missing = ()\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(
+        codes,
+        ["TRAIT_BOUND_NOT_SATISFIED", "NAME_NOT_FOUND"],
+        "{codes:?}"
+    );
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn header_precedence_does_not_discard_an_invalid_alias_definition() {
+    let source = concat!(
+        "trait Need {}\n",
+        "struct Boxed[T: Need] {}\n",
+        "trait Marker { type Item }\n",
+        "type Broken = Missing\n",
+        "impl Marker for Boxed[i64] { type Item = Broken }\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(
+        codes,
+        ["NAME_NOT_FOUND", "TRAIT_BOUND_NOT_SATISFIED"],
+        "{codes:?}"
+    );
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
 fn public_conformance_header_bounds_can_use_other_impl_bindings() {
     let declarations = concat!(
         "pub trait Has { type Item }\n",
@@ -247,6 +352,57 @@ fn invalid_supporting_method_does_not_create_a_derivative_header_bound_error() {
     );
     let (codes, disposition) = compile(source);
     assert_eq!(codes, ["TRAIT_IMPL_MISSING_METHOD"], "{codes:?}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn rejected_supporting_header_does_not_create_a_derivative_bound_error() {
+    let declarations = concat!(
+        "pub trait Wrap[T] {}\n",
+        "pub struct Carrier {}\n",
+        "struct Hidden {}\n",
+        "struct Boxed[T: Wrap[Hidden]] {}\n",
+        "trait Marker {}\n",
+    );
+    let support = "impl Wrap[Hidden] for Carrier {}\n";
+    let dependent = "impl Marker for Boxed[Carrier] {}\n";
+    for source in [
+        format!("{declarations}{support}{dependent}"),
+        format!("{declarations}{dependent}{support}"),
+    ] {
+        let (codes, disposition) = compile(&source);
+        assert_eq!(codes, ["VISIBILITY_VIOLATION"], "{source}: {codes:?}");
+        assert_eq!(disposition, CompileDisposition::Rejected, "{source}");
+    }
+}
+
+#[test]
+fn rejected_impl_header_does_not_create_a_derivative_method_error() {
+    let source = concat!(
+        "pub trait Wrap[T] { fn run(self: &Self) -> i64 }\n",
+        "pub struct Carrier {}\n",
+        "struct Hidden {}\n",
+        "impl Wrap[Hidden] for Carrier { fn run(self: &Self) -> i64 = 1 }\n",
+        "fn invoke(value: Carrier) -> i64 = value.run()\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["VISIBILITY_VIOLATION"], "{codes:?}");
+    assert_eq!(disposition, CompileDisposition::Rejected);
+}
+
+#[test]
+fn a_valid_impl_proves_bounds_despite_a_rejected_duplicate() {
+    let source = concat!(
+        "trait Need {}\n",
+        "struct Carrier {}\n",
+        "impl Need for Carrier {}\n",
+        "impl Need for Carrier {}\n",
+        "struct Boxed[T: Need] {}\n",
+        "trait Marker {}\n",
+        "impl Marker for Boxed[Carrier] {}\n",
+    );
+    let (codes, disposition) = compile(source);
+    assert_eq!(codes, ["TRAIT_IMPL_DUPLICATE"], "{codes:?}");
     assert_eq!(disposition, CompileDisposition::Rejected);
 }
 

@@ -480,6 +480,8 @@ pub struct DeclarationSignatures {
     pub(super) occurrences: FactTable<TypeOccurrenceId, ResolvedTypeOccurrence>,
     pub(super) callables: Box<[CallableSignature]>,
     pub(super) impl_headers: FactTable<CanonicalTarget, TraitImplHeader>,
+    pub(super) rejected_impl_headers: BTreeMap<CanonicalTarget, TraitImplHeader>,
+    pub(super) impl_later_roots: BTreeMap<DefId, Poison>,
     pub(super) trait_methods: BTreeMap<CanonicalTarget, Box<[TraitMethodSignature]>>,
     pub(super) trait_method_owners: BTreeMap<CanonicalTarget, CanonicalTarget>,
     pub(super) declared_impl_methods: BTreeMap<CanonicalTarget, Box<[DeclaredImplMethod]>>,
@@ -602,6 +604,16 @@ impl DeclarationSignatures {
         &self,
     ) -> impl ExactSizeIterator<Item = (&CanonicalTarget, &SemanticFact<TraitImplHeader>)> {
         self.impl_headers.iter()
+    }
+
+    pub(crate) fn rejected_impl_headers(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&CanonicalTarget, &TraitImplHeader)> {
+        self.rejected_impl_headers.iter()
+    }
+
+    pub(crate) fn impl_later_roots(&self, declaration: DefId) -> Option<&Poison> {
+        self.impl_later_roots.get(&declaration)
     }
 
     #[must_use]

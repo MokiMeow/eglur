@@ -914,6 +914,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let Some(header) = self.impl_headers.get(&declaration_id).cloned() else {
             return Ok(Resolution::Unperformed);
         };
+        let declaration = self
+            .collection
+            .declaration(declaration_id)
+            .expect("impl belongs to collection");
+        let impl_span = self.required_span(source, declaration.origin())?;
+        let checkpoint = self.diagnostics.checkpoint();
         let bindings = self.resolve_source_impl_bindings(
             declaration_id,
             source,
@@ -922,6 +928,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             header.trait_ref(),
             header.target(),
         )?;
+        if let Some(roots) = self
+            .diagnostics
+            .roots_since_within(&checkpoint, &impl_span)?
+        {
+            self.impl_later_roots.insert(declaration_id, roots);
+        }
         match bindings {
             Resolution::Known(bindings) => Ok(Resolution::Known(DeclarationSignature::Impl {
                 associated_bindings: bindings.into_boxed_slice(),

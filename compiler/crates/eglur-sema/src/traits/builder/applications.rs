@@ -6,6 +6,7 @@ use crate::signatures::{TypeApplication, TypeApplicationRegion, TypeApplicationS
 
 #[derive(Clone, Copy)]
 pub(super) enum ApplicationPass {
+    ImplHeaders,
     BeforeImplMethods,
     BeforeImplBodies,
     All,
@@ -22,19 +23,23 @@ pub(super) fn validate_type_applications(
     let applications = signatures
         .type_applications()
         .filter(|application| {
-            !matches!(
-                (pass, application.site().region()),
-                (
-                    ApplicationPass::BeforeImplMethods,
-                    Some(
-                        TypeApplicationRegion::ImplMethodSignature
-                            | TypeApplicationRegion::ImplMethodBody
+            matches!(pass, ApplicationPass::ImplHeaders)
+                .then(|| application.site().region() == Some(TypeApplicationRegion::ImplHeader))
+                .unwrap_or_else(|| {
+                    !matches!(
+                        (pass, application.site().region()),
+                        (
+                            ApplicationPass::BeforeImplMethods,
+                            Some(
+                                TypeApplicationRegion::ImplMethodSignature
+                                    | TypeApplicationRegion::ImplMethodBody
+                            )
+                        ) | (
+                            ApplicationPass::BeforeImplBodies,
+                            Some(TypeApplicationRegion::ImplMethodBody)
+                        )
                     )
-                ) | (
-                    ApplicationPass::BeforeImplBodies,
-                    Some(TypeApplicationRegion::ImplMethodBody)
-                )
-            )
+                })
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -65,8 +70,11 @@ pub(super) fn validate_type_applications(
             {
                 continue;
             }
+            let is_impl_header =
+                application.site().region() == Some(TypeApplicationRegion::ImplHeader);
             match signatures.declaration(&application.site().owner()) {
-                FactState::Poisoned(_) => continue,
+                FactState::Poisoned(_) if !is_impl_header => continue,
+                FactState::Poisoned(_) => {}
                 FactState::Unperformed => {
                     unperformed_owners.insert(application.site().owner());
                     continue;
@@ -79,6 +87,7 @@ pub(super) fn validate_type_applications(
                     unperformed_owners.insert(application.site().owner());
                 }
                 ApplicationCheck::Failed(failure) => {
+                    let independent = !matches!(failure, TraitNormalization::Poisoned(_));
                     let poison = application_failure(
                         collection,
                         &source_map,
@@ -87,6 +96,13 @@ pub(super) fn validate_type_applications(
                         application,
                         failure,
                     )?;
+                    if independent
+                        && is_impl_header
+                        && let TypeApplicationSite::Source { owner, .. } = application.site()
+                        && let Some(later) = signatures.impl_later_roots(*owner)
+                    {
+                        diagnostics.select_preceding_roots(&poison, later)?;
+                    }
                     propagate_poison(
                         signatures,
                         &dependencies,

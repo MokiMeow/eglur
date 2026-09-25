@@ -1,5 +1,5 @@
 use super::*;
-use crate::signatures::{TypeApplication, TypeApplicationSite};
+use crate::signatures::{TypeApplication, TypeApplicationRegion, TypeApplicationSite};
 use crate::{DeclarationSignature, SemanticFact};
 
 pub(in crate::traits) enum ApplicationCheck {
@@ -111,10 +111,21 @@ impl TraitEnvironment {
         site: &TypeApplicationSite,
     ) -> Result<Vec<TraitAssumption>, TraitEnvironmentError> {
         if let TypeApplicationSite::Source { owner, .. } = site {
-            return Ok(self
-                .assumptions
-                .get(owner)
-                .map_or_else(Vec::new, |values| values.to_vec()));
+            let header = site.region() == Some(TypeApplicationRegion::ImplHeader);
+            return Ok(self.assumptions.get(owner).map_or_else(Vec::new, |values| {
+                values
+                    .iter()
+                    .filter(|assumption| {
+                        !header
+                            || !matches!(
+                                &assumption.evidence,
+                                TraitAssumptionEvidence::Implementation(current)
+                                    if current == &CanonicalTarget::Source(*owner)
+                            )
+                    })
+                    .cloned()
+                    .collect()
+            }));
         }
         let owner = site.owner();
         let mut assumptions = Vec::new();

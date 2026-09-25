@@ -36,6 +36,21 @@ pub(super) fn collect_implementations(
             },
         );
     }
+    for (declaration, header) in signatures.rejected_impl_headers() {
+        let FactState::Poisoned(poison) = signatures.impl_header(declaration) else {
+            return Err(TraitEnvironmentError::UnexpectedImplSignature(
+                declaration.clone(),
+            ));
+        };
+        implementations.insert(
+            declaration.clone(),
+            TraitImpl {
+                header: header.clone(),
+                bindings: BTreeMap::new(),
+                poison: Some(poison.clone()),
+            },
+        );
+    }
     Ok(CollectedImplementations::Complete(implementations))
 }
 

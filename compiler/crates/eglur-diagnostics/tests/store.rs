@@ -153,6 +153,113 @@ fn poison_merge_preserves_roots_and_rejects_cross_store_provenance() {
 }
 
 #[test]
+fn stage_selection_preserves_prior_and_outside_roots() {
+    let mut store = DiagnosticStore::new();
+    store
+        .record_failure(DiagnosticFailure::Root(source_root(diagnostic(
+            "PARSE_ERROR",
+            Severity::Error,
+            "main.eglur",
+            1,
+            4,
+            "earlier syntax error",
+        ))))
+        .unwrap();
+    let checkpoint = store.checkpoint();
+    store
+        .record_failure(DiagnosticFailure::Root(source_root(diagnostic(
+            "NAME_NOT_FOUND",
+            Severity::Error,
+            "other.eglur",
+            2,
+            4,
+            "independent alias error",
+        ))))
+        .unwrap();
+    store
+        .record_failure(DiagnosticFailure::Root(source_root(diagnostic(
+            "VISIBILITY_VIOLATION",
+            Severity::Error,
+            "main.eglur",
+            1,
+            10,
+            "later impl error",
+        ))))
+        .unwrap();
+    let local = store
+        .roots_since_within(&checkpoint, &source_span("main.eglur", 1, 0, 20))
+        .unwrap()
+        .expect("the impl has one new local root");
+    let preceding = store
+        .record_failure(DiagnosticFailure::Root(source_root(diagnostic(
+            "TRAIT_BOUND_NOT_SATISFIED",
+            Severity::Error,
+            "main.eglur",
+            1,
+            6,
+            "earlier-stage bound failure",
+        ))))
+        .unwrap();
+    store.select_preceding_roots(&preceding, &local).unwrap();
+    store
+        .record_failure(DiagnosticFailure::Derivative(local))
+        .unwrap();
+    assert!(store.has_errors());
+
+    let DiagnosticSnapshot::Rejected(snapshot) = store.finalize(None) else {
+        panic!("independent roots must remain retained")
+    };
+    let codes = snapshot
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| diagnostic.code().as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        codes,
+        ["PARSE_ERROR", "TRAIT_BOUND_NOT_SATISFIED", "NAME_NOT_FOUND"]
+    );
+}
+
+#[test]
+fn checkpoints_and_preceding_roots_belong_to_one_store() {
+    let mut first = DiagnosticStore::new();
+    let checkpoint = first.checkpoint();
+    let first_root = first
+        .record_failure(DiagnosticFailure::Root(source_root(diagnostic(
+            "NAME_NOT_FOUND",
+            Severity::Error,
+            "a.eglur",
+            1,
+            1,
+            "first",
+        ))))
+        .unwrap();
+    let mut second = DiagnosticStore::new();
+    let second_root = second
+        .record_failure(DiagnosticFailure::Root(source_root(diagnostic(
+            "NAME_NOT_FOUND",
+            Severity::Error,
+            "b.eglur",
+            2,
+            1,
+            "second",
+        ))))
+        .unwrap();
+    assert_eq!(
+        second
+            .roots_since_within(&checkpoint, &source_span("b.eglur", 2, 0, 5))
+            .unwrap_err(),
+        DiagnosticStoreError::ForeignCheckpoint
+    );
+    assert_eq!(
+        first
+            .select_preceding_roots(&second_root, &first_root)
+            .unwrap_err(),
+        DiagnosticStoreError::ForeignPoison
+    );
+}
+
+#[test]
 fn ordering_and_limit_ignore_discovery_order_without_hiding_rejection() {
     let mut store = DiagnosticStore::new();
     for start in [30, 10, 20] {

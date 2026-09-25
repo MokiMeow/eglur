@@ -62,6 +62,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             impl_headers: BTreeMap::new(),
             impl_header_poison: BTreeMap::new(),
             retained_impl_headers: FactTable::new(),
+            rejected_impl_headers: BTreeMap::new(),
+            impl_later_roots: BTreeMap::new(),
         };
         resolver.register_trusted_heads()?;
         resolver.register_source_heads()?;
@@ -83,6 +85,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             occurrences: self.occurrences,
             callables: self.callables.into_boxed_slice(),
             impl_headers: self.retained_impl_headers,
+            rejected_impl_headers: self.rejected_impl_headers,
+            impl_later_roots: self.impl_later_roots,
             trait_methods: self.trait_methods,
             trait_method_owners: self.trait_method_owners,
             declared_impl_methods: self.declared_impl_methods,
