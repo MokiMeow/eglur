@@ -153,6 +153,77 @@ fn parser_budgeted_pattern_failure_keeps_one_diagnostic() {
 }
 
 #[test]
+fn parser_budgeted_let_groups_bind_on_the_default_stack() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let pattern = format!("{}value{}", "(".repeat(254), ")".repeat(254));
+    let source = format!("fn f(input: i64) -> i64 {{ let {pattern} = input\n yield value }}\n");
+    let mut accepted = session(&source);
+    let analysis = accepted
+        .resolve(&branching_profile(), Some(&catalog))
+        .unwrap();
+    assert!(analysis.trace().missing().next().is_none());
+    let resolution = analysis.resolution().unwrap();
+    let binding = resolution
+        .names()
+        .locals()
+        .iter()
+        .find(|binding| binding.name().spelling() == "value")
+        .unwrap();
+    assert!(matches!(
+        resolution.body_types().local(binding.id()),
+        FactState::Known(_)
+    ));
+    assert!(diagnostic_codes(&accepted.into_diagnostics(None)).is_empty());
+}
+
+#[test]
+fn parser_budgeted_let_groups_preserve_duplicate_and_initializer_errors() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let groups = "(".repeat(245);
+    let closes = ")".repeat(245);
+    let cases = [
+        (
+            format!(
+                "fn f(input: (i64, i64)) -> i64 {{ let {groups}(value, value){closes} = input\n yield 0 }}\n"
+            ),
+            "LET_PATTERN_DUPLICATE_BINDING",
+        ),
+        (
+            format!("fn f() -> i64 {{ let {groups}value{closes} = missing\n yield 0 }}\n"),
+            "NAME_NOT_FOUND",
+        ),
+    ];
+    for (source, expected) in cases {
+        let mut rejected = session(&source);
+        let analysis = rejected
+            .resolve(&branching_profile(), Some(&catalog))
+            .unwrap();
+        let resolution = analysis.resolution().unwrap();
+        let bindings = resolution
+            .names()
+            .locals()
+            .iter()
+            .filter(|binding| binding.name().spelling() == "value")
+            .collect::<Vec<_>>();
+        assert!(!bindings.is_empty(), "{expected}");
+        for binding in bindings {
+            assert!(
+                matches!(
+                    resolution.body_types().local(binding.id()),
+                    FactState::Poisoned(_)
+                ),
+                "{expected}"
+            );
+        }
+        assert_eq!(
+            diagnostic_codes(&rejected.into_diagnostics(None)),
+            [expected],
+            "{expected}"
+        );
+    }
+}
+
+#[test]
 fn bare_enum_variant_spellings_are_not_whole_value_bindings() {
     let catalog = TrustedCatalog::first_slice().unwrap();
     for (declarations, ty, pattern, name) in [
