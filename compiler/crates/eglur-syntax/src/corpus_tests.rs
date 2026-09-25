@@ -548,6 +548,60 @@ fn ordinary_control_body_is_not_reclassified_as_a_restricted_suffix() {
 }
 
 #[test]
+fn braced_constructors_and_closures_keep_distinct_nested_holes() {
+    let cases = [
+        (
+            "fn f(x: i64) -> i64 = { yield match x { _ => x } }\n",
+            0,
+            0,
+            1,
+        ),
+        ("fn f(x: i64) -> i64 = { match x { _ => x } }\n", 0, 0, 1),
+        ("fn f(x: i64) -> i64 = { match x { _ => f(_) } }\n", 0, 1, 0),
+        (
+            "fn f(x: i64) -> i64 = (Wrap { value: (match x { _ => (Wrap { value: x }).value }) }).value\n",
+            2,
+            0,
+            0,
+        ),
+        ("fn f() -> Unit = Wrap { value: { f(_) } }\n", 1, 1, 0),
+        ("fn f() -> Unit = Wrap { value: _ }\n", 1, 0, 0),
+        ("fn f() -> Unit = consume { f(_) }\n", 0, 1, 0),
+        ("fn f() -> Unit = consume { |x: i64| x }\n", 0, 1, 0),
+        ("fn f() -> Unit = { take({ _ }) }\n", 0, 1, 1),
+        ("fn f() -> Unit = { take { _ } }\n", 0, 1, 1),
+        ("fn f() -> Unit = { _ = 1 }\n", 0, 0, 1),
+        ("fn f() -> Unit = { f(_)\n yield 1 }\n", 0, 0, 1),
+        ("fn f(x: i64) -> i64 = { let _ = x\n yield x }\n", 0, 0, 1),
+    ];
+
+    for (index, (text, constructors, closures, blocks)) in cases.into_iter().enumerate() {
+        let source = SourceFile::new(
+            FileId::new(u32::try_from(index).unwrap()),
+            text.as_bytes().to_vec(),
+        );
+        let FrontendOutcome::Parsed(parse) =
+            parse_with_entry(&source, ParseEntryPoint::CompilationUnit)
+        else {
+            panic!("valid UTF-8 source should reach the parser");
+        };
+        assert!(parse.is_success(), "{text}: {:?}", parse.diagnostics());
+        let count = |kind| {
+            let mut pending = vec![parse.syntax()];
+            let mut found = 0;
+            while let Some(node) = pending.pop() {
+                found += usize::from(node.kind() == kind);
+                pending.extend(node.children());
+            }
+            found
+        };
+        assert_eq!(count(SyntaxKind::StructLiteralExpr), constructors, "{text}");
+        assert_eq!(count(SyntaxKind::LambdaExpr), closures, "{text}");
+        assert_eq!(count(SyntaxKind::BlockExpr), blocks, "{text}");
+    }
+}
+
+#[test]
 fn contextual_reduce_by_preserves_every_syntactically_valid_candidate() {
     let sources = [
         "counter.reduce_by((h, f), g)",

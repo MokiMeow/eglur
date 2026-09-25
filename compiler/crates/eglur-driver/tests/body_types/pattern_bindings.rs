@@ -116,6 +116,43 @@ fn distinct_aliases_remain_valid_bindings() {
 }
 
 #[test]
+fn parser_budgeted_match_patterns_typecheck_on_the_default_stack() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let grouped = format!("{}value{}", "(".repeat(254), ")".repeat(254));
+    let aliases = (0..254)
+        .map(|index| format!("alias_{index} @ "))
+        .collect::<String>();
+
+    for pattern in [grouped, format!("{aliases}value")] {
+        let source = format!("fn f(input: i64) -> i64 = match input {{ {pattern} => value }}\n");
+        let mut accepted = session(&source);
+        let analysis = accepted
+            .resolve(&branching_profile(), Some(&catalog))
+            .unwrap();
+        assert!(analysis.trace().missing().next().is_none(), "{pattern}");
+        assert!(
+            diagnostic_codes(&accepted.into_diagnostics(None)).is_empty(),
+            "{pattern}"
+        );
+    }
+}
+
+#[test]
+fn parser_budgeted_pattern_failure_keeps_one_diagnostic() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let pattern = format!("{}(value, _){}", "(".repeat(253), ")".repeat(253));
+    let source = format!("fn f(input: i64) -> i64 = match input {{ {pattern} => 0 }}\n");
+    let mut rejected = session(&source);
+    rejected
+        .resolve(&branching_profile(), Some(&catalog))
+        .unwrap();
+    assert_eq!(
+        diagnostic_codes(&rejected.into_diagnostics(None)),
+        ["PATTERN_TYPE_MISMATCH"]
+    );
+}
+
+#[test]
 fn bare_enum_variant_spellings_are_not_whole_value_bindings() {
     let catalog = TrustedCatalog::first_slice().unwrap();
     for (declarations, ty, pattern, name) in [

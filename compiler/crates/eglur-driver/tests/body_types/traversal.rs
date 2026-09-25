@@ -1,5 +1,5 @@
 use super::{body_profile, diagnostic_codes, session};
-use eglur_driver::TrustedCatalog;
+use eglur_driver::{SupportProfile, TrustedCatalog};
 use eglur_sema::{
     BodyTypes, CompileCapability, ControlTransferKind, FactState, TypecheckCapability,
 };
@@ -24,6 +24,141 @@ fn accepted(source: &str, inspect: impl FnOnce(&BodyTypes)) {
         diagnostic_codes(&session.into_diagnostics(None)),
         Vec::<&str>::new()
     );
+}
+
+fn mixed_family_source(leaf: &str, depth: usize) -> String {
+    let mut expression = leaf.to_owned();
+    for _ in 0..depth {
+        expression = format!(
+            "id((if flag {{ yield match x {{ value => Wrap {{ value: {expression} }}.value }} }} else {{ yield x }},).0)"
+        );
+    }
+    format!(
+        "struct Wrap[T] {{ field value: T }}\nfn id[T](value: T) -> T = value\nfn f(flag: Bool, x: i64) -> Res[i64, NumericError] = result {{ yield Ok(checked {{ yield ({expression}) + 0 }}?) }}\n"
+    )
+}
+
+#[test]
+fn checked_question_as_struct_field_is_supported() {
+    let source = "struct Wrap { field value: i64 }\nfn f(x: i64) -> Res[i64, NumericError] = result { yield Ok((Wrap { value: (checked { yield x + 0 }?) }).value) }\n";
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let mut accepted = session(source);
+    accepted
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+    let diagnostics = accepted.into_diagnostics(None);
+    assert!(
+        diagnostic_codes(&diagnostics).is_empty(),
+        "{:?}",
+        diagnostics.diagnostics()
+    );
+}
+
+#[test]
+fn wildcard_match_arm_accepts_struct_literal_result() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for pattern in ["_", "value"] {
+        let source = format!(
+            "struct Wrap {{ field value: i64 }}\nfn f(x: i64) -> i64 = match x {{ {pattern} => Wrap {{ value: x }}.value }}\n"
+        );
+        let mut accepted = session(&source);
+        accepted
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        let diagnostics = accepted.into_diagnostics(None);
+        assert!(
+            diagnostic_codes(&diagnostics).is_empty(),
+            "{pattern}: {:?}",
+            diagnostics.diagnostics()
+        );
+    }
+
+    let depth = 2;
+    let source = format!(
+        "struct Wrap[T] {{ field value: T }}\nfn id[T](value: T) -> T = value\nfn f(flag: Bool, x: i64) -> i64 = {}x{}\n",
+        "id((if flag { yield match x { _ => Wrap { value: ".repeat(depth),
+        " }.value } } else { yield x },).0)".repeat(depth),
+    );
+    let mut accepted = session(&source);
+    accepted
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+    let diagnostics = accepted.into_diagnostics(None);
+    assert!(
+        diagnostic_codes(&diagnostics).is_empty(),
+        "nested wildcard: {:?}",
+        diagnostics.diagnostics()
+    );
+}
+
+#[test]
+fn wildcard_match_inside_expression_block_retains_its_result() {
+    let source = "fn f(x: i64) -> i64 = { yield match x { _ => x } }\n";
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let mut accepted = session(source);
+    accepted
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+    let diagnostics = accepted.into_diagnostics(None);
+    assert!(
+        diagnostic_codes(&diagnostics).is_empty(),
+        "{:?}",
+        diagnostics.diagnostics()
+    );
+}
+
+#[test]
+fn mixed_family_nesting_keeps_results_and_invocations_on_the_default_stack() {
+    let depth = 30;
+    let source = mixed_family_source("x", depth);
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let mut accepted = session(&source);
+    let analysis = accepted
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+    assert!(analysis.trace().missing().next().is_none());
+    let invocations = analysis
+        .resolution()
+        .unwrap()
+        .body_types()
+        .invocations()
+        .len();
+    let diagnostics = accepted.into_diagnostics(None);
+    assert!(
+        diagnostic_codes(&diagnostics).is_empty(),
+        "source length {}: {:?}",
+        source.len(),
+        diagnostics.diagnostics()
+    );
+    assert_eq!(invocations, 2 * depth + 1);
+}
+
+#[test]
+fn mixed_family_nesting_preserves_poison_and_unsupported_results() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for (leaf, expected) in [("x.0", Some("TUPLE_PROJECTION_NON_TUPLE")), ("[1]", None)] {
+        let source = mixed_family_source(leaf, 30);
+        let mut rejected = session(&source);
+        let analysis = rejected
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        let facts = analysis.resolution().unwrap().body_types();
+        assert_eq!(facts.invocations().len(), 0, "{leaf}");
+        if expected.is_none() {
+            assert!(analysis.trace().missing().any(|entry| {
+                entry.capability()
+                    == CompileCapability::Typecheck(TypecheckCapability::CheckContainers)
+            }));
+        }
+        let diagnostics = rejected.into_diagnostics(None);
+        assert_eq!(
+            diagnostic_codes(&diagnostics),
+            expected.into_iter().collect::<Vec<_>>(),
+            "{leaf}, source length {}: {:?}",
+            source.len(),
+            diagnostics.diagnostics()
+        );
+    }
 }
 
 #[test]

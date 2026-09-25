@@ -165,6 +165,7 @@ pub(super) struct Parser<'source> {
     region_has_diagnostic: bool,
     terminal: bool,
     depth: u16,
+    placeholder_hole: Option<bool>,
 }
 
 impl<'source> Parser<'source> {
@@ -197,6 +198,7 @@ impl<'source> Parser<'source> {
             region_has_diagnostic: false,
             terminal: false,
             depth: 0,
+            placeholder_hole: None,
         }
     }
 
