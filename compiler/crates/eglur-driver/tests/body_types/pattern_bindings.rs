@@ -138,6 +138,33 @@ fn parser_budgeted_match_patterns_typecheck_on_the_default_stack() {
 }
 
 #[test]
+fn nested_option_patterns_typecheck_with_payload_bindings() {
+    let depth = 64;
+    let ty = format!("{}i64{}", "Opt[".repeat(depth), "]".repeat(depth));
+    let pattern = format!("{}value{}", "Some(".repeat(depth), ")".repeat(depth));
+    let source =
+        format!("fn f(input: {ty}) -> i64 = match input {{ {pattern} => value, _ => 0 }}\n");
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let mut accepted = session(&source);
+    let analysis = accepted
+        .resolve(&branching_profile(), Some(&catalog))
+        .unwrap();
+    assert!(analysis.trace().missing().next().is_none());
+    let resolution = analysis.resolution().unwrap();
+    let binding = resolution
+        .names()
+        .locals()
+        .iter()
+        .find(|binding| binding.name().spelling() == "value")
+        .unwrap();
+    assert!(matches!(
+        resolution.body_types().local(binding.id()),
+        FactState::Known(_)
+    ));
+    assert!(diagnostic_codes(&accepted.into_diagnostics(None)).is_empty());
+}
+
+#[test]
 fn parser_budgeted_pattern_failure_keeps_one_diagnostic() {
     let catalog = TrustedCatalog::first_slice().unwrap();
     let pattern = format!("{}(value, _){}", "(".repeat(253), ")".repeat(253));

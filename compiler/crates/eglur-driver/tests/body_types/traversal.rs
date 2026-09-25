@@ -162,6 +162,72 @@ fn mixed_family_nesting_preserves_poison_and_unsupported_results() {
 }
 
 #[test]
+fn mixed_family_nesting_preserves_deep_let_pattern_facts() {
+    const DEPTH: usize = 20;
+
+    enum ExpectedFact {
+        Known,
+        Poisoned,
+        Unperformed,
+    }
+
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let pattern = format!("{}leaf_value{}", "(".repeat(90), ")".repeat(90));
+    for (initializer, expected_diagnostic, expected_fact, expected_invocations) in [
+        ("x", None, ExpectedFact::Known, 2 * DEPTH + 1),
+        (
+            "true",
+            Some("ASSIGNMENT_TYPE_MISMATCH"),
+            ExpectedFact::Poisoned,
+            0,
+        ),
+        ("[1]", None, ExpectedFact::Unperformed, 0),
+    ] {
+        let leaf = format!("{{ let {pattern}: i64 = {initializer}\n yield leaf_value }}");
+        let source = mixed_family_source(&leaf, DEPTH);
+        let mut checked = session(&source);
+        let analysis = checked
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        let resolution = analysis.resolution().unwrap();
+        let binding = resolution
+            .names()
+            .locals()
+            .iter()
+            .find(|binding| binding.name().spelling() == "leaf_value")
+            .unwrap();
+        let fact = resolution.body_types().local(binding.id());
+        assert!(
+            match expected_fact {
+                ExpectedFact::Known => matches!(fact, FactState::Known(_)),
+                ExpectedFact::Poisoned => matches!(fact, FactState::Poisoned(_)),
+                ExpectedFact::Unperformed => matches!(fact, FactState::Unperformed),
+            },
+            "{initializer}: {fact:?}"
+        );
+        assert_eq!(
+            resolution.body_types().invocations().len(),
+            expected_invocations,
+            "{initializer}"
+        );
+        if initializer == "[1]" {
+            assert!(analysis.trace().missing().any(|entry| {
+                entry.capability()
+                    == CompileCapability::Typecheck(TypecheckCapability::CheckContainers)
+            }));
+        } else {
+            assert!(analysis.trace().missing().next().is_none());
+        }
+        let snapshot = checked.into_diagnostics(None);
+        assert_eq!(
+            diagnostic_codes(&snapshot),
+            expected_diagnostic.into_iter().collect::<Vec<_>>(),
+            "{initializer}"
+        );
+    }
+}
+
+#[test]
 fn nested_yield_blocks_typecheck_on_the_default_stack() {
     let depth = 255;
     let source = format!(
