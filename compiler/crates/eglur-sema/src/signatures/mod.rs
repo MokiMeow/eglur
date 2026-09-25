@@ -13,4 +13,4 @@ pub use model::*;
 pub use resolver::{SignatureResolutionInputs, resolve_declaration_signatures};
 pub use trusted::*;
 
-pub(crate) use applications::{TypeApplication, TypeApplicationSite};
+pub(crate) use applications::{TypeApplication, TypeApplicationRegion, TypeApplicationSite};

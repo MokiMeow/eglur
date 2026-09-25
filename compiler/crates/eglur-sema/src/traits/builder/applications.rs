@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, VecDeque};
 
 use super::super::environment::ApplicationCheck;
 use super::*;
-use crate::signatures::{TypeApplication, TypeApplicationSite};
+use crate::signatures::{TypeApplication, TypeApplicationRegion, TypeApplicationSite};
 
 #[derive(Clone, Copy)]
 pub(super) enum ApplicationPass {
@@ -22,12 +22,19 @@ pub(super) fn validate_type_applications(
     let applications = signatures
         .type_applications()
         .filter(|application| {
-            !is_impl_method_application(collection, application.site())
-                || match pass {
-                    ApplicationPass::BeforeImplMethods => false,
-                    ApplicationPass::BeforeImplBodies => !application.site().is_body(),
-                    ApplicationPass::All => true,
-                }
+            !matches!(
+                (pass, application.site().region()),
+                (
+                    ApplicationPass::BeforeImplMethods,
+                    Some(
+                        TypeApplicationRegion::ImplMethodSignature
+                            | TypeApplicationRegion::ImplMethodBody
+                    )
+                ) | (
+                    ApplicationPass::BeforeImplBodies,
+                    Some(TypeApplicationRegion::ImplMethodBody)
+                )
+            )
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -94,32 +101,6 @@ pub(super) fn validate_type_applications(
                 .iter()
                 .all(|owner| matches!(signatures.declaration(owner), FactState::Poisoned(_))));
         }
-    }
-}
-
-fn is_impl_method_application(
-    collection: &DeclarationCollection,
-    site: &TypeApplicationSite,
-) -> bool {
-    let TypeApplicationSite::Source { owner, .. } = site else {
-        return false;
-    };
-    let mut current = *owner;
-    loop {
-        let Some(declaration) = collection.declaration(current) else {
-            return false;
-        };
-        let Some(parent) = declaration.parent() else {
-            return false;
-        };
-        if declaration.kind() == DeclarationKind::Function
-            && collection
-                .declaration(parent)
-                .is_some_and(|parent| parent.kind() == DeclarationKind::Impl)
-        {
-            return true;
-        }
-        current = parent;
     }
 }
 

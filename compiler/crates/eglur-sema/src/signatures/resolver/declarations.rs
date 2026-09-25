@@ -304,8 +304,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     continue;
                 }
                 let mut context = self.source_context(owner.declaration, owner.allow_self)?;
-                context.application_region =
-                    super::super::applications::TypeApplicationRegion::Body;
+                context.application_region = if context.application_region
+                    == super::super::applications::TypeApplicationRegion::ImplMethodSignature
+                {
+                    super::super::applications::TypeApplicationRegion::ImplMethodBody
+                } else {
+                    super::super::applications::TypeApplicationRegion::Body
+                };
                 for (type_ref, position) in roots {
                     self.resolve_source_type(
                         owner.declaration,

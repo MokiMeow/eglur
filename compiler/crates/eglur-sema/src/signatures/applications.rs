@@ -20,6 +20,10 @@ pub(crate) enum TypeApplicationSite {
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum TypeApplicationRegion {
+    ImplHeader,
+    ImplBinding,
+    ImplMethodSignature,
+    ImplMethodBody,
     Declaration,
     Body,
 }
@@ -32,14 +36,11 @@ impl TypeApplicationSite {
         }
     }
 
-    pub(crate) fn is_body(&self) -> bool {
-        matches!(
-            self,
-            Self::Source {
-                region: TypeApplicationRegion::Body,
-                ..
-            }
-        )
+    pub(crate) const fn region(&self) -> Option<TypeApplicationRegion> {
+        match self {
+            Self::Source { region, .. } => Some(*region),
+            Self::Trusted(_) => None,
+        }
     }
 }
 
