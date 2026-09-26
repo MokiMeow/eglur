@@ -40,6 +40,9 @@ mod numeric_traversal;
 #[path = "body_types/pattern_bindings.rs"]
 mod pattern_bindings;
 
+#[path = "body_types/pattern_traversal.rs"]
+mod pattern_traversal;
+
 #[path = "body_types/residual_patterns.rs"]
 mod residual_patterns;
 

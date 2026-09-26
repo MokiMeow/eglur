@@ -1,0 +1,677 @@
+use super::*;
+
+enum PatternPlan<'hir> {
+    Complete(Outcome<PatternCheck>),
+    Child {
+        pattern: PatternId,
+        expected: TypeId,
+        continuation: PatternContinuation<'hir>,
+    },
+}
+
+enum PatternContinuation<'hir> {
+    Alias {
+        binding: LocalBindingId,
+        expected: TypeId,
+    },
+    Group,
+    Tuple {
+        cursor: PatternElementCursor<'hir>,
+        types: Vec<TypeId>,
+        check: PatternCheck,
+    },
+    Variant {
+        cursor: PatternElementCursor<'hir>,
+        templates: Vec<TypeId>,
+        replacements: BTreeMap<GenericParameterId, TypeId>,
+        declaration: CanonicalTarget,
+        check: PatternCheck,
+    },
+}
+
+struct PatternElementCursor<'hir> {
+    elements: &'hir [PatternElement],
+    next_element: usize,
+    next_type: usize,
+}
+
+impl<'hir> PatternElementCursor<'hir> {
+    fn new(elements: &'hir [PatternElement]) -> Self {
+        Self {
+            elements,
+            next_element: 0,
+            next_type: 0,
+        }
+    }
+
+    fn next(&mut self, type_count: usize) -> Option<(PatternId, usize)> {
+        while let Some(element) = self.elements.get(self.next_element) {
+            self.next_element += 1;
+            match element {
+                PatternElement::Pattern(pattern) => {
+                    let type_index = self.next_type;
+                    self.next_type += 1;
+                    return Some((*pattern, type_index));
+                }
+                PatternElement::Rest(_) => self.next_type = type_count,
+            }
+        }
+        None
+    }
+}
+
+impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
+    pub(in super::super) fn type_match_pattern<'body>(
+        &mut self,
+        context: BodyContext<'_, 'body>,
+        pattern_id: PatternId,
+        expected: TypeId,
+    ) -> Result<Outcome<PatternCheck>, BodyTypingError> {
+        let mut pending = (pattern_id, expected);
+        let mut continuations = Vec::new();
+        loop {
+            let mut plan = self.prepare_match_pattern(context, pending.0, pending.1)?;
+            loop {
+                match plan {
+                    PatternPlan::Child {
+                        pattern,
+                        expected,
+                        continuation,
+                    } => {
+                        continuations.push(continuation);
+                        pending = (pattern, expected);
+                        break;
+                    }
+                    PatternPlan::Complete(outcome) => {
+                        let Some(continuation) = continuations.pop() else {
+                            return Ok(outcome);
+                        };
+                        plan = self.resume_match_pattern(continuation, outcome)?;
+                    }
+                }
+            }
+        }
+    }
+
+    fn prepare_match_pattern<'body>(
+        &mut self,
+        context: BodyContext<'_, 'body>,
+        pattern_id: PatternId,
+        expected: TypeId,
+    ) -> Result<PatternPlan<'body>, BodyTypingError> {
+        let BodyContext {
+            module,
+            source,
+            body,
+            ..
+        } = context;
+        let pattern = body
+            .pattern(pattern_id)
+            .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
+        match pattern.kind() {
+            PatternKind::Binding(name) => {
+                if let TypeKind::Nominal {
+                    head: NominalHead::Declaration(owner),
+                    ..
+                } = self.signatures.types().kind(expected)?
+                {
+                    match self.signatures.enum_variant_names(owner) {
+                        FactState::Known(names)
+                            if names.contains(
+                                &NameKey::from_hir(name).expect("valid binding name"),
+                            ) =>
+                        {
+                            let spelling = name.text().expect("valid binding name");
+                            let variant = format!("{}::{spelling}", self.format_type(expected)?);
+                            let span = source.origin_span(name.origin()).cloned().ok_or(
+                                BodyTypingError::MissingOriginSpan {
+                                    file: source.file(),
+                                    origin: name.origin(),
+                                },
+                            )?;
+                            let poison = crate::diagnostic::record_name_ambiguous(
+                                self.diagnostics,
+                                span,
+                                spelling,
+                                [format!("binding `{spelling}`"), variant],
+                            )?;
+                            return Ok(PatternPlan::Complete(Outcome::Poisoned(poison)));
+                        }
+                        FactState::Poisoned(poison) => {
+                            return Ok(PatternPlan::Complete(Outcome::Poisoned(poison.clone())));
+                        }
+                        FactState::Unperformed => {
+                            return Ok(PatternPlan::Complete(Outcome::Unperformed));
+                        }
+                        FactState::Known(_) | FactState::NotApplicable => {}
+                    }
+                }
+                let binding = self.local_binding(module, body.id(), name.origin())?;
+                Ok(PatternPlan::Complete(Outcome::Known(
+                    PatternCheck::binding(binding, expected),
+                )))
+            }
+            PatternKind::Wildcard => Ok(PatternPlan::Complete(Outcome::Known(
+                PatternCheck::irrefutable(),
+            ))),
+            PatternKind::Alias { name, pattern } => {
+                let binding = self.local_binding(module, body.id(), name.origin())?;
+                Ok(PatternPlan::Child {
+                    pattern: *pattern,
+                    expected,
+                    continuation: PatternContinuation::Alias { binding, expected },
+                })
+            }
+            PatternKind::Group(pattern) => Ok(PatternPlan::Child {
+                pattern: *pattern,
+                expected,
+                continuation: PatternContinuation::Group,
+            }),
+            PatternKind::Literal(literal) => {
+                let actual =
+                    self.type_literal(source, literal, TypeRequest::definitive(Some(expected)))?;
+                match actual {
+                    Outcome::Known(actual)
+                        if self.signatures.types().is_assignable(actual.ty, expected)? =>
+                    {
+                        Ok(PatternPlan::Complete(Outcome::Known(
+                            PatternCheck::partial(),
+                        )))
+                    }
+                    Outcome::Known(actual) => self
+                        .pattern_type_mismatch(
+                            source,
+                            pattern.origin(),
+                            "literal",
+                            expected,
+                            Some(actual.ty),
+                        )
+                        .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison))),
+                    other => Ok(PatternPlan::Complete(
+                        other.map(|_| PatternCheck::partial()),
+                    )),
+                }
+            }
+            PatternKind::Unit => {
+                let unit = self.primitive(PrimitiveType::Unit)?;
+                if expected == unit {
+                    Ok(PatternPlan::Complete(Outcome::Known(
+                        PatternCheck::irrefutable(),
+                    )))
+                } else {
+                    self.pattern_type_mismatch(source, pattern.origin(), "unit", expected, None)
+                        .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)))
+                }
+            }
+            PatternKind::Tuple(elements) => {
+                self.prepare_tuple_pattern(context, pattern_id, elements, expected)
+            }
+            PatternKind::Variant { payload, .. } => {
+                self.prepare_variant_pattern(context, pattern_id, payload, expected)
+            }
+            PatternKind::Or(_) | PatternKind::Struct { .. } => {
+                Ok(PatternPlan::Complete(self.unsupported(
+                    TypecheckCapability::CheckAdvancedPatterns,
+                    source,
+                    pattern.origin(),
+                )))
+            }
+            PatternKind::Invalid => Ok(PatternPlan::Complete(Outcome::Poisoned(
+                source.invalid_poison(pattern.origin()).cloned().ok_or(
+                    BodyTypingError::MissingOriginSpan {
+                        file: source.file(),
+                        origin: pattern.origin(),
+                    },
+                )?,
+            ))),
+        }
+    }
+
+    fn prepare_tuple_pattern<'body>(
+        &mut self,
+        context: BodyContext<'_, 'body>,
+        pattern_id: PatternId,
+        elements: &'body [PatternElement],
+        expected: TypeId,
+    ) -> Result<PatternPlan<'body>, BodyTypingError> {
+        let source = context.source;
+        let origin = context
+            .body
+            .pattern(pattern_id)
+            .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?
+            .origin();
+        let TypeKind::Tuple(types) = self.signatures.types().kind(expected)?.clone() else {
+            return self
+                .pattern_type_mismatch(source, origin, "tuple", expected, None)
+                .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
+        };
+        let explicit = elements
+            .iter()
+            .filter(|element| matches!(element, PatternElement::Pattern(_)))
+            .count();
+        let has_rest = elements
+            .iter()
+            .any(|element| matches!(element, PatternElement::Rest(_)));
+        if (!has_rest && explicit != types.len()) || (has_rest && explicit > types.len()) {
+            return self
+                .type_error(
+                    source,
+                    origin,
+                    "PATTERN_ARITY_MISMATCH",
+                    "tuple pattern arity mismatch",
+                    BTreeMap::from([
+                        (
+                            Box::<str>::from("expected_count"),
+                            self.diagnostic_count(types.len())?,
+                        ),
+                        (
+                            Box::<str>::from("actual_count"),
+                            self.diagnostic_count(explicit)?,
+                        ),
+                    ]),
+                )
+                .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
+        }
+        let mut cursor = PatternElementCursor::new(elements);
+        let Some((pattern, type_index)) = cursor.next(types.len()) else {
+            return Ok(PatternPlan::Complete(Outcome::Known(
+                PatternCheck::irrefutable(),
+            )));
+        };
+        Ok(PatternPlan::Child {
+            pattern,
+            expected: types[type_index],
+            continuation: PatternContinuation::Tuple {
+                cursor,
+                types: types.into_vec(),
+                check: PatternCheck::irrefutable(),
+            },
+        })
+    }
+
+    fn prepare_variant_pattern<'body>(
+        &mut self,
+        context: BodyContext<'_, 'body>,
+        pattern_id: PatternId,
+        payload: &'body eglur_hir::PatternPayload,
+        expected: TypeId,
+    ) -> Result<PatternPlan<'body>, BodyTypingError> {
+        let source = context.source;
+        let pattern = context
+            .body
+            .pattern(pattern_id)
+            .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
+        let target = match self.pattern_constructor_target(
+            context.module,
+            source,
+            pattern_id,
+            pattern.origin(),
+        )? {
+            Outcome::Known(target) => target,
+            Outcome::Poisoned(poison) => {
+                return Ok(PatternPlan::Complete(Outcome::Poisoned(poison)));
+            }
+            Outcome::Deferred => return Ok(PatternPlan::Complete(Outcome::Deferred)),
+            Outcome::Unperformed | Outcome::NotApplicable => {
+                return Ok(PatternPlan::Complete(Outcome::Unperformed));
+            }
+        };
+        if matches!(payload, eglur_hir::PatternPayload::Named(_))
+            && target.kind.is_type_namespace_target()
+        {
+            return Ok(PatternPlan::Complete(self.unsupported(
+                TypecheckCapability::CheckAdvancedPatterns,
+                source,
+                pattern.origin(),
+            )));
+        }
+        if target.kind != ResolvedTargetKind::VariantConstructor {
+            return self
+                .pattern_type_mismatch(source, pattern.origin(), "variant", expected, None)
+                .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
+        }
+        let contract = self.pattern_constructor_contract(&target)?;
+        let parameter_set = contract
+            .generic_parameters
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut replacements = BTreeMap::new();
+        let inferred =
+            self.infer_constraints(contract.result, expected, &parameter_set, &mut replacements)?;
+        if inferred == ConstraintOutcome::Conflict
+            || !contract
+                .generic_parameters
+                .iter()
+                .all(|parameter| replacements.contains_key(parameter))
+        {
+            return self
+                .pattern_type_mismatch(
+                    source,
+                    pattern.origin(),
+                    "variant",
+                    expected,
+                    Some(contract.result),
+                )
+                .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
+        }
+        let result = self
+            .signatures
+            .types_mut()
+            .substitute(contract.result, &replacements)?;
+        if result != expected {
+            return self
+                .pattern_type_mismatch(source, pattern.origin(), "variant", expected, Some(result))
+                .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
+        }
+        let actual_form = ConstructorPayloadForm::from_pattern(payload);
+        let expected_form = contract.shape.form();
+        if expected_form != actual_form {
+            let owner = self.target_label(&contract.declaration);
+            let variant = self
+                .target_name(&contract.declaration)
+                .unwrap_or(owner.as_str())
+                .to_owned();
+            return self
+                .type_error(
+                    source,
+                    pattern.origin(),
+                    "PATTERN_PAYLOAD_FORM_MISMATCH",
+                    "pattern payload form mismatch",
+                    BTreeMap::from([
+                        (Box::<str>::from("owner"), DiagnosticDataValue::from(owner)),
+                        (
+                            Box::<str>::from("variant"),
+                            DiagnosticDataValue::from(variant),
+                        ),
+                        (
+                            Box::<str>::from("expected_form"),
+                            DiagnosticDataValue::from(expected_form.spelling()),
+                        ),
+                        (
+                            Box::<str>::from("actual_form"),
+                            DiagnosticDataValue::from(actual_form.spelling()),
+                        ),
+                    ]),
+                )
+                .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
+        }
+        match (contract.shape, payload) {
+            (ConstructorShape::Absent, eglur_hir::PatternPayload::Absent) => {
+                Ok(PatternPlan::Complete(Outcome::Known(
+                    PatternCheck::variant(contract.declaration, PatternCheck::irrefutable()),
+                )))
+            }
+            (ConstructorShape::Tuple(types), eglur_hir::PatternPayload::Positional(elements)) => {
+                let explicit = elements
+                    .iter()
+                    .filter(|element| matches!(element, PatternElement::Pattern(_)))
+                    .count();
+                let has_rest = elements
+                    .iter()
+                    .any(|element| matches!(element, PatternElement::Rest(_)));
+                if (!has_rest && explicit != types.len()) || (has_rest && explicit > types.len()) {
+                    return self
+                        .type_error(
+                            source,
+                            pattern.origin(),
+                            "PATTERN_ARITY_MISMATCH",
+                            "variant pattern arity mismatch",
+                            BTreeMap::from([
+                                (
+                                    Box::<str>::from("expected_count"),
+                                    self.diagnostic_count(types.len())?,
+                                ),
+                                (
+                                    Box::<str>::from("actual_count"),
+                                    self.diagnostic_count(explicit)?,
+                                ),
+                            ]),
+                        )
+                        .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
+                }
+                let mut cursor = PatternElementCursor::new(elements);
+                let Some((pattern, type_index)) = cursor.next(types.len()) else {
+                    return Ok(PatternPlan::Complete(Outcome::Known(
+                        PatternCheck::variant(contract.declaration, PatternCheck::irrefutable()),
+                    )));
+                };
+                let child_type = self
+                    .signatures
+                    .types_mut()
+                    .substitute(types[type_index], &replacements)?;
+                Ok(PatternPlan::Child {
+                    pattern,
+                    expected: child_type,
+                    continuation: PatternContinuation::Variant {
+                        cursor,
+                        templates: types,
+                        replacements,
+                        declaration: contract.declaration,
+                        check: PatternCheck::irrefutable(),
+                    },
+                })
+            }
+            (ConstructorShape::Named(_), eglur_hir::PatternPayload::Named(_)) => {
+                Ok(PatternPlan::Complete(self.unsupported(
+                    TypecheckCapability::CheckAdvancedPatterns,
+                    source,
+                    pattern.origin(),
+                )))
+            }
+            _ => Err(BodyTypingError::InconsistentConstructorPayloadForm {
+                expected: expected_form.spelling(),
+                actual: actual_form.spelling(),
+            }),
+        }
+    }
+
+    fn resume_match_pattern<'body>(
+        &mut self,
+        continuation: PatternContinuation<'body>,
+        outcome: Outcome<PatternCheck>,
+    ) -> Result<PatternPlan<'body>, BodyTypingError> {
+        match continuation {
+            PatternContinuation::Alias { binding, expected } => Ok(PatternPlan::Complete(
+                outcome.map(|check| check.with_binding(binding, expected)),
+            )),
+            PatternContinuation::Group => Ok(PatternPlan::Complete(outcome)),
+            PatternContinuation::Tuple {
+                mut cursor,
+                types,
+                mut check,
+            } => {
+                let Outcome::Known(child) = outcome else {
+                    return Ok(PatternPlan::Complete(outcome));
+                };
+                check.merge(child);
+
+                let Some((pattern, type_index)) = cursor.next(types.len()) else {
+                    return Ok(PatternPlan::Complete(Outcome::Known(check)));
+                };
+                Ok(PatternPlan::Child {
+                    pattern,
+                    expected: types[type_index],
+                    continuation: PatternContinuation::Tuple {
+                        cursor,
+                        types,
+                        check,
+                    },
+                })
+            }
+            PatternContinuation::Variant {
+                mut cursor,
+                templates,
+                replacements,
+                declaration,
+                mut check,
+            } => {
+                let Outcome::Known(child) = outcome else {
+                    return Ok(PatternPlan::Complete(outcome));
+                };
+                check.merge(child);
+
+                let Some((pattern, type_index)) = cursor.next(templates.len()) else {
+                    return Ok(PatternPlan::Complete(Outcome::Known(
+                        PatternCheck::variant(declaration, check),
+                    )));
+                };
+                let expected = self
+                    .signatures
+                    .types_mut()
+                    .substitute(templates[type_index], &replacements)?;
+                Ok(PatternPlan::Child {
+                    pattern,
+                    expected,
+                    continuation: PatternContinuation::Variant {
+                        cursor,
+                        templates,
+                        replacements,
+                        declaration,
+                        check,
+                    },
+                })
+            }
+        }
+    }
+
+    fn pattern_type_mismatch(
+        &mut self,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
+        pattern_kind: &'static str,
+        expected: TypeId,
+        actual: Option<TypeId>,
+    ) -> Result<Poison, BodyTypingError> {
+        let reason = if actual.is_some() {
+            "typed_pattern"
+        } else {
+            "structural_form"
+        };
+        let mut data = BTreeMap::from([
+            (
+                Box::<str>::from("reason"),
+                DiagnosticDataValue::from(reason),
+            ),
+            (
+                Box::<str>::from("pattern_kind"),
+                DiagnosticDataValue::from(pattern_kind),
+            ),
+            (
+                Box::<str>::from("expected_type"),
+                DiagnosticDataValue::from(self.format_type(expected)?),
+            ),
+        ]);
+        if let Some(actual) = actual {
+            data.insert(
+                Box::<str>::from("actual_type"),
+                DiagnosticDataValue::from(self.format_type(actual)?),
+            );
+        }
+        self.type_error(
+            source,
+            origin,
+            "PATTERN_TYPE_MISMATCH",
+            "pattern type mismatch",
+            data,
+        )
+    }
+
+    pub(in super::super) fn check_match_coverage(
+        &mut self,
+        source: &SemanticSource<'_>,
+        scrutinee: TypeId,
+        arms: &[(&eglur_hir::MatchArm, PatternCoverage)],
+    ) -> Result<Outcome<()>, BodyTypingError> {
+        let mut total = false;
+        let mut variants = BTreeSet::new();
+        for (arm, coverage) in arms {
+            let unreachable = total
+                || (!coverage.variants.is_empty()
+                    && coverage
+                        .variants
+                        .iter()
+                        .all(|variant| variants.contains(variant)));
+            if unreachable {
+                return self
+                    .type_error(
+                        source,
+                        self.pattern_origin(source, arm.pattern)?,
+                        "MATCH_UNREACHABLE_ARM",
+                        "match arm is unreachable",
+                        BTreeMap::new(),
+                    )
+                    .map(Outcome::Poisoned);
+            }
+            if arm.guard.is_none() {
+                total |= coverage.total;
+                variants.extend(coverage.variants.iter().cloned());
+            }
+        }
+        if total {
+            return Ok(Outcome::Known(()));
+        }
+        let Some(universe) = self.match_variant_universe(scrutinee)? else {
+            let origin = arms
+                .first()
+                .map(|(arm, _)| self.pattern_origin(source, arm.pattern))
+                .transpose()?
+                .ok_or(BodyTypingError::MissingMatchCoverageOrigin)?;
+            self.demand_unimplemented(TypecheckCapability::AnalyzePatternCoverage, source, origin);
+            return Ok(Outcome::Unperformed);
+        };
+        if universe.iter().all(|variant| variants.contains(variant)) {
+            return Ok(Outcome::Known(()));
+        }
+        let origin = arms
+            .first()
+            .map(|(arm, _)| self.pattern_origin(source, arm.pattern))
+            .transpose()?
+            .ok_or(BodyTypingError::MissingMatchCoverageOrigin)?;
+        self.type_error(
+            source,
+            origin,
+            "MATCH_NON_EXHAUSTIVE",
+            "match is non-exhaustive",
+            BTreeMap::new(),
+        )
+        .map(Outcome::Poisoned)
+    }
+
+    fn match_variant_universe(
+        &self,
+        scrutinee: TypeId,
+    ) -> Result<Option<BTreeSet<CanonicalTarget>>, BodyTypingError> {
+        let TypeKind::Nominal { head, .. } = self.signatures.types().kind(scrutinee)? else {
+            return Ok(None);
+        };
+        let intrinsic = |left: LanguageItem, right: LanguageItem| {
+            let left = self.signatures.language_items().declaration(left)?.clone();
+            let right = self.signatures.language_items().declaration(right)?.clone();
+            Some(BTreeSet::from([left, right]))
+        };
+        let variants = match head {
+            NominalHead::Intrinsic(IntrinsicNominal::Opt) => {
+                intrinsic(LanguageItem::OptSome, LanguageItem::OptNone)
+            }
+            NominalHead::Intrinsic(IntrinsicNominal::Res) => {
+                intrinsic(LanguageItem::ResOk, LanguageItem::ResErr)
+            }
+            NominalHead::Declaration(_) => None,
+            NominalHead::Intrinsic(IntrinsicNominal::Own | IntrinsicNominal::Box) => None,
+        };
+        Ok(variants)
+    }
+
+    fn pattern_origin(
+        &self,
+        source: &SemanticSource<'_>,
+        pattern: PatternId,
+    ) -> Result<OriginId, BodyTypingError> {
+        source
+            .hir()
+            .and_then(|hir| hir.body(pattern.body()).pattern(pattern))
+            .map(eglur_hir::Pattern::origin)
+            .ok_or(BodyTypingError::WrongBodyPattern(pattern))
+    }
+}

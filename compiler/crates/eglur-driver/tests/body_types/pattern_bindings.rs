@@ -138,8 +138,8 @@ fn parser_budgeted_match_patterns_typecheck_on_the_default_stack() {
 }
 
 #[test]
-fn nested_option_patterns_typecheck_with_payload_bindings() {
-    let depth = 64;
+fn parser_budgeted_option_patterns_typecheck_with_payload_bindings() {
+    let depth = 254;
     let ty = format!("{}i64{}", "Opt[".repeat(depth), "]".repeat(depth));
     let pattern = format!("{}value{}", "Some(".repeat(depth), ")".repeat(depth));
     let source =
