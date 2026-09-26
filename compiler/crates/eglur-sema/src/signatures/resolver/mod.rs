@@ -441,15 +441,6 @@ enum TypeStructureValidation {
     AfterBindingCycles,
 }
 
-struct SourceTypeSite<'source, 'hir> {
-    owner: DefId,
-    source: &'source SemanticSource<'hir>,
-    hir: &'source HirFile,
-    context: &'source SourceTypeContext,
-    type_origin: OriginId,
-    type_ref: TypeRefId,
-}
-
 #[derive(Clone)]
 struct SelfBinding {
     ty: TypeId,
@@ -544,25 +535,6 @@ impl<T> Resolution<Result<T, TypeStoreError>> {
             Resolution::Poisoned(poison) => Ok(Resolution::Poisoned(poison)),
             Resolution::Unperformed => Ok(Resolution::Unperformed),
         }
-    }
-}
-
-fn combine_types<T>(
-    left: Resolution<Vec<TypeId>>,
-    right: Resolution<TypeId>,
-    combine: impl FnOnce(Vec<TypeId>, TypeId) -> Result<T, TypeStoreError>,
-) -> Result<Resolution<T>, SignatureResolutionError> {
-    match (left, right) {
-        (Resolution::Known(left), Resolution::Known(right)) => {
-            Ok(Resolution::Known(combine(left, right)?))
-        }
-        (Resolution::Poisoned(left), Resolution::Poisoned(right)) => {
-            Ok(Resolution::Poisoned(left.merge(&right)?))
-        }
-        (Resolution::Poisoned(poison), _) | (_, Resolution::Poisoned(poison)) => {
-            Ok(Resolution::Poisoned(poison))
-        }
-        _ => Ok(Resolution::Unperformed),
     }
 }
 
