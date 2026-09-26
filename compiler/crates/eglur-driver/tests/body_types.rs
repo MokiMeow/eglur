@@ -58,6 +58,9 @@ mod statements;
 #[path = "body_types/traversal.rs"]
 mod traversal;
 
+#[path = "body_types/type_graph_traversal.rs"]
+mod type_graph_traversal;
+
 #[path = "body_types/value_traversal.rs"]
 mod value_traversal;
 

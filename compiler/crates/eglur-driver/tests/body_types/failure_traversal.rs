@@ -172,3 +172,48 @@ fn deep_unsupported_result_body_stays_unperformed() {
     ));
     assert!(diagnostic_codes(&session.into_diagnostics(None)).is_empty());
 }
+
+#[test]
+fn failed_failure_contexts_do_not_leak_into_the_next_callable() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for (bad, expected) in [
+        (
+            "fn bad(x: Opt[i64]) -> Res[i64, Str] = result { yield Ok(x?) }",
+            Some("RESULT_BLOCK_MIXED_KINDS"),
+        ),
+        (
+            "fn bad(x: Res[i64, Str]) -> Res[i64, NumericError] = checked { yield x? }",
+            Some("Q_OUTSIDE_RESULT"),
+        ),
+        ("fn bad() -> Res[i64, Str] = result { yield [1] }", None),
+    ] {
+        let source = format!(
+            "{bad}\nfn good(value: Res[i64, Str]) -> Res[i64, Str] = result {{ yield Ok(value?) }}\n"
+        );
+        let mut checked = session(&source);
+        let analysis = checked
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        let resolution = analysis.resolution().unwrap();
+        let good = resolution
+            .declarations()
+            .modules()
+            .flat_map(|module| module.declarations())
+            .find(|declaration| {
+                declaration
+                    .name()
+                    .is_some_and(|name| name.spelling() == "good")
+            })
+            .unwrap();
+        assert!(
+            matches!(resolution.body_types().body(good.id()), FactState::Known(_)),
+            "{bad}"
+        );
+        assert_eq!(analysis.trace().has_missing(), expected.is_none(), "{bad}");
+        assert_eq!(
+            diagnostic_codes(&checked.into_diagnostics(None)),
+            expected.into_iter().collect::<Vec<_>>(),
+            "{bad}"
+        );
+    }
+}

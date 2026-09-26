@@ -26,16 +26,81 @@ fn accepted(source: &str, inspect: impl FnOnce(&BodyTypes)) {
     );
 }
 
-fn mixed_family_source(leaf: &str, depth: usize) -> String {
+fn mixed_expression(leaf: &str, depth: usize) -> String {
     let mut expression = leaf.to_owned();
     for _ in 0..depth {
         expression = format!(
             "id((if flag {{ yield match x {{ value => Wrap {{ value: {expression} }}.value }} }} else {{ yield x }},).0)"
         );
     }
+    expression
+}
+
+fn mixed_family_source(leaf: &str, depth: usize) -> String {
+    let expression = mixed_expression(leaf, depth);
     format!(
         "struct Wrap[T] {{ field value: T }}\nfn id[T](value: T) -> T = value\nfn f(flag: Bool, x: i64) -> Res[i64, NumericError] = result {{ yield Ok(checked {{ yield ({expression}) + 0 }}?) }}\n"
     )
+}
+
+fn check_mixed_match_pattern(unsupported: bool) {
+    let depth = 10;
+    let pattern_depth = 160;
+    let ty = format!(
+        "{}i64{}",
+        "Opt[".repeat(pattern_depth),
+        "]".repeat(pattern_depth)
+    );
+    let pattern = format!(
+        "{}payload{}",
+        "Some(".repeat(pattern_depth),
+        ")".repeat(pattern_depth)
+    );
+    let value = if unsupported { "[1]" } else { "payload" };
+    let leaf = format!("match input {{ {pattern} => {value}, _ => x }}");
+    let expression = mixed_expression(&leaf, depth);
+    let source = format!(
+        "struct Wrap[T] {{ field value: T }}\nfn id[T](value: T) -> T = value\nfn f(flag: Bool, x: i64, input: {ty}) -> Res[i64, NumericError] = result {{ yield Ok(checked {{ yield ({expression}) + 0 }}?) }}\n"
+    );
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let mut checked = session(&source);
+    let analysis = checked
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+    let resolution = analysis.resolution().unwrap();
+    let binding = resolution
+        .names()
+        .locals()
+        .iter()
+        .find(|binding| binding.name().spelling() == "payload")
+        .unwrap();
+    assert!(matches!(
+        resolution.body_types().local(binding.id()),
+        FactState::Known(_)
+    ));
+    assert_eq!(
+        resolution.body_types().invocations().len(),
+        if unsupported { 0 } else { 2 * depth + 1 }
+    );
+    let missing = analysis
+        .trace()
+        .missing()
+        .map(|entry| entry.capability())
+        .collect::<Vec<_>>();
+    assert!(missing.iter().all(|capability| *capability
+        == CompileCapability::Typecheck(TypecheckCapability::CheckContainers)));
+    assert_eq!(!missing.is_empty(), unsupported);
+    assert!(diagnostic_codes(&checked.into_diagnostics(None)).is_empty());
+}
+
+#[test]
+fn deep_match_pattern_and_expression_families_share_supported_depth() {
+    check_mixed_match_pattern(false);
+}
+
+#[test]
+fn missing_match_arm_capability_does_not_publish_enclosing_calls() {
+    check_mixed_match_pattern(true);
 }
 
 #[test]

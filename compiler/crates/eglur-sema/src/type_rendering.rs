@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+mod traversal;
+
 use crate::type_namespace::{
     TypeNameLookup, TypeNameLookupError, lookup_external_module_type, lookup_prelude_type,
     lookup_source_module_type,
@@ -284,95 +286,6 @@ impl<'a> DiagnosticTypeRenderer<'a> {
     pub(crate) fn with_self_binding(mut self, owner: CanonicalTarget, replacement: TypeId) -> Self {
         self.self_binding = Some((owner, replacement));
         self
-    }
-
-    pub(crate) fn render_type(&self, ty: TypeId) -> Result<String, DiagnosticTypeRenderingError> {
-        let kind = self.facts.types().kind(ty)?.clone();
-        match kind {
-            TypeKind::Never => Ok("Never".to_owned()),
-            TypeKind::Primitive(primitive) => Ok(primitive.spelling().to_owned()),
-            TypeKind::Nominal { head, substitution } => {
-                let name = match head {
-                    NominalHead::Intrinsic(intrinsic) => intrinsic.spelling().to_owned(),
-                    NominalHead::Declaration(target) => self.render_target_path(&target)?,
-                };
-                let arguments = self.facts.types().substitution(substitution)?;
-                self.render_application(name, arguments)
-            }
-            TypeKind::GenericParameter(parameter) => self
-                .facts
-                .generic_parameter_name(&parameter)
-                .map(str::to_owned)
-                .ok_or(DiagnosticTypeRenderingError::UnavailableGenericParameter(
-                    parameter,
-                )),
-            TypeKind::SelfType(target) => {
-                if self.owner_contains_target(&target) {
-                    Ok("Self".to_owned())
-                } else if let Some((owner, replacement)) = &self.self_binding
-                    && *owner == target
-                {
-                    self.render_type(*replacement)
-                } else {
-                    Err(DiagnosticTypeRenderingError::UnboundSelfType {
-                        target,
-                        owner: self.owner,
-                    })
-                }
-            }
-            TypeKind::Reference {
-                mutability,
-                referent,
-            } => {
-                let marker = if mutability == ReferenceMutability::Mutable {
-                    "&mut "
-                } else {
-                    "&"
-                };
-                Ok(format!("{marker}{}", self.render_type(referent)?))
-            }
-            TypeKind::RawPointer {
-                mutability,
-                referent,
-            } => {
-                let marker = if mutability == RawPointerMutability::Mutable {
-                    "*mut "
-                } else {
-                    "*const "
-                };
-                Ok(format!("{marker}{}", self.render_type(referent)?))
-            }
-            TypeKind::Tuple(elements) => {
-                let rendered = self.render_types(&elements)?;
-                let suffix = if rendered.len() == 1 { "," } else { "" };
-                Ok(format!("({}{suffix})", rendered.join(", ")))
-            }
-            TypeKind::Callable { parameters, result } => Ok(format!(
-                "Fn({}) -> {}",
-                self.render_types(&parameters)?.join(", "),
-                self.render_type(result)?
-            )),
-            TypeKind::ErrorUnion(members) => {
-                let mut rendered = self.render_types(&members)?;
-                rendered.sort();
-                match rendered.len() {
-                    0 => Err(DiagnosticTypeRenderingError::InvalidUnionArity(0)),
-                    1 => Ok(rendered.pop().expect("one rendered union member")),
-                    _ => Ok(format!("Union[{}]", rendered.join(", "))),
-                }
-            }
-            TypeKind::AssociatedProjection(projection) => Ok(format!(
-                "{}::{}",
-                self.render_type(projection.base())?,
-                self.names
-                    .target_name(projection.associated())
-                    .ok_or_else(|| {
-                        DiagnosticTypeRenderingError::MissingTargetName(
-                            projection.associated().clone(),
-                        )
-                    })?
-            )),
-        }
     }
 
     pub(crate) fn render_trait_ref(
