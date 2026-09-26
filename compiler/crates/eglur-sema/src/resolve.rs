@@ -1,5 +1,8 @@
 mod traversal;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -1710,137 +1713,86 @@ impl Resolver<'_, '_> {
         body: &Body,
         pattern: PatternId,
     ) -> Result<BindingGroup, NameResolutionError> {
-        let pattern_value = body
-            .pattern(pattern)
-            .ok_or(NameResolutionError::WrongBodyPattern(pattern))?;
+        enum Step<'hir> {
+            Pattern(PatternId),
+            Name(&'hir Name),
+        }
+
+        let mut pending = vec![Step::Pattern(pattern)];
         let mut introductions = Vec::new();
-        match pattern_value.kind() {
-            PatternKind::Binding(name) => match self.binding_introduction(source, name)? {
-                BindingName::Known(introduction) => introductions.push(introduction),
-                BindingName::Poisoned(poison) => {
-                    return Ok(BindingGroup::Poisoned(poison));
-                }
-            },
-            PatternKind::Alias { name, pattern } => {
-                match self.binding_introduction(source, name)? {
-                    BindingName::Known(introduction) => introductions.push(introduction),
-                    BindingName::Poisoned(poison) => {
-                        return Ok(BindingGroup::Poisoned(poison));
-                    }
-                }
-                return Ok(self
-                    .pattern_bindings(source, body, *pattern)?
-                    .prepend(introductions));
-            }
-            PatternKind::Wildcard | PatternKind::Literal(_) | PatternKind::Unit => {}
-            PatternKind::Group(pattern) => {
-                return self.pattern_bindings(source, body, *pattern);
-            }
-            PatternKind::Tuple(elements) => {
-                for element in elements {
-                    if let PatternElement::Pattern(pattern) = element {
-                        match self.pattern_bindings(source, body, *pattern)? {
-                            BindingGroup::Known(mut nested) => introductions.append(&mut nested),
-                            BindingGroup::Poisoned(poison) => {
-                                return Ok(BindingGroup::Poisoned(poison));
-                            }
-                        }
-                    }
-                }
-            }
-            PatternKind::Or(patterns) => {
-                for pattern in patterns {
-                    match self.pattern_bindings(source, body, *pattern)? {
-                        BindingGroup::Known(mut nested) => introductions.append(&mut nested),
-                        BindingGroup::Poisoned(poison) => {
+        while let Some(step) = pending.pop() {
+            let pattern = match step {
+                Step::Name(name) => {
+                    match self.binding_introduction(source, name)? {
+                        BindingName::Known(introduction) => introductions.push(introduction),
+                        BindingName::Poisoned(poison) => {
                             return Ok(BindingGroup::Poisoned(poison));
                         }
                     }
+                    continue;
                 }
-            }
-            PatternKind::Variant { payload, .. } => match payload {
-                eglur_hir::PatternPayload::Positional(elements) => {
-                    for element in elements {
+                Step::Pattern(pattern) => body
+                    .pattern(pattern)
+                    .ok_or(NameResolutionError::WrongBodyPattern(pattern))?,
+            };
+            match pattern.kind() {
+                PatternKind::Binding(name) => pending.push(Step::Name(name)),
+                PatternKind::Alias { name, pattern } => {
+                    pending.push(Step::Pattern(*pattern));
+                    pending.push(Step::Name(name));
+                }
+                PatternKind::Group(pattern) => pending.push(Step::Pattern(*pattern)),
+                PatternKind::Tuple(elements)
+                | PatternKind::Variant {
+                    payload: eglur_hir::PatternPayload::Positional(elements),
+                    ..
+                } => {
+                    for element in elements.iter().rev() {
                         if let PatternElement::Pattern(pattern) = element {
-                            match self.pattern_bindings(source, body, *pattern)? {
-                                BindingGroup::Known(mut nested) => {
-                                    introductions.append(&mut nested)
-                                }
-                                BindingGroup::Poisoned(poison) => {
-                                    return Ok(BindingGroup::Poisoned(poison));
-                                }
-                            }
+                            pending.push(Step::Pattern(*pattern));
                         }
                     }
                 }
-                eglur_hir::PatternPayload::Named(fields) => {
-                    for field in fields {
+                PatternKind::Or(patterns) => {
+                    pending.extend(patterns.iter().rev().copied().map(Step::Pattern));
+                }
+                PatternKind::Struct { fields, .. }
+                | PatternKind::Variant {
+                    payload: eglur_hir::PatternPayload::Named(fields),
+                    ..
+                } => {
+                    for field in fields.iter().rev() {
                         match field {
                             eglur_hir::FieldPattern::Field {
                                 name,
                                 pattern: None,
                                 ..
-                            } => match self.binding_introduction(source, name)? {
-                                BindingName::Known(introduction) => {
-                                    introductions.push(introduction)
-                                }
-                                BindingName::Poisoned(poison) => {
-                                    return Ok(BindingGroup::Poisoned(poison));
-                                }
-                            },
+                            } => pending.push(Step::Name(name)),
                             eglur_hir::FieldPattern::Field {
                                 pattern: Some(pattern),
                                 ..
-                            } => match self.pattern_bindings(source, body, *pattern)? {
-                                BindingGroup::Known(mut nested) => {
-                                    introductions.append(&mut nested)
-                                }
-                                BindingGroup::Poisoned(poison) => {
-                                    return Ok(BindingGroup::Poisoned(poison));
-                                }
-                            },
+                            } => pending.push(Step::Pattern(*pattern)),
                             eglur_hir::FieldPattern::Rest(_) => {}
                         }
                     }
                 }
-                eglur_hir::PatternPayload::Absent => {}
-            },
-            PatternKind::Struct { fields, .. } => {
-                for field in fields {
-                    match field {
-                        eglur_hir::FieldPattern::Field {
-                            name,
-                            pattern: None,
-                            ..
-                        } => match self.binding_introduction(source, name)? {
-                            BindingName::Known(introduction) => introductions.push(introduction),
-                            BindingName::Poisoned(poison) => {
-                                return Ok(BindingGroup::Poisoned(poison));
-                            }
-                        },
-                        eglur_hir::FieldPattern::Field {
-                            pattern: Some(pattern),
-                            ..
-                        } => match self.pattern_bindings(source, body, *pattern)? {
-                            BindingGroup::Known(mut nested) => introductions.append(&mut nested),
-                            BindingGroup::Poisoned(poison) => {
-                                return Ok(BindingGroup::Poisoned(poison));
-                            }
-                        },
-                        eglur_hir::FieldPattern::Rest(_) => {}
-                    }
+                PatternKind::Invalid => {
+                    return Ok(BindingGroup::Poisoned(
+                        source.invalid_poison(pattern.origin()).cloned().ok_or(
+                            NameResolutionError::MissingInvalidPoison {
+                                file: source.file(),
+                                origin: pattern.origin(),
+                            },
+                        )?,
+                    ));
                 }
-            }
-            PatternKind::Invalid => {
-                return Ok(BindingGroup::Poisoned(
-                    source
-                        .invalid_poison(pattern_value.origin())
-                        .cloned()
-                        .ok_or(NameResolutionError::MissingInvalidPoison {
-                            file: source.file(),
-                            origin: pattern_value.origin(),
-                        })?,
-                ));
+                PatternKind::Wildcard
+                | PatternKind::Literal(_)
+                | PatternKind::Unit
+                | PatternKind::Variant {
+                    payload: eglur_hir::PatternPayload::Absent,
+                    ..
+                } => {}
             }
         }
         Ok(BindingGroup::known(introductions))
@@ -2237,6 +2189,9 @@ impl BindingGroup {
         let mut canonical = Vec::<BindingIntroduction>::new();
         let mut positions = BTreeMap::<NameKey, usize>::new();
         for introduction in introductions {
+            #[cfg(test)]
+            tests::record_origin_visits(introduction.origins.len());
+
             if let Some(&index) = positions.get(&introduction.name) {
                 canonical[index].origins.extend(introduction.origins);
             } else {
@@ -2245,16 +2200,6 @@ impl BindingGroup {
             }
         }
         Self::Known(canonical)
-    }
-
-    fn prepend(self, mut prefix: Vec<BindingIntroduction>) -> Self {
-        match self {
-            Self::Known(mut values) => {
-                prefix.append(&mut values);
-                Self::known(prefix)
-            }
-            other => other,
-        }
     }
 }
 
