@@ -17,6 +17,136 @@ fn source_binding(rhs: &str) -> Analysis {
 }
 
 #[test]
+fn source_binding_chains_preserve_finite_and_cycle_affected_facts() {
+    for size in [1, 8, 32, 128] {
+        for cycle in [false, true] {
+            let mut text = String::from("trait Linked {\n");
+            for node in 0..size {
+                text.push_str(&format!("type A{node}\n"));
+            }
+            text.push_str("}\nstruct Node {}\nimpl Linked for Node {\n");
+            for node in 0..size {
+                let rhs = if node + 1 < size {
+                    format!("Self::A{}", node + 1)
+                } else if cycle {
+                    format!("Self::A{node}")
+                } else {
+                    String::from("i64")
+                };
+                text.push_str(&format!("type A{node} = {rhs}\n"));
+            }
+            text.push_str("}\n");
+            let analysis = analyze(
+                &text,
+                &CapabilitySet::signatures(),
+                Some(&empty_external()),
+                None,
+            );
+            assert_eq!(
+                diagnostic_codes(&analysis.diagnostics),
+                if cycle {
+                    vec!["ASSOCIATED_TYPE_CYCLE"]
+                } else {
+                    vec![]
+                },
+                "size={size}, cycle={cycle}"
+            );
+            let signatures = analysis.signatures.unwrap();
+            for node in 0..size {
+                let binding = source_def(
+                    &analysis.declarations,
+                    &format!("A{node}"),
+                    DeclarationKind::AssociatedTypeBinding,
+                );
+                let fact = signatures.source_declaration(binding);
+                assert!(if cycle {
+                    matches!(fact, FactState::Poisoned(_))
+                } else {
+                    matches!(fact, FactState::Known(_))
+                });
+            }
+        }
+    }
+}
+
+#[test]
+fn multiple_cycles_blame_the_first_written_cyclic_binding_not_a_dependent() {
+    let text = "trait Linked {\n type A\n type B\n type C\n type D\n type Dependent\n type Free\n }\n\
+                struct Node {}\n impl Linked for Node {\n\
+                type Dependent = Self::A\n\
+                type D = Self::C\n\
+                type B = Self::A\n\
+                type C = Self::D\n\
+                type A = Self::B\n\
+                type Free = i64\n }\n";
+    let prepared = prepare("main.eglur", text);
+    let expected_span = prepared
+        .hir
+        .items()
+        .find_map(|(_, item)| {
+            let eglur_hir::ItemKind::AssociatedTypeBinding(binding) = item.kind() else {
+                return None;
+            };
+            (binding.name.text() == Some("D")).then(|| {
+                prepared
+                    .hir
+                    .origin(prepared.hir.type_ref(binding.value).origin())
+                    .source()
+            })
+        })
+        .unwrap();
+    let analysis = analyze(
+        text,
+        &CapabilitySet::signatures(),
+        Some(&empty_external()),
+        None,
+    );
+    assert_eq!(
+        diagnostic_codes(&analysis.diagnostics),
+        ["ASSOCIATED_TYPE_CYCLE"]
+    );
+    assert_eq!(
+        analysis.diagnostics.diagnostics()[0]
+            .primary_span()
+            .as_source()
+            .unwrap()
+            .file_span(),
+        expected_span
+    );
+    let signatures = analysis.signatures.unwrap();
+    let cycle = source_def(
+        &analysis.declarations,
+        "A",
+        DeclarationKind::AssociatedTypeBinding,
+    );
+    let FactState::Poisoned(expected_poison) = signatures.source_declaration(cycle) else {
+        panic!("cycle binding has no poison");
+    };
+    for name in ["A", "B", "C", "D", "Dependent"] {
+        let binding = source_def(
+            &analysis.declarations,
+            name,
+            DeclarationKind::AssociatedTypeBinding,
+        );
+        let FactState::Poisoned(poison) = signatures.source_declaration(binding) else {
+            panic!("affected binding {name} has no poison");
+        };
+        poison
+            .merge(expected_poison)
+            .expect("cycle dependents retain the same diagnostic store");
+    }
+    let free = source_def(
+        &analysis.declarations,
+        "Free",
+        DeclarationKind::AssociatedTypeBinding,
+    );
+    assert!(matches!(
+        signatures.source_declaration(free),
+        FactState::Known(_)
+    ));
+}
+
+#[test]
 fn associated_cycles_precede_structural_checks_through_nested_types_and_aliases() {
     for rhs in [
         "(&i64, Self::Item)",
