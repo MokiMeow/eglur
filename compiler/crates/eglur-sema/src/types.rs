@@ -555,6 +555,10 @@ impl CanonicalTypeStore {
     ) -> Result<TypeId, TypeStoreError> {
         self.require_type(root)?;
         self.require_types(replacements.values())?;
+        if replacements.is_empty() {
+            return Ok(root);
+        }
+
         let mut memo = BTreeMap::new();
         self.substitute_inner(root, replacements, &mut memo)
     }
@@ -794,6 +798,8 @@ impl CanonicalTypeStore {
         if let Some(&resolved) = memo.get(&root) {
             return Ok(resolved);
         }
+        #[cfg(test)]
+        tests::observe_substitution_read();
         let kind = self.kind(root)?.clone();
         let resolved = match kind {
             TypeKind::Never | TypeKind::Primitive(_) | TypeKind::SelfType(_) => root,
@@ -1048,9 +1054,18 @@ impl From<IdentityOverflow> for TypeStoreError {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::collections::BTreeMap;
 
     use super::*;
+
+    thread_local! {
+        static SUBSTITUTION_READS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(super) fn observe_substitution_read() {
+        SUBSTITUTION_READS.set(SUBSTITUTION_READS.get() + 1);
+    }
 
     fn external(key: &str) -> CanonicalTarget {
         CanonicalTarget::External(ExternalDefId::new(key).unwrap())
@@ -1226,6 +1241,127 @@ mod tests {
                 .unwrap(),
             [concrete]
         );
+    }
+
+    #[test]
+    fn empty_substitution_preserves_every_canonical_kind_without_payload_reads() {
+        let mut store = CanonicalTypeStore::new().unwrap();
+        let integer = store.primitive(PrimitiveType::I64).unwrap();
+        let text = store.primitive(PrimitiveType::Str).unwrap();
+        let parameter = store
+            .generic_parameter(GenericParameterId::Trusted {
+                owner: ExternalDefId::new("std::generic").unwrap(),
+                index: 0,
+            })
+            .unwrap();
+        let self_type = store.self_type(external("std::Node")).unwrap();
+        let owned = store
+            .nominal(NominalHead::Intrinsic(IntrinsicNominal::Own), [parameter])
+            .unwrap();
+        let reference = store
+            .reference(ReferenceMutability::Mutable, parameter)
+            .unwrap();
+        let pointer = store
+            .raw_pointer(RawPointerMutability::Const, parameter)
+            .unwrap();
+        let tuple = store.tuple([owned, reference, pointer, integer]).unwrap();
+        let callable = store.callable([tuple, parameter], self_type).unwrap();
+        let union = store.error_union([integer, text, callable]).unwrap();
+        let arguments = store.intern_substitution([parameter, tuple]).unwrap();
+        let projection = store
+            .associated_projection(AssociatedProjection::new(
+                parameter,
+                TraitRef::new(external("std::Linked"), arguments),
+                external("std::Linked::Item"),
+            ))
+            .unwrap();
+        let roots = [
+            store.never(),
+            integer,
+            text,
+            parameter,
+            self_type,
+            owned,
+            reference,
+            pointer,
+            tuple,
+            callable,
+            union,
+            projection,
+        ];
+        let original = roots
+            .iter()
+            .map(|&root| store.kind(root).unwrap().clone())
+            .collect::<Vec<_>>();
+        let type_count = store.type_count();
+        let substitution_count = store.substitution_count();
+        SUBSTITUTION_READS.set(0);
+
+        for (&root, kind) in roots.iter().zip(original) {
+            assert_eq!(store.substitute(root, &BTreeMap::new()), Ok(root));
+            assert_eq!(store.kind(root).unwrap(), &kind);
+        }
+        assert_eq!(SUBSTITUTION_READS.get(), 0);
+        assert_eq!(store.type_count(), type_count);
+        assert_eq!(store.substitution_count(), substitution_count);
+    }
+
+    #[test]
+    fn empty_substitution_does_not_rescan_shared_suffixes_or_deep_graphs() {
+        for size in [32, 128, 512, 20_000] {
+            let mut store = CanonicalTypeStore::new().unwrap();
+            let scalar = store.primitive(PrimitiveType::I64).unwrap();
+            let mut root = scalar;
+            let mut roots = Vec::new();
+            for _ in 0..size {
+                root = store.tuple([root, scalar]).unwrap();
+                roots.push(root);
+            }
+            let type_count = store.type_count();
+            SUBSTITUTION_READS.set(0);
+
+            for root in roots {
+                assert_eq!(store.substitute(root, &BTreeMap::new()), Ok(root));
+            }
+            assert_eq!(SUBSTITUTION_READS.get(), 0, "size={size}");
+            assert_eq!(store.type_count(), type_count);
+        }
+    }
+
+    #[test]
+    fn substitution_preserves_root_and_replacement_validation_order() {
+        let mut store = CanonicalTypeStore::new().unwrap();
+        let scalar = store.primitive(PrimitiveType::I64).unwrap();
+        let parameter = GenericParameterId::Trusted {
+            owner: ExternalDefId::new("std::generic").unwrap(),
+            index: 0,
+        };
+        let parameter_type = store.generic_parameter(parameter.clone()).unwrap();
+        let root = store.tuple([parameter_type, scalar]).unwrap();
+        let unknown_root = TypeId::from_index(store.type_count() + 10).unwrap();
+        let unknown_value = TypeId::from_index(store.type_count() + 11).unwrap();
+        let invalid = BTreeMap::from([(parameter.clone(), unknown_value)]);
+        SUBSTITUTION_READS.set(0);
+
+        assert_eq!(
+            store.substitute(unknown_root, &BTreeMap::new()),
+            Err(TypeStoreError::UnknownType(unknown_root)),
+        );
+        assert_eq!(
+            store.substitute(unknown_root, &invalid),
+            Err(TypeStoreError::UnknownType(unknown_root)),
+        );
+        assert_eq!(
+            store.substitute(root, &invalid),
+            Err(TypeStoreError::UnknownType(unknown_value)),
+        );
+        assert_eq!(SUBSTITUTION_READS.get(), 0);
+
+        let concrete = store
+            .substitute(root, &BTreeMap::from([(parameter, scalar)]))
+            .unwrap();
+        assert_eq!(concrete, store.tuple([scalar, scalar]).unwrap());
+        assert_eq!(SUBSTITUTION_READS.get(), 3);
     }
 
     #[test]
