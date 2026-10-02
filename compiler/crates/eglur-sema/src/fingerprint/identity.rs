@@ -264,16 +264,16 @@ impl<'a> KeyDeriver<'a> {
             && self
                 .collection
                 .module(declaration.id().module())
-                .into_iter()
-                .flat_map(|module| module.declarations())
-                .filter(|candidate| {
-                    candidate.kind() == DeclarationKind::Function
-                        && candidate.parent() == declaration.parent()
-                        && candidate.name() == declaration.name()
+                .is_some_and(|module| {
+                    module
+                        .direct_candidates(
+                            declaration.parent(),
+                            declaration.name(),
+                            DeclarationKind::Function,
+                        )
+                        .len()
+                        > 1
                 })
-                .take(2)
-                .count()
-                > 1
     }
 
     fn overload_discriminator(

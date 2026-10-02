@@ -142,6 +142,41 @@ fn bound_priority_does_not_change_semantic_contract_or_evidence_fingerprints() {
 }
 
 #[test]
+fn overload_fingerprints_preserve_function_and_receiver_families_under_reordering() {
+    let families = [
+        [
+            "pub overload fn choose(value: Bool) -> Bool = value\n",
+            "pub overload fn choose(value: Str) -> Str = value\n",
+        ],
+        [
+            "pub overload fn parse(self: Self, value: Bool) -> Bool = value\n",
+            "pub overload fn parse(self: &Self, value: Bool) -> Bool = value\n",
+        ],
+    ];
+    for (index, family) in families.into_iter().enumerate() {
+        let source = |members: [&str; 2]| {
+            let members = members.concat();
+            if index == 0 {
+                format!(
+                    "{members}\n\
+                     pub fn boolean(value: Bool) -> Bool = choose(value)\n\
+                     pub fn text(value: Str) -> Str = choose(value)\n"
+                )
+            } else {
+                format!("pub struct Parser {{\n{members}}}\n")
+            }
+        };
+        let ordered = resolve([file("main.eglur", &source(family))], "main.eglur", false);
+        let reversed = resolve(
+            [file("main.eglur", &source([family[1], family[0]]))],
+            "main.eglur",
+            false,
+        );
+        assert_eq!(ordered.semantics, reversed.semantics);
+    }
+}
+
+#[test]
 fn qualified_trait_aliases_share_the_same_body_fingerprint() {
     let resolve_alias = |import: &str, owner: &str| {
         let main = format!(

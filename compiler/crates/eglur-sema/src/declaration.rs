@@ -16,6 +16,9 @@ use crate::{
     SemanticLocation, SemanticSource,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Declaration role retained independently from later canonical type facts.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DeclarationKind {
@@ -205,6 +208,7 @@ pub struct ModuleDeclarations {
     declarations: Vec<Declaration>,
     item_defs: BTreeMap<ItemId, DefId>,
     module_bindings: BTreeMap<(Namespace, NameKey), Vec<DefId>>,
+    direct_declarations: BTreeMap<(Option<DefId>, DeclarationKind, Option<NameKey>), Vec<DefId>>,
     imports: Vec<ImportRecord>,
     declaration_poison: Option<Poison>,
     import_poison: Option<Poison>,
@@ -228,7 +232,15 @@ impl ModuleDeclarations {
     }
 
     pub fn declarations(&self) -> impl ExactSizeIterator<Item = &Declaration> {
-        self.declarations.iter()
+        #[cfg(test)]
+        let declarations = self
+            .declarations
+            .iter()
+            .inspect(|_| tests::observe_declaration_visit());
+        #[cfg(not(test))]
+        let declarations = self.declarations.iter();
+
+        declarations
     }
 
     #[must_use]
@@ -245,6 +257,17 @@ impl ModuleDeclarations {
     pub fn candidates(&self, namespace: Namespace, name: &NameKey) -> &[DefId] {
         self.module_bindings
             .get(&(namespace, name.clone()))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    pub(crate) fn direct_candidates(
+        &self,
+        parent: Option<DefId>,
+        name: Option<&NameKey>,
+        kind: DeclarationKind,
+    ) -> &[DefId] {
+        self.direct_declarations
+            .get(&(parent, kind, name.cloned()))
             .map_or(&[], Vec::as_slice)
     }
 
@@ -356,15 +379,11 @@ impl DeclarationCollection {
         kind: DeclarationKind,
     ) -> Vec<DefId> {
         self.module(parent.module())
-            .into_iter()
-            .flat_map(ModuleDeclarations::declarations)
-            .filter(|declaration| {
-                declaration.parent() == Some(parent)
-                    && declaration.kind() == kind
-                    && declaration.name() == Some(name)
+            .map_or_else(Vec::new, |module| {
+                module
+                    .direct_candidates(Some(parent), Some(name), kind)
+                    .to_vec()
             })
-            .map(Declaration::id)
-            .collect()
     }
 
     #[must_use]
@@ -433,6 +452,7 @@ pub fn collect_declarations(
             declarations: Vec::new(),
             item_defs: BTreeMap::new(),
             module_bindings: BTreeMap::new(),
+            direct_declarations: BTreeMap::new(),
             imports: Vec::new(),
             declaration_poison: source.source_poison().cloned(),
             import_poison: source.source_poison().cloned(),
@@ -642,6 +662,11 @@ fn allocate_declaration(
         origin,
         item,
     });
+    module
+        .direct_declarations
+        .entry((parent, kind, name.clone()))
+        .or_default()
+        .push(id);
     if parent.is_none()
         && let (Some(name), Some(namespace)) = (name, kind.namespace())
     {
