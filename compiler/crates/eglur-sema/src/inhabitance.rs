@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
@@ -6,6 +6,10 @@ use crate::{
     GenericParameterId, IntrinsicNominal, NominalHead, TrustedTypeExpr, TypeId, TypeKind,
     TypeStoreError,
 };
+
+mod fixed_point;
+
+use fixed_point::{NodeFormula, NodeId};
 
 /// Conservative proof state for whether a well-formed type has a value.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -242,60 +246,6 @@ impl From<TypeStoreError> for InhabitanceError {
     }
 }
 
-type NodeId = usize;
-
-#[derive(Clone)]
-enum NodeFormula {
-    Constant(Inhabitance),
-    Product(Box<[NodeId]>),
-    Sum(Box<[NodeId]>),
-}
-
-impl NodeFormula {
-    fn dependencies(&self) -> &[NodeId] {
-        match self {
-            Self::Constant(_) => &[],
-            Self::Product(dependencies) | Self::Sum(dependencies) => dependencies,
-        }
-    }
-
-    fn evaluate(&self, values: &[Inhabitance]) -> Inhabitance {
-        match self {
-            Self::Constant(value) => *value,
-            Self::Product(dependencies) => {
-                if dependencies
-                    .iter()
-                    .any(|&dependency| values[dependency] == Inhabitance::Uninhabited)
-                {
-                    Inhabitance::Uninhabited
-                } else if dependencies
-                    .iter()
-                    .all(|&dependency| values[dependency] == Inhabitance::Inhabited)
-                {
-                    Inhabitance::Inhabited
-                } else {
-                    Inhabitance::Unknown
-                }
-            }
-            Self::Sum(dependencies) => {
-                if dependencies
-                    .iter()
-                    .any(|&dependency| values[dependency] == Inhabitance::Inhabited)
-                {
-                    Inhabitance::Inhabited
-                } else if dependencies
-                    .iter()
-                    .all(|&dependency| values[dependency] == Inhabitance::Uninhabited)
-                {
-                    Inhabitance::Uninhabited
-                } else {
-                    Inhabitance::Unknown
-                }
-            }
-        }
-    }
-}
-
 struct ActiveNominal {
     arguments: Box<[TypeId]>,
     node: NodeId,
@@ -336,29 +286,7 @@ impl<'facts> InhabitanceGraph<'facts> {
 
     fn classify(mut self, root: TypeId) -> Result<Inhabitance, InhabitanceError> {
         let root = self.build_type(root)?;
-        let mut reverse = vec![Vec::new(); self.nodes.len()];
-        for (node, formula) in self.nodes.iter().enumerate() {
-            for &dependency in formula.dependencies() {
-                reverse[dependency].push(node);
-            }
-        }
-        let mut values = vec![Inhabitance::Uninhabited; self.nodes.len()];
-        let mut pending = (0..self.nodes.len()).collect::<VecDeque<_>>();
-        let mut queued = vec![true; self.nodes.len()];
-        while let Some(node) = pending.pop_front() {
-            queued[node] = false;
-            let next = self.nodes[node].evaluate(&values);
-            if next <= values[node] {
-                continue;
-            }
-            values[node] = next;
-            for &dependent in &reverse[node] {
-                if !queued[dependent] {
-                    queued[dependent] = true;
-                    pending.push_back(dependent);
-                }
-            }
-        }
+        let values = fixed_point::least_fixed_point(&self.nodes);
         Ok(values[root])
     }
 
@@ -659,43 +587,10 @@ impl<'facts> InhabitanceGraph<'facts> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Inhabitance, NodeFormula, TrustedInhabitanceEnvironment, TrustedInhabitanceError,
-        TrustedInhabitanceFact, TrustedNominalInhabitance,
+        TrustedInhabitanceEnvironment, TrustedInhabitanceError, TrustedInhabitanceFact,
+        TrustedNominalInhabitance,
     };
     use crate::ExternalDefId;
-
-    #[test]
-    fn product_and_sum_formulas_use_the_closed_lattice() {
-        let values = [
-            Inhabitance::Uninhabited,
-            Inhabitance::Unknown,
-            Inhabitance::Inhabited,
-        ];
-        assert_eq!(
-            NodeFormula::Product(Box::new([])).evaluate(&values),
-            Inhabitance::Inhabited
-        );
-        assert_eq!(
-            NodeFormula::Sum(Box::new([])).evaluate(&values),
-            Inhabitance::Uninhabited
-        );
-        assert_eq!(
-            NodeFormula::Product(Box::new([1, 2])).evaluate(&values),
-            Inhabitance::Unknown
-        );
-        assert_eq!(
-            NodeFormula::Product(Box::new([0, 2])).evaluate(&values),
-            Inhabitance::Uninhabited
-        );
-        assert_eq!(
-            NodeFormula::Sum(Box::new([0, 1])).evaluate(&values),
-            Inhabitance::Unknown
-        );
-        assert_eq!(
-            NodeFormula::Sum(Box::new([0, 2])).evaluate(&values),
-            Inhabitance::Inhabited
-        );
-    }
 
     #[test]
     fn trusted_environment_orders_facts_and_rejects_duplicates() {
