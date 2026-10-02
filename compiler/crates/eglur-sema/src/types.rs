@@ -292,6 +292,12 @@ pub enum TypeKind {
     AssociatedProjection(AssociatedProjection),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PayloadDependency<'a> {
+    Type(TypeId),
+    Projection(&'a AssociatedProjection),
+}
+
 /// Canonical ownership-bearing root recognized by v0.1 dataflow.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OwnershipRoot {
@@ -689,45 +695,40 @@ impl CanonicalTypeStore {
         }
     }
 
-    /// Returns associated projections reachable through payload type positions.
-    pub(crate) fn associated_projections(
+    /// Immediate payload dependencies; projection identity metadata remains terminal.
+    pub(crate) fn payload_dependencies(
         &self,
         root: TypeId,
-    ) -> Result<Vec<AssociatedProjection>, TypeStoreError> {
-        self.require_type(root)?;
-        let mut projections = Vec::new();
-        let mut pending = vec![root];
-        let mut seen = BTreeSet::new();
-        while let Some(current) = pending.pop() {
-            if !seen.insert(current) {
-                continue;
+    ) -> Result<impl Iterator<Item = PayloadDependency<'_>>, TypeStoreError> {
+        self.payload_dependencies_for_kind(self.kind(root)?)
+    }
+
+    fn payload_dependencies_for_kind<'a>(
+        &'a self,
+        kind: &'a TypeKind,
+    ) -> Result<impl Iterator<Item = PayloadDependency<'a>>, TypeStoreError> {
+        let (children, terminal): (&[TypeId], _) = match kind {
+            TypeKind::Never
+            | TypeKind::Primitive(_)
+            | TypeKind::GenericParameter(_)
+            | TypeKind::SelfType(_) => (&[], None),
+            TypeKind::Nominal { substitution, .. } => (self.substitution(*substitution)?, None),
+            TypeKind::Reference { referent, .. } | TypeKind::RawPointer { referent, .. } => {
+                (std::slice::from_ref(referent), None)
             }
-            match self.kind(current)? {
-                TypeKind::Never
-                | TypeKind::Primitive(_)
-                | TypeKind::GenericParameter(_)
-                | TypeKind::SelfType(_) => {}
-                TypeKind::Nominal { substitution, .. } => {
-                    pending.extend(self.substitution(*substitution)?.iter().copied());
-                }
-                TypeKind::Reference { referent, .. } | TypeKind::RawPointer { referent, .. } => {
-                    pending.push(*referent);
-                }
-                TypeKind::Tuple(elements) | TypeKind::ErrorUnion(elements) => {
-                    pending.extend(elements.iter().copied());
-                }
-                TypeKind::Callable { parameters, result } => {
-                    pending.extend(parameters.iter().copied());
-                    pending.push(*result);
-                }
-                TypeKind::AssociatedProjection(projection) => {
-                    projections.push(projection.clone());
-                }
+            TypeKind::Tuple(elements) | TypeKind::ErrorUnion(elements) => (elements, None),
+            TypeKind::Callable { parameters, result } => {
+                (parameters, Some(PayloadDependency::Type(*result)))
             }
-        }
-        projections.sort();
-        projections.dedup();
-        Ok(projections)
+            TypeKind::AssociatedProjection(projection) => {
+                (&[], Some(PayloadDependency::Projection(projection)))
+            }
+        };
+        Ok(children
+            .iter()
+            .copied()
+            .map(PayloadDependency::Type)
+            .chain(terminal))
     }
 
     pub fn ownership_root(&self, root: TypeId) -> Result<Option<OwnershipRoot>, TypeStoreError> {
@@ -966,28 +967,14 @@ impl CanonicalTypeStore {
             if predicate(kind) {
                 return Ok(true);
             }
-            match kind {
-                TypeKind::Never
-                | TypeKind::Primitive(_)
-                | TypeKind::GenericParameter(_)
-                | TypeKind::SelfType(_) => {}
-                TypeKind::Nominal { substitution, .. } => {
-                    pending.extend(self.substitution(*substitution)?.iter().copied());
-                }
-                TypeKind::Reference { referent, .. } | TypeKind::RawPointer { referent, .. } => {
-                    pending.push(*referent)
-                }
-                TypeKind::Tuple(elements) | TypeKind::ErrorUnion(elements) => {
-                    pending.extend(elements.iter().copied());
-                }
-                TypeKind::Callable { parameters, result } => {
-                    pending.extend(parameters.iter().copied());
-                    pending.push(*result);
-                }
-                // Associated slots are ownership-free and reference-free. Their base and
-                // declaring trait arguments identify the slot; they are not payload nodes.
-                TypeKind::AssociatedProjection(_) => {}
-            }
+            pending.extend(
+                self.payload_dependencies_for_kind(kind)?.filter_map(
+                    |dependency| match dependency {
+                        PayloadDependency::Type(child) => Some(child),
+                        PayloadDependency::Projection(_) => None,
+                    },
+                ),
+            );
         }
         Ok(false)
     }
@@ -1283,8 +1270,102 @@ mod tests {
         assert!(!store.contains_ownership(projection).unwrap());
         assert!(!store.contains_reference(projection).unwrap());
         assert_eq!(
-            store.associated_projections(projection).unwrap(),
-            [expected]
+            store
+                .payload_dependencies(projection)
+                .unwrap()
+                .collect::<Vec<_>>(),
+            [PayloadDependency::Projection(&expected)]
+        );
+    }
+
+    #[test]
+    fn immediate_payload_dependencies_preserve_each_shape_and_child_order() {
+        use PayloadDependency::Type;
+
+        let mut store = CanonicalTypeStore::new().unwrap();
+        let integer = store.primitive(PrimitiveType::I64).unwrap();
+        let text = store.primitive(PrimitiveType::Str).unwrap();
+        let parameter = store
+            .generic_parameter(GenericParameterId::Trusted {
+                owner: ExternalDefId::new("std::generic").unwrap(),
+                index: 0,
+            })
+            .unwrap();
+        let self_type = store.self_type(external("std::Node")).unwrap();
+        let nominal = store
+            .nominal(
+                NominalHead::Intrinsic(IntrinsicNominal::Res),
+                [text, integer],
+            )
+            .unwrap();
+        let reference = store.reference(ReferenceMutability::Mutable, text).unwrap();
+        let pointer = store
+            .raw_pointer(RawPointerMutability::Const, integer)
+            .unwrap();
+        let tuple = store.tuple([text, integer, text]).unwrap();
+        let callable = store.callable([text, integer, text], parameter).unwrap();
+        let union = store.error_union([parameter, integer, parameter]).unwrap();
+        for (root, expected) in [
+            (store.never(), vec![]),
+            (integer, vec![]),
+            (parameter, vec![]),
+            (self_type, vec![]),
+            (nominal, vec![Type(text), Type(integer)]),
+            (reference, vec![Type(text)]),
+            (pointer, vec![Type(integer)]),
+            (tuple, vec![Type(text), Type(integer), Type(text)]),
+            (
+                callable,
+                vec![Type(text), Type(integer), Type(text), Type(parameter)],
+            ),
+            (union, vec![Type(integer), Type(parameter)]),
+        ] {
+            assert_eq!(
+                store
+                    .payload_dependencies(root)
+                    .unwrap()
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn payload_queries_preserve_lookup_errors_and_predicate_short_circuiting() {
+        let mut store = CanonicalTypeStore::new().unwrap();
+        let unknown = TypeId::from_index(store.type_count() + 10).unwrap();
+        assert_eq!(
+            store
+                .payload_dependencies(unknown)
+                .map(|edges| edges.collect::<Vec<_>>()),
+            Err(TypeStoreError::UnknownType(unknown)),
+        );
+        assert_eq!(
+            store.tuple([unknown]),
+            Err(TypeStoreError::UnknownType(unknown))
+        );
+        assert_eq!(
+            store.reference(ReferenceMutability::Shared, unknown),
+            Err(TypeStoreError::UnknownType(unknown)),
+        );
+
+        let invalid = SubstId::from_index(store.substitution_count() + 10).unwrap();
+        let malformed = store
+            .intern_type(TypeKind::Nominal {
+                head: NominalHead::Intrinsic(IntrinsicNominal::Own),
+                substitution: invalid,
+            })
+            .unwrap();
+        assert!(store.contains_ownership(malformed).unwrap());
+        assert_eq!(
+            store.contains_reference(malformed),
+            Err(TypeStoreError::UnknownSubstitution(invalid))
+        );
+        assert_eq!(
+            store
+                .payload_dependencies(malformed)
+                .map(|edges| edges.collect::<Vec<_>>()),
+            Err(TypeStoreError::UnknownSubstitution(invalid)),
         );
     }
 }

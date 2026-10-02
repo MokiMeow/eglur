@@ -1,6 +1,9 @@
 use super::*;
 
 mod cycles;
+mod dependencies;
+
+use dependencies::BindingDependencies;
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_impl_bindings(
@@ -240,7 +243,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             .map(|(binding, _)| binding.clone())
             .collect::<Vec<_>>();
         let Some(cycles) =
-            associated_binding_cycle_sets(&self.types, trait_ref, target, &signatures)?
+            BindingDependencies::new(&self.types, trait_ref, target, &signatures)?.cycle_sets()
         else {
             return Ok(None);
         };
@@ -306,7 +309,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 value,
             });
         }
-        if associated_binding_cycle_sets(&self.types, trait_ref, target, &bindings)?.is_some() {
+        if BindingDependencies::new(&self.types, trait_ref, target, &bindings)?
+            .cycle_sets()
+            .is_some()
+        {
             return Err(SignatureResolutionError::Trusted(
                 TrustedSignatureError::InvalidTypePosition {
                     declaration: owner.clone(),
@@ -341,66 +347,4 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         }
         Ok(bindings)
     }
-}
-
-fn associated_binding_cycle_sets(
-    types: &CanonicalTypeStore,
-    trait_ref: &TraitRef,
-    target: TypeId,
-    bindings: &[AssociatedBindingSignature],
-) -> Result<Option<AssociatedBindingCycles>, TypeStoreError> {
-    let binding_targets = bindings
-        .iter()
-        .map(|binding| binding.associated.clone())
-        .collect::<BTreeSet<_>>();
-    let mut dependencies = binding_targets
-        .iter()
-        .cloned()
-        .map(|associated| (associated, BTreeSet::new()))
-        .collect::<BTreeMap<_, _>>();
-    for binding in bindings {
-        for projection in types.associated_projections(binding.value)? {
-            if projection.base() == target
-                && projection.trait_ref() == trait_ref
-                && binding_targets.contains(projection.associated())
-            {
-                dependencies
-                    .get_mut(&binding.associated)
-                    .expect("binding dependency node was registered")
-                    .insert(projection.associated().clone());
-            }
-        }
-    }
-    let nodes = dependencies.keys().collect::<Vec<_>>();
-    let indices = nodes
-        .iter()
-        .enumerate()
-        .map(|(index, &node)| (node, index))
-        .collect::<BTreeMap<_, _>>();
-    let indexed = dependencies
-        .values()
-        .map(|targets| targets.iter().map(|target| indices[target]).collect())
-        .collect::<Vec<_>>();
-    let statuses = cycles::classify(&indexed);
-    let cyclic = nodes
-        .iter()
-        .zip(&statuses)
-        .filter(|(_, status)| status.is_cyclic())
-        .map(|(&node, _)| node.clone())
-        .collect::<BTreeSet<_>>();
-    if cyclic.is_empty() {
-        return Ok(None);
-    }
-    let affected = nodes
-        .into_iter()
-        .zip(statuses)
-        .filter(|(_, status)| status.is_affected())
-        .map(|(node, _)| node.clone())
-        .collect();
-    Ok(Some(AssociatedBindingCycles { cyclic, affected }))
-}
-
-struct AssociatedBindingCycles {
-    cyclic: BTreeSet<CanonicalTarget>,
-    affected: BTreeSet<CanonicalTarget>,
 }
