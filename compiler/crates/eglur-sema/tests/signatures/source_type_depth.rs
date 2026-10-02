@@ -307,6 +307,73 @@ fn nongeneric_aliases_reuse_shared_instantiation_roots() {
 }
 
 #[test]
+fn parameter_erasing_aliases_reuse_their_closed_instantiation_roots() {
+    for size in [8, 32, 128] {
+        let mut source = String::from("type S0[T] = i64\n");
+        for node in 1..=size {
+            source.push_str(&format!("type S{node}[T] = (S{}[T], i64)\n", node - 1));
+        }
+        for node in 1..=size {
+            source.push_str(&format!("type U{node} = S{node}[i64]\n"));
+        }
+        let analysis = analyze(
+            &source,
+            &CapabilitySet::signatures(),
+            Some(&empty_external()),
+            None,
+        );
+        assert!(analysis.diagnostics.diagnostics().is_empty());
+        let signatures = analysis.signatures.unwrap();
+        assert_eq!(signatures.types().type_count(), 2 * size + 3);
+        let base = source_def(&analysis.declarations, "S0", DeclarationKind::TypeAlias);
+        let FactState::Known(DeclarationSignature::TypeAlias { value: base, .. }) =
+            signatures.source_declaration(base)
+        else {
+            panic!("alias base was not resolved")
+        };
+        assert_eq!(
+            signatures.types().kind(*base).unwrap(),
+            &TypeKind::Primitive(eglur_sema::PrimitiveType::I64),
+        );
+        let mut previous = *base;
+        for node in 1..=size {
+            let definition = source_def(
+                &analysis.declarations,
+                &format!("S{node}"),
+                DeclarationKind::TypeAlias,
+            );
+            let application = source_def(
+                &analysis.declarations,
+                &format!("U{node}"),
+                DeclarationKind::TypeAlias,
+            );
+            let FactState::Known(DeclarationSignature::TypeAlias {
+                generic_parameters,
+                value,
+            }) = signatures.source_declaration(definition)
+            else {
+                panic!("alias definition was not resolved")
+            };
+            let FactState::Known(DeclarationSignature::TypeAlias {
+                generic_parameters: application_parameters,
+                value: applied,
+            }) = signatures.source_declaration(application)
+            else {
+                panic!("alias application was not resolved")
+            };
+            assert_eq!(generic_parameters.len(), 1);
+            assert!(application_parameters.is_empty());
+            assert_eq!(value, applied);
+            assert_eq!(
+                signatures.types().kind(*value).unwrap(),
+                &TypeKind::Tuple(Box::new([previous, *base])),
+            );
+            previous = *value;
+        }
+    }
+}
+
+#[test]
 fn long_alias_cycles_poison_each_alias_and_their_consumers() {
     let source = alias_chain(300, true);
     let external = empty_external();

@@ -310,6 +310,7 @@ pub enum OwnershipRoot {
 pub struct CanonicalTypeStore {
     never: TypeId,
     types: Vec<TypeKind>,
+    may_need_generic_substitution: Vec<bool>,
     type_ids: BTreeMap<TypeKind, TypeId>,
     substitutions: Vec<Box<[TypeId]>>,
     substitution_ids: BTreeMap<Box<[TypeId]>, SubstId>,
@@ -322,6 +323,7 @@ impl CanonicalTypeStore {
         let mut store = Self {
             never,
             types: Vec::new(),
+            may_need_generic_substitution: Vec::new(),
             type_ids: BTreeMap::new(),
             substitutions: Vec::new(),
             substitution_ids: BTreeMap::new(),
@@ -555,7 +557,7 @@ impl CanonicalTypeStore {
     ) -> Result<TypeId, TypeStoreError> {
         self.require_type(root)?;
         self.require_types(replacements.values())?;
-        if replacements.is_empty() {
+        if replacements.is_empty() || !self.may_need_generic_substitution[root.index()] {
             return Ok(root);
         }
 
@@ -765,13 +767,53 @@ impl CanonicalTypeStore {
         }
     }
 
+    // False proves identity for generic substitution, including projection metadata.
+    // Immutable constructor operands already have their own admission facts.
+    fn kind_needs_generic_substitution(&self, kind: &TypeKind) -> bool {
+        let child = |id: TypeId| {
+            #[cfg(test)]
+            substitution_tests::observe_child_fact();
+            self.may_need_generic_substitution
+                .get(id.index())
+                .copied()
+                .unwrap_or(true)
+        };
+        match kind {
+            TypeKind::GenericParameter(_) => true,
+            TypeKind::Never | TypeKind::Primitive(_) | TypeKind::SelfType(_) => false,
+            TypeKind::Nominal { substitution, .. } => self
+                .substitution(*substitution)
+                .map_or(true, |arguments| arguments.iter().any(|&id| child(id))),
+            TypeKind::Reference { referent, .. } | TypeKind::RawPointer { referent, .. } => {
+                child(*referent)
+            }
+            TypeKind::Tuple(elements) | TypeKind::ErrorUnion(elements) => {
+                elements.iter().any(|&id| child(id))
+            }
+            TypeKind::Callable { parameters, result } => {
+                child(*result) || parameters.iter().any(|&id| child(id))
+            }
+            TypeKind::AssociatedProjection(projection) => {
+                child(projection.base)
+                    || self
+                        .substitution(projection.trait_ref.substitution)
+                        .map_or(true, |arguments| arguments.iter().any(|&id| child(id)))
+            }
+        }
+    }
+
     fn intern_type(&mut self, kind: TypeKind) -> Result<TypeId, TypeStoreError> {
         if let Some(&id) = self.type_ids.get(&kind) {
             return Ok(id);
         }
         let id = TypeId::from_index(self.types.len())?;
+        let may_need_generic_substitution = self.kind_needs_generic_substitution(&kind);
         self.type_ids.insert(kind.clone(), id);
         self.types.push(kind);
+        self.may_need_generic_substitution
+            .push(may_need_generic_substitution);
+        #[cfg(test)]
+        substitution_tests::observe_admission();
         Ok(id)
     }
 
@@ -1053,6 +1095,9 @@ impl From<IdentityOverflow> for TypeStoreError {
 }
 
 #[cfg(test)]
+mod substitution_tests;
+
+#[cfg(test)]
 mod tests {
     use std::cell::Cell;
     use std::collections::BTreeMap;
@@ -1060,7 +1105,7 @@ mod tests {
     use super::*;
 
     thread_local! {
-        static SUBSTITUTION_READS: Cell<usize> = const { Cell::new(0) };
+        pub(super) static SUBSTITUTION_READS: Cell<usize> = const { Cell::new(0) };
     }
 
     pub(super) fn observe_substitution_read() {
