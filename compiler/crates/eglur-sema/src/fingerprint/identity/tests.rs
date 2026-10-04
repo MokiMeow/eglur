@@ -1,6 +1,8 @@
 use super::*;
 use crate::{AssociatedProjection, PrimitiveType};
 
+pub(super) mod generic_ordinals;
+
 fn external(name: &str) -> CanonicalTarget {
     CanonicalTarget::External(ExternalDefId::new(name).unwrap())
 }

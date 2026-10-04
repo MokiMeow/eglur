@@ -161,6 +161,7 @@ struct KeyDeriver<'a> {
     signatures: &'a DeclarationSignatures,
     keys: BTreeMap<DefId, StableDeclarationKey>,
     active: BTreeSet<DefId>,
+    generic_parameter_indices: BTreeMap<DefId, BTreeMap<DefId, usize>>,
 }
 
 impl<'a> KeyDeriver<'a> {
@@ -170,6 +171,7 @@ impl<'a> KeyDeriver<'a> {
             signatures,
             keys: BTreeMap::new(),
             active: BTreeSet::new(),
+            generic_parameter_indices: BTreeMap::new(),
         }
     }
 
@@ -325,14 +327,24 @@ impl<'a> KeyDeriver<'a> {
     }
 
     fn generic_parameter_index(
-        &self,
+        &mut self,
         parent: DefId,
         parameter: DefId,
     ) -> Result<u32, StableDeclarationError> {
-        let parameters = direct_generic_parameters(self.signatures, parent)?;
-        parameters
-            .iter()
-            .position(|candidate| candidate == &GenericParameterId::Source(parameter))
+        #[cfg(test)]
+        tests::generic_ordinals::observe_query();
+
+        if let std::collections::btree_map::Entry::Vacant(entry) =
+            self.generic_parameter_indices.entry(parent)
+        {
+            let parameters = direct_generic_parameters(self.signatures, parent)?;
+            #[cfg(test)]
+            tests::generic_ordinals::observe_owner();
+            entry.insert(index_source_generic_parameters(parameters));
+        }
+        self.generic_parameter_indices[&parent]
+            .get(&parameter)
+            .copied()
             .and_then(|index| u32::try_from(index).ok())
             .ok_or(StableDeclarationError::UnknownGenericParameter {
                 owner: parent,
@@ -396,6 +408,19 @@ impl<'a> KeyDeriver<'a> {
             }
         }
     }
+}
+
+fn index_source_generic_parameters(parameters: &[GenericParameterId]) -> BTreeMap<DefId, usize> {
+    let mut indices = BTreeMap::new();
+    for (index, parameter) in parameters.iter().enumerate() {
+        #[cfg(test)]
+        tests::generic_ordinals::observe_parameter();
+
+        if let GenericParameterId::Source(parameter) = parameter {
+            indices.entry(*parameter).or_insert(index);
+        }
+    }
+    indices
 }
 
 pub(crate) fn declaration_binder_positions(

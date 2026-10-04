@@ -816,3 +816,40 @@ fn conformance_fingerprints_ignore_source_insertion_order() {
         shuffled.analysis.conformance()
     );
 }
+
+#[test]
+fn generic_ordinal_fingerprints_preserve_owner_contexts_under_reordering() {
+    fn source(reversed: bool) -> String {
+        let mut methods = [
+            "pub fn first[U](self: &Self, value: U) -> U = value\n",
+            "pub fn second[V](self: &Self, value: V) -> V = value\n",
+        ];
+        if reversed {
+            methods.reverse();
+        }
+        let mut declarations = vec![
+            "pub trait Mark {}\n".to_owned(),
+            "pub struct Host {}\n".to_owned(),
+            "impl Mark for Host {}\n".to_owned(),
+            "pub enum Either[A, B] { Left(A)\n Right(B) }\n".to_owned(),
+            "pub type Pair[A, B] = (A, B)\n".to_owned(),
+            "pub trait Echo[A] { fn echo[B: Mark](self: &Self, value: B) -> B }\n".to_owned(),
+            format!("pub struct Wrap[X, Y] {{\n{}}}\n", methods.concat()),
+            "impl[X, Y] Echo[X] for Wrap[X, Y] {\n\
+                fn echo[C: Mark](self: &Self, value: C) -> C = value\n}\n"
+                .to_owned(),
+            "pub fn identity[D](value: D) -> D = value\n".to_owned(),
+            "pub fn use(value: Wrap[Bool, Str], item: Host) -> Host = value.echo(identity(item))\n"
+                .to_owned(),
+        ];
+        if reversed {
+            declarations.reverse();
+        }
+        declarations.concat()
+    }
+
+    let canonical = resolve([file("main.eglur", &source(false))], "main.eglur", false);
+    let reordered = resolve([file("main.eglur", &source(true))], "main.eglur", false);
+
+    assert_eq!(canonical.semantics, reordered.semantics);
+}
