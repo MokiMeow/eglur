@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use eglur_hir::{
     AxisExprId, AxisExprKind, BinaryOperator, CallArgument, CallSyntax, ConstructorPayload, ExprId,
@@ -8,7 +9,9 @@ use eglur_hir::{
     TypeRefKind, UnaryOperator,
 };
 
-use crate::fingerprint::identity::{StableTraitRef, StableType, declaration_binder_positions};
+use crate::fingerprint::identity::{
+    BinderContext, DeclarationBinderContexts, StableTraitRef, StableType,
+};
 use crate::{
     BodyFingerprint, BodyTypes, CallableInstance, CanonicalFingerprintBuilder, CanonicalTarget,
     CheckedDispatch, CheckedInvocation, CheckedNumericOperation, CheckedNumericOperator,
@@ -45,6 +48,7 @@ impl BodyProjection {
         trait_environment: &TraitEnvironment,
         trait_evidence: &TraitEvidence,
         keys: &StableDeclarationKeys,
+        binder_contexts: &mut DeclarationBinderContexts<'_>,
     ) -> Result<Self, SemanticFingerprintError> {
         let source_by_file = sources
             .iter()
@@ -69,15 +73,13 @@ impl BodyProjection {
                 let FactState::Known(summary) = body_types.body(declaration.id()) else {
                     return Err(SemanticFingerprintError::IncompleteBodyFact("body summary"));
                 };
-                let binders =
-                    declaration_binder_positions(declarations, signatures, declaration.id())?;
+                let binders = binder_contexts.context(declaration.id())?;
                 let stable_declaration = keys.source(declaration.id()).cloned().ok_or(
                     SemanticFingerprintError::UnknownStableDeclaration(declaration.id()),
                 )?;
                 let mut nodes = NodeHasher {
                     module: module.id(),
                     hir,
-                    declarations,
                     names,
                     signatures,
                     body_types,
@@ -85,6 +87,7 @@ impl BodyProjection {
                     trait_evidence,
                     keys,
                     binders,
+                    binder_contexts,
                     expressions: BTreeMap::new(),
                     statements: BTreeMap::new(),
                     patterns: BTreeMap::new(),
@@ -185,7 +188,7 @@ fn declaration_body_root<'hir>(
 fn write_declaration_body(
     builder: &mut CanonicalFingerprintBuilder,
     root: DeclarationBodyRoot<'_>,
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     match root {
         DeclarationBodyRoot::Function {
@@ -225,17 +228,17 @@ enum NodeKey {
     Type(TypeRefId),
 }
 
-struct NodeHasher<'a> {
+struct NodeHasher<'a, 'snapshot> {
     module: ModuleId,
     hir: &'a HirFile,
-    declarations: &'a DeclarationCollection,
     names: &'a NameResolution,
     signatures: &'a DeclarationSignatures,
     body_types: &'a BodyTypes,
     trait_environment: &'a TraitEnvironment,
     trait_evidence: &'a TraitEvidence,
     keys: &'a StableDeclarationKeys,
-    binders: BTreeMap<GenericParameterId, u32>,
+    binders: Rc<BinderContext>,
+    binder_contexts: &'a mut DeclarationBinderContexts<'snapshot>,
     expressions: BTreeMap<ExprId, FingerprintDigest>,
     statements: BTreeMap<StmtId, FingerprintDigest>,
     patterns: BTreeMap<PatternId, FingerprintDigest>,
@@ -246,7 +249,7 @@ struct NodeHasher<'a> {
     active: BTreeSet<NodeKey>,
 }
 
-impl NodeHasher<'_> {
+impl NodeHasher<'_, '_> {
     fn is_type_member_owner(&self, id: ExprId) -> bool {
         matches!(
             self.names.fact(ResolutionKey::Expression {
@@ -1421,15 +1424,14 @@ impl NodeHasher<'_> {
     }
 
     fn stable_witness(
-        &self,
+        &mut self,
         witness: WitnessSlotId,
     ) -> Result<StableWitness, SemanticFingerprintError> {
         let obligation = self
             .trait_environment
             .witness_obligation(witness)
             .ok_or(SemanticFingerprintError::UnknownBoundWitness)?;
-        let binders =
-            declaration_binder_positions(self.declarations, self.signatures, witness.owner())?;
+        let binders = self.binder_contexts.context(witness.owner())?;
         Ok(StableWitness {
             owner: self.keys.source(witness.owner()).cloned().ok_or(
                 SemanticFingerprintError::UnknownStableDeclaration(witness.owner()),
@@ -1516,7 +1518,7 @@ fn write_member_access(
     member: &MemberAccess,
     signatures: &DeclarationSignatures,
     keys: &StableDeclarationKeys,
-    binders: &BTreeMap<GenericParameterId, u32>,
+    binders: &BinderContext,
 ) -> Result<(), SemanticFingerprintError> {
     keys.target(member.declaration())
         .ok_or_else(|| stable_target_error(member.declaration()))?
@@ -1540,7 +1542,7 @@ fn write_checked_numeric_operation(
     operation: &CheckedNumericOperation,
     signatures: &DeclarationSignatures,
     keys: &StableDeclarationKeys,
-    binders: &BTreeMap<GenericParameterId, u32>,
+    binders: &BinderContext,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_u8(match operation.operator() {
         CheckedNumericOperator::Add => 0,
@@ -1566,7 +1568,7 @@ fn write_checked_numeric_operation(
 fn write_expression_digests(
     builder: &mut CanonicalFingerprintBuilder,
     expressions: &[ExprId],
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(expressions.len());
     for &expression in expressions {
@@ -1578,7 +1580,7 @@ fn write_expression_digests(
 fn write_statement_digests(
     builder: &mut CanonicalFingerprintBuilder,
     statements: &[StmtId],
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(statements.len());
     for &statement in statements {
@@ -1590,7 +1592,7 @@ fn write_statement_digests(
 fn write_pattern_digests(
     builder: &mut CanonicalFingerprintBuilder,
     patterns: &[PatternId],
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(patterns.len());
     for &pattern in patterns {
@@ -1602,7 +1604,7 @@ fn write_pattern_digests(
 fn write_axis_digests(
     builder: &mut CanonicalFingerprintBuilder,
     axes: &[AxisExprId],
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(axes.len());
     for &axis in axes {
@@ -1614,7 +1616,7 @@ fn write_axis_digests(
 fn write_type_digests(
     builder: &mut CanonicalFingerprintBuilder,
     types: &[TypeRefId],
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(types.len());
     for &ty in types {
@@ -1626,7 +1628,7 @@ fn write_type_digests(
 fn write_optional_expression(
     builder: &mut CanonicalFingerprintBuilder,
     expression: Option<ExprId>,
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_bool(expression.is_some());
     if let Some(expression) = expression {
@@ -1638,7 +1640,7 @@ fn write_optional_expression(
 fn write_optional_type(
     builder: &mut CanonicalFingerprintBuilder,
     ty: Option<TypeRefId>,
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_bool(ty.is_some());
     if let Some(ty) = ty {
@@ -1650,7 +1652,7 @@ fn write_optional_type(
 fn write_call_arguments(
     builder: &mut CanonicalFingerprintBuilder,
     arguments: &[CallArgument],
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(arguments.len());
     for argument in arguments {
@@ -1662,7 +1664,7 @@ fn write_call_arguments(
 fn write_call_argument(
     builder: &mut CanonicalFingerprintBuilder,
     argument: &CallArgument,
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_bool(argument.name.is_some());
     if let Some(name) = &argument.name {
@@ -1675,7 +1677,7 @@ fn write_call_argument(
 fn write_pattern_payload(
     builder: &mut CanonicalFingerprintBuilder,
     payload: &PatternPayload,
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     match payload {
         PatternPayload::Absent => builder.write_u8(0),
@@ -1694,7 +1696,7 @@ fn write_pattern_payload(
 fn write_pattern_elements(
     builder: &mut CanonicalFingerprintBuilder,
     elements: &[PatternElement],
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(elements.len());
     for element in elements {
@@ -1712,7 +1714,7 @@ fn write_pattern_elements(
 fn write_field_patterns(
     builder: &mut CanonicalFingerprintBuilder,
     fields: &[FieldPattern],
-    nodes: &mut NodeHasher<'_>,
+    nodes: &mut NodeHasher<'_, '_>,
 ) -> Result<(), SemanticFingerprintError> {
     builder.write_len(fields.len());
     for field in fields {

@@ -9,6 +9,9 @@ use crate::{
     RawPointerMutability, ReferenceMutability, TraitRef, TypeId, TypeKind, TypeStoreError,
 };
 
+mod binders;
+pub(crate) use binders::{BinderContext, DeclarationBinderContexts};
+
 #[cfg(test)]
 mod tests;
 
@@ -124,7 +127,7 @@ impl StableDeclarationKeys {
         &self,
         signatures: &DeclarationSignatures,
         ty: TypeId,
-        binders: &BTreeMap<GenericParameterId, u32>,
+        binders: &BinderContext,
     ) -> Result<StableType, StableDeclarationError> {
         StableType::from_type(signatures.types(), self, ty, binders)
     }
@@ -133,7 +136,7 @@ impl StableDeclarationKeys {
         &self,
         signatures: &DeclarationSignatures,
         trait_ref: &TraitRef,
-        binders: &BTreeMap<GenericParameterId, u32>,
+        binders: &BinderContext,
     ) -> Result<StableTraitRef, StableDeclarationError> {
         let declaration =
             self.target(trait_ref.declaration())
@@ -162,6 +165,7 @@ struct KeyDeriver<'a> {
     keys: BTreeMap<DefId, StableDeclarationKey>,
     active: BTreeSet<DefId>,
     generic_parameter_indices: BTreeMap<DefId, BTreeMap<DefId, usize>>,
+    binder_contexts: DeclarationBinderContexts<'a>,
 }
 
 impl<'a> KeyDeriver<'a> {
@@ -172,6 +176,7 @@ impl<'a> KeyDeriver<'a> {
             keys: BTreeMap::new(),
             active: BTreeSet::new(),
             generic_parameter_indices: BTreeMap::new(),
+            binder_contexts: DeclarationBinderContexts::new(collection, signatures),
         }
     }
 
@@ -284,7 +289,7 @@ impl<'a> KeyDeriver<'a> {
     ) -> Result<FingerprintDigest, StableDeclarationError> {
         let signature = self.callable_signature(declaration)?;
         let bang = signature.is_bang();
-        let binders = declaration_binder_positions(self.collection, self.signatures, declaration)?;
+        let binders = self.binder_contexts.context(declaration)?;
         let parameter_types = signature
             .parameters()
             .iter()
@@ -315,7 +320,7 @@ impl<'a> KeyDeriver<'a> {
                 return Err(StableDeclarationError::IncompleteSignature(declaration));
             }
         };
-        let binders = declaration_binder_positions(self.collection, self.signatures, declaration)?;
+        let binders = self.binder_contexts.context(declaration)?;
         let trait_ref = self.stable_trait_ref(header.trait_ref(), &binders)?;
         let target = self.stable_type(header.target(), &binders)?;
         let mut builder =
@@ -355,7 +360,7 @@ impl<'a> KeyDeriver<'a> {
     fn callable_signature(
         &self,
         declaration: DefId,
-    ) -> Result<&CallableSignature, StableDeclarationError> {
+    ) -> Result<&'a CallableSignature, StableDeclarationError> {
         let FactState::Known(DeclarationSignature::Callable(signature)) =
             self.signatures.source_declaration(declaration)
         else {
@@ -369,7 +374,7 @@ impl<'a> KeyDeriver<'a> {
     fn stable_type(
         &mut self,
         ty: TypeId,
-        binders: &BTreeMap<GenericParameterId, u32>,
+        binders: &BinderContext,
     ) -> Result<StableType, StableDeclarationError> {
         StableType::from_type_with(ty, binders, self.signatures.types(), &mut |target| {
             self.stable_target(target)
@@ -379,7 +384,7 @@ impl<'a> KeyDeriver<'a> {
     fn stable_trait_ref(
         &mut self,
         trait_ref: &TraitRef,
-        binders: &BTreeMap<GenericParameterId, u32>,
+        binders: &BinderContext,
     ) -> Result<StableTraitRef, StableDeclarationError> {
         let declaration = self.stable_target(trait_ref.declaration())?;
         let arguments = self
@@ -421,36 +426,6 @@ fn index_source_generic_parameters(parameters: &[GenericParameterId]) -> BTreeMa
         }
     }
     indices
-}
-
-pub(crate) fn declaration_binder_positions(
-    collection: &DeclarationCollection,
-    signatures: &DeclarationSignatures,
-    declaration: DefId,
-) -> Result<BTreeMap<GenericParameterId, u32>, StableDeclarationError> {
-    let mut owners = Vec::new();
-    let mut cursor = Some(declaration);
-    while let Some(owner) = cursor {
-        let declaration = collection
-            .declaration(owner)
-            .ok_or(StableDeclarationError::UnknownDeclaration(owner))?;
-        owners.push(owner);
-        cursor = declaration.parent();
-    }
-    owners.reverse();
-
-    let parameter_count = owners.iter().try_fold(0_usize, |count, &owner| {
-        direct_generic_parameters(signatures, owner).map(|parameters| count + parameters.len())
-    })?;
-    let mut binders = BTreeMap::new();
-    for owner in owners {
-        for parameter in direct_generic_parameters(signatures, owner)? {
-            let index = u32::try_from(binders.len())
-                .map_err(|_| StableDeclarationError::GenericParameterOverflow(parameter_count))?;
-            binders.insert(parameter.clone(), index);
-        }
-    }
-    Ok(binders)
 }
 
 pub(crate) fn direct_generic_parameters(
@@ -546,7 +521,7 @@ impl StableType {
         types: &CanonicalTypeStore,
         keys: &StableDeclarationKeys,
         ty: TypeId,
-        binders: &BTreeMap<GenericParameterId, u32>,
+        binders: &BinderContext,
     ) -> Result<Self, StableDeclarationError> {
         Self::from_type_with(ty, binders, types, &mut |target| {
             keys.target(target).ok_or_else(|| match target {
@@ -560,7 +535,7 @@ impl StableType {
 
     fn from_type_with(
         ty: TypeId,
-        binders: &BTreeMap<GenericParameterId, u32>,
+        binders: &BinderContext,
         types: &CanonicalTypeStore,
         stable_target: &mut impl FnMut(
             &CanonicalTarget,
@@ -594,9 +569,11 @@ impl StableType {
                     TypeKind::Never => values.push(Self::Never),
                     TypeKind::Primitive(primitive) => values.push(Self::Primitive(*primitive)),
                     TypeKind::GenericParameter(parameter) => {
-                        values.push(Self::GenericParameter(*binders.get(parameter).ok_or_else(
-                            || StableDeclarationError::UnboundGenericParameter(parameter.clone()),
-                        )?));
+                        values.push(Self::GenericParameter(
+                            binders.ordinal(parameter).ok_or_else(|| {
+                                StableDeclarationError::UnboundGenericParameter(parameter.clone())
+                            })?,
+                        ));
                     }
                     TypeKind::SelfType(target) => {
                         values.push(Self::SelfType(stable_target(target)?))

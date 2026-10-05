@@ -61,10 +61,11 @@ fn nested_stable_types_build_encode_compare_and_drop_on_the_default_stack() {
             .unwrap();
         }
 
-        let stable = StableType::from_type_with(ty, &BTreeMap::new(), &types, &mut |target| {
-            Ok(stable_external(target))
-        })
-        .unwrap();
+        let stable =
+            StableType::from_type_with(ty, &BinderContext::empty(), &types, &mut |target| {
+                Ok(stable_external(target))
+            })
+            .unwrap();
         let copy = stable.clone();
         assert_eq!(stable.cmp(&copy), std::cmp::Ordering::Equal);
         assert_eq!(encode(&stable), encode(&copy));
@@ -90,11 +91,12 @@ fn mixed_type_children_preserve_shape_and_callback_order() {
     let callable = types.callable([pair, nullary], result).unwrap();
 
     let mut observed = Vec::new();
-    let stable = StableType::from_type_with(callable, &BTreeMap::new(), &types, &mut |target| {
-        observed.push(target.clone());
-        Ok(stable_external(target))
-    })
-    .unwrap();
+    let stable =
+        StableType::from_type_with(callable, &BinderContext::empty(), &types, &mut |target| {
+            observed.push(target.clone());
+            Ok(stable_external(target))
+        })
+        .unwrap();
     let first = StableType::SelfType(stable_external(&external("probe::First")));
     let last = StableType::SelfType(stable_external(&external("probe::Last")));
     let nullary = StableType::Callable {
@@ -147,10 +149,11 @@ fn union_encoding_uses_portable_order_instead_of_local_type_ids() {
             members.push(types.nominal(head, []).unwrap());
         }
         let union = types.error_union(members).unwrap();
-        let stable = StableType::from_type_with(union, &BTreeMap::new(), &types, &mut |target| {
-            Ok(stable_external(target))
-        })
-        .unwrap();
+        let stable =
+            StableType::from_type_with(union, &BinderContext::empty(), &types, &mut |target| {
+                Ok(stable_external(target))
+            })
+            .unwrap();
 
         let StableType::ErrorUnion(members) = &stable else {
             panic!("two different nominal members remain a union");
@@ -186,15 +189,19 @@ fn projection_targets_preserve_callback_and_failure_order() {
 
     for fail_at in 0..=expected.len() {
         let mut observed = Vec::new();
-        let result =
-            StableType::from_type_with(projection, &BTreeMap::new(), &types, &mut |target| {
+        let result = StableType::from_type_with(
+            projection,
+            &BinderContext::empty(),
+            &types,
+            &mut |target| {
                 observed.push(target.clone());
                 if fail_at == observed.len() {
                     Err(StableDeclarationError::GenericParameterOverflow(7))
                 } else {
                     Ok(stable_external(target))
                 }
-            });
+            },
+        );
         if fail_at == 0 {
             assert!(matches!(
                 result,
@@ -223,22 +230,29 @@ fn unbound_generic_stops_before_later_targets() {
     let last = types.self_type(external("probe::Last")).unwrap();
     let tuple = types.tuple([types.never(), first, generic, last]).unwrap();
     let mut observed = Vec::new();
-    let result = StableType::from_type_with(tuple, &BTreeMap::new(), &types, &mut |target| {
-        observed.push(target.clone());
-        Ok(stable_external(target))
-    });
+    let result =
+        StableType::from_type_with(tuple, &BinderContext::empty(), &types, &mut |target| {
+            observed.push(target.clone());
+            Ok(stable_external(target))
+        });
     assert!(matches!(
         result,
         Err(StableDeclarationError::UnboundGenericParameter(found)) if found == parameter
     ));
     assert_eq!(observed, [external("probe::First")]);
 
-    let stable = StableType::from_type_with(
-        tuple,
-        &BTreeMap::from([(parameter, 3)]),
-        &types,
-        &mut |target| Ok(stable_external(target)),
-    )
+    let (collection, signatures, diagnostics) =
+        generic_ordinals::headers("pub fn bound[A, B, C, D](value: Bool) -> Bool = value\n");
+    assert!(diagnostics.diagnostics().is_empty());
+    let context = DeclarationBinderContexts::new(&collection, &signatures)
+        .context(generic_ordinals::owner(&collection, "bound"))
+        .unwrap();
+    let parameter = GenericParameterId::Source(generic_ordinals::owner(&collection, "D"));
+    let generic = types.generic_parameter(parameter).unwrap();
+    let tuple = types.tuple([types.never(), first, generic, last]).unwrap();
+    let stable = StableType::from_type_with(tuple, &context, &types, &mut |target| {
+        Ok(stable_external(target))
+    })
     .unwrap();
     let StableType::Tuple(elements) = stable else {
         panic!("tuple shape is preserved");

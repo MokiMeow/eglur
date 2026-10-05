@@ -1,5 +1,7 @@
 use std::fmt;
 
+use super::identity::DeclarationBinderContexts;
+
 use crate::{
     BodyFingerprint, BodyTypes, ConformanceComponentFingerprint, ConformanceFingerprint,
     DeclarationCollection, DeclarationSignatures, EffectFacts, EffectFingerprint,
@@ -134,6 +136,7 @@ impl SemanticFingerprints {
             Err(StableDeclarationError::IncompleteSignature(_)) => return Ok(None),
             Err(error) => return Err(error.into()),
         };
+        let mut binder_contexts = DeclarationBinderContexts::new(declarations, signatures);
         let bodies = match BodyProjection::compute(
             declarations,
             names,
@@ -143,13 +146,20 @@ impl SemanticFingerprints {
             trait_environment,
             trait_evidence,
             &keys,
+            &mut binder_contexts,
         ) {
             Ok(bodies) => bodies,
             Err(error) if error.is_incomplete() => return Ok(None),
             Err(error) => return Err(error),
         };
-        let interfaces = match interface::compute(declarations, imports, signatures, &bodies, &keys)
-        {
+        let interfaces = match interface::compute(
+            declarations,
+            imports,
+            signatures,
+            &bodies,
+            &keys,
+            &mut binder_contexts,
+        ) {
             Ok(interfaces) => interfaces,
             Err(error) if error.is_incomplete() => return Ok(None),
             Err(error) => return Err(error),
@@ -159,7 +169,13 @@ impl SemanticFingerprints {
             Err(error) if error.is_incomplete() => return Ok(None),
             Err(error) => return Err(error),
         };
-        let conformance = conformance::compute(declarations, signatures, trait_environment, &keys)?;
+        let conformance = conformance::compute(
+            declarations,
+            signatures,
+            trait_environment,
+            &keys,
+            &mut binder_contexts,
+        )?;
 
         let mut modules =
             declarations

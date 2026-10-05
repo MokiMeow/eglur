@@ -64,7 +64,7 @@ fn performed<T>(analysis: PhaseAnalysis<T>) -> T {
     value
 }
 
-fn headers(
+pub(in crate::fingerprint::identity) fn headers(
     text: &str,
 ) -> (
     DeclarationCollection,
@@ -143,7 +143,10 @@ fn headers(
     (collection, signatures, diagnostics.finalize(None))
 }
 
-fn owner(collection: &DeclarationCollection, name: &str) -> DefId {
+pub(in crate::fingerprint::identity) fn owner(
+    collection: &DeclarationCollection,
+    name: &str,
+) -> DefId {
     collection
         .modules()
         .flat_map(|module| module.declarations())
@@ -266,8 +269,13 @@ fn owner_families_preserve_direct_ordinals_and_inherited_contexts() {
 
         if declaration.name().unwrap().text() == "C" {
             assert_eq!(expected, 0);
-            let context = declaration_binder_positions(&collection, &signatures, parent).unwrap();
-            assert_eq!(context[&GenericParameterId::Source(declaration.id())], 2);
+            let context = DeclarationBinderContexts::new(&collection, &signatures)
+                .context(parent)
+                .unwrap();
+            assert_eq!(
+                context.ordinal(&GenericParameterId::Source(declaration.id())),
+                Some(2)
+            );
         }
     }
 }

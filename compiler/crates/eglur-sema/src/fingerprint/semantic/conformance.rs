@@ -1,4 +1,4 @@
-use crate::fingerprint::identity::declaration_binder_positions;
+use crate::fingerprint::identity::DeclarationBinderContexts;
 use crate::{
     CanonicalFingerprintBuilder, CanonicalTarget, ConformanceComponentFact,
     ConformanceComponentFingerprint, ConformanceEnvironmentFact, ConformanceFingerprint,
@@ -13,6 +13,7 @@ pub(super) fn compute(
     signatures: &DeclarationSignatures,
     trait_environment: &TraitEnvironment,
     keys: &StableDeclarationKeys,
+    binder_contexts: &mut DeclarationBinderContexts<'_>,
 ) -> Result<ConformanceEnvironmentFact, SemanticFingerprintError> {
     let mut components = Vec::new();
     for module in declarations.modules() {
@@ -36,7 +37,7 @@ pub(super) fn compute(
             let implementation = keys.source(declaration.id()).cloned().ok_or(
                 SemanticFingerprintError::UnknownStableDeclaration(declaration.id()),
             )?;
-            let binders = declaration_binder_positions(declarations, signatures, declaration.id())?;
+            let binders = binder_contexts.context(declaration.id())?;
             let mut builder = CanonicalFingerprintBuilder::new(FingerprintDomain::Conformance);
             builder.write_u8(0);
             implementation.write_to(&mut builder);
