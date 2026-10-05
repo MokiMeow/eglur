@@ -12,6 +12,9 @@ use eglur_sema::{
 #[path = "fingerprints/traversal.rs"]
 mod traversal;
 
+#[path = "fingerprints/binder_contexts.rs"]
+mod binder_contexts;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FingerprintSnapshot {
     analysis: AnalysisFingerprints,
