@@ -134,39 +134,71 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .declaration(candidate)
                 .expect("context declaration belongs to collection");
             match declaration.kind() {
-                DeclarationKind::Trait => {
-                    let target = CanonicalTarget::Source(candidate);
+                DeclarationKind::Trait | DeclarationKind::Struct => {
+                    #[cfg(test)]
+                    tests::observe_lookup();
+
+                    if let Some(binding) = self.static_self_bindings.get(&candidate) {
+                        #[cfg(test)]
+                        tests::observe_hit();
+
+                        return Ok(Some(binding.clone()));
+                    }
+                    #[cfg(test)]
+                    tests::observe_build();
+                    #[cfg(test)]
+                    tests::observe_query();
+
                     let arguments = self
                         .direct_generic_ids(candidate)
                         .iter()
-                        .map(|id| self.generic_types[id])
+                        .map(|id| {
+                            #[cfg(test)]
+                            tests::observe_argument();
+
+                            self.generic_types[id]
+                        })
                         .collect::<Vec<_>>();
-                    let substitution = self.types.intern_substitution(arguments)?;
-                    let ty = self.types.self_type(target.clone())?;
-                    return Ok(Some(SelfBinding {
-                        ty,
-                        trait_ref: Some(TraitRef::new(target, substitution)),
-                    }));
+                    #[cfg(test)]
+                    tests::observe_prepared(arguments.len());
+
+                    let binding = if declaration.kind() == DeclarationKind::Trait {
+                        let target = CanonicalTarget::Source(candidate);
+                        #[cfg(test)]
+                        tests::observe_trait_substitution();
+
+                        let substitution = self.types.intern_substitution(arguments)?;
+                        #[cfg(test)]
+                        tests::observe_self_type();
+
+                        let ty = self.types.self_type(target.clone())?;
+                        SelfBinding {
+                            ty,
+                            trait_ref: Some(TraitRef::new(target, substitution)),
+                        }
+                    } else {
+                        #[cfg(test)]
+                        tests::observe_nominal();
+
+                        let ty = self.types.nominal(
+                            NominalHead::Declaration(CanonicalTarget::Source(candidate)),
+                            arguments,
+                        )?;
+                        SelfBinding {
+                            ty,
+                            trait_ref: None,
+                        }
+                    };
+                    self.static_self_bindings.insert(candidate, binding.clone());
+                    #[cfg(test)]
+                    tests::observe_row(self.static_self_bindings.len());
+
+                    return Ok(Some(binding));
                 }
                 DeclarationKind::Impl => {
                     return Ok(self.impl_headers.get(&candidate).map(|header| SelfBinding {
                         ty: header.target(),
                         trait_ref: Some(header.trait_ref().clone()),
-                    }));
-                }
-                DeclarationKind::Struct => {
-                    let arguments = self
-                        .direct_generic_ids(candidate)
-                        .iter()
-                        .map(|id| self.generic_types[id])
-                        .collect::<Vec<_>>();
-                    let ty = self.types.nominal(
-                        NominalHead::Declaration(CanonicalTarget::Source(candidate)),
-                        arguments,
-                    )?;
-                    return Ok(Some(SelfBinding {
-                        ty,
-                        trait_ref: None,
                     }));
                 }
                 _ => {}
@@ -175,3 +207,6 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests;
