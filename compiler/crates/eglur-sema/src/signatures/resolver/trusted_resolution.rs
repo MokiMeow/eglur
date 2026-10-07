@@ -54,6 +54,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             generic_bounds: BTreeMap::new(),
             source_generic_redeclarations: BTreeSet::new(),
             source_generic_names: std::rc::Rc::default(),
+            frozen_source_generic_scopes: None,
             static_self_bindings: BTreeMap::new(),
             source_generic_bound_seeds: BTreeMap::new(),
             source_generic_states: BTreeMap::new(),

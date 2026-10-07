@@ -2,7 +2,7 @@ use super::*;
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn generic_context_state(
-        &self,
+        &mut self,
         owner: DefId,
     ) -> Result<Resolution<()>, SignatureResolutionError> {
         let mut chain = Vec::new();
@@ -17,15 +17,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let mut poison = None;
         let mut unperformed = false;
         for declaration in chain {
-            for generic in self.child_declarations(declaration, DeclarationKind::GenericParameter) {
-                match self
-                    .generic_parameters
-                    .state(&GenericParameterId::Source(generic))
-                {
-                    FactState::Poisoned(found) => merge_poison(&mut poison, found)?,
-                    FactState::Unperformed => unperformed = true,
-                    FactState::Known(_) | FactState::NotApplicable => {}
-                }
+            match self.direct_generic_state(declaration)? {
+                Resolution::Poisoned(found) => merge_poison(&mut poison, &found)?,
+                Resolution::Unperformed => unperformed = true,
+                Resolution::Known(()) => {}
             }
         }
         Ok(if let Some(poison) = poison {
@@ -35,6 +30,78 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         } else {
             Resolution::Known(())
         })
+    }
+
+    fn direct_generic_state(
+        &mut self,
+        owner: DefId,
+    ) -> Result<Resolution<()>, SignatureResolutionError> {
+        #[cfg(test)]
+        generic_state_tests::observe(generic_state_tests::Step::Lookup);
+
+        if let Some(state) = self
+            .frozen_source_generic_scopes
+            .as_ref()
+            .and_then(|scopes| scopes.get(&owner))
+        {
+            #[cfg(test)]
+            generic_state_tests::observe(generic_state_tests::Step::Hit);
+
+            return Ok(state.clone());
+        }
+        #[cfg(test)]
+        generic_state_tests::observe(generic_state_tests::Step::Query);
+
+        let generics = self.child_declarations(owner, DeclarationKind::GenericParameter);
+        if generics.len() == 0 {
+            return Ok(Resolution::Known(()));
+        }
+        #[cfg(test)]
+        generic_state_tests::observe(generic_state_tests::Step::Build);
+
+        let mut poison = None;
+        let mut unperformed = false;
+        for generic in generics {
+            #[cfg(test)]
+            generic_state_tests::observe(generic_state_tests::Step::Read);
+
+            match self
+                .generic_parameters
+                .state(&GenericParameterId::Source(generic))
+            {
+                FactState::Poisoned(found) => {
+                    #[cfg(test)]
+                    generic_state_tests::observe(generic_state_tests::Step::Poisoned);
+                    #[cfg(test)]
+                    generic_state_tests::observe(generic_state_tests::Step::Merge);
+
+                    merge_poison(&mut poison, found)?;
+                }
+                FactState::Unperformed => {
+                    #[cfg(test)]
+                    generic_state_tests::observe(generic_state_tests::Step::Unperformed);
+
+                    unperformed = true;
+                }
+                FactState::Known(_) | FactState::NotApplicable => {
+                    #[cfg(test)]
+                    generic_state_tests::observe(generic_state_tests::Step::Neutral);
+                }
+            }
+        }
+        let state = if let Some(poison) = poison {
+            Resolution::Poisoned(poison)
+        } else if unperformed {
+            Resolution::Unperformed
+        } else {
+            Resolution::Known(())
+        };
+        if let Some(scopes) = &mut self.frozen_source_generic_scopes {
+            scopes.insert(owner, state.clone());
+            #[cfg(test)]
+            generic_state_tests::observe(generic_state_tests::Step::Row(scopes.len()));
+        }
+        Ok(state)
     }
 
     pub(super) fn declaration_context_state(
@@ -210,3 +277,6 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod generic_state_tests;

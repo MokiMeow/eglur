@@ -281,6 +281,7 @@ struct SignatureResolver<'input, 'hir> {
     generic_bounds: BTreeMap<GenericParameterId, Box<[TraitRef]>>,
     source_generic_redeclarations: BTreeSet<DefId>,
     source_generic_names: std::rc::Rc<generic_names::SourceGenericNameIndex>,
+    frozen_source_generic_scopes: Option<BTreeMap<DefId, Resolution<()>>>,
     static_self_bindings: BTreeMap<DefId, SelfBinding>,
     source_generic_bound_seeds: BTreeMap<(DefId, TypeRefId), Resolution<TraitRef>>,
     source_generic_states: BTreeMap<DefId, SourceGenericState>,

@@ -16,6 +16,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         for declaration_id in generic_ids {
             self.resolve_source_generic(declaration_id)?;
         }
+
+        // All source parameters have been attempted; missing facts are terminal too.
+        // Reopening those attempts would require invalidating the scope summaries.
+        self.frozen_source_generic_scopes
+            .get_or_insert_with(BTreeMap::new);
         Ok(())
     }
 

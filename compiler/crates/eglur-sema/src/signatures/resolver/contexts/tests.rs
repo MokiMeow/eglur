@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use super::super::tests::with_resolver;
+use super::super::tests::{with_modules, with_resolver};
 use super::*;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -296,69 +296,6 @@ fn static_self_preparation_tracks_owner_width_not_width_times_methods() {
             });
         }
     }
-}
-
-struct Support;
-
-impl CompileSupport for Support {
-    fn supports(&self, _: CompileCapability) -> bool {
-        true
-    }
-}
-
-fn with_modules(texts: &[(&str, &str)], inspect: impl FnOnce(&mut SignatureResolver<'_, '_>)) {
-    crate::declaration::tests::with_sources(texts, |sources| {
-        let PhaseProduct::Performed(collection) = crate::collect_declarations(sources, &Support)
-            .unwrap()
-            .into_parts()
-            .0
-        else {
-            panic!("collection is supported")
-        };
-        assert_eq!(collection.modules().len(), texts.len());
-        let external = ExternalNameEnvironment::new([], [], []).unwrap();
-        let mut diagnostics = DiagnosticStore::new();
-        let PhaseProduct::Performed(plan) = crate::plan_imports(
-            &collection,
-            sources,
-            &Support,
-            Some(&external),
-            &mut diagnostics,
-        )
-        .unwrap()
-        .into_parts()
-        .0
-        else {
-            panic!("planning is supported")
-        };
-        let unit = crate::ImportAnalysisUnit::new(sources.iter().map(|s| s.file())).unwrap();
-        let PhaseProduct::Performed(imports) = crate::resolve_imports(
-            &collection,
-            &plan,
-            &[unit],
-            sources,
-            &Support,
-            Some(&external),
-            &mut diagnostics,
-        )
-        .unwrap()
-        .into_parts()
-        .0
-        else {
-            panic!("imports are supported")
-        };
-        let mut resolver = SignatureResolver::new(
-            &collection,
-            &imports,
-            sources.iter().map(|s| (s.file(), s)).collect(),
-            None,
-            Some(&external),
-            None,
-            &mut diagnostics,
-        )
-        .unwrap();
-        inspect(&mut resolver);
-    });
 }
 
 #[test]
