@@ -431,7 +431,6 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     generic_parameters: self.direct_generic_ids(declaration_id),
                     variants: self
                         .child_declarations(declaration_id, DeclarationKind::EnumVariant)
-                        .into_iter()
                         .map(CanonicalTarget::Source)
                         .collect::<Vec<_>>()
                         .into_boxed_slice(),
@@ -1061,8 +1060,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let mut unperformed = false;
                 for field in fields {
                     let field_id = declarations
-                        .iter()
-                        .copied()
+                        .clone()
                         .find(|&candidate| {
                             self.collection
                                 .declaration(candidate)
@@ -1243,13 +1241,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             .ok_or(SignatureResolutionError::MissingDeclarationItem(owner))?;
         let generics = item_generic_parameters(hir.item(item).kind())
             .ok_or(SignatureResolutionError::WrongDeclarationItem(owner))?;
-        let declarations = self.child_declarations(owner, DeclarationKind::GenericParameter);
-        let index = declarations
-            .iter()
-            .position(|&candidate| candidate == declaration_id)
-            .ok_or(SignatureResolutionError::MissingGenericDeclaration(
-                declaration_id,
-            ))?;
+        let index = module.source_generic_index(declaration_id).ok_or(
+            SignatureResolutionError::MissingGenericDeclaration(declaration_id),
+        )?;
         let parameter =
             generics
                 .get(index)
@@ -1261,19 +1255,21 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
 
     pub(super) fn direct_generic_ids(&self, owner: DefId) -> Box<[GenericParameterId]> {
         self.child_declarations(owner, DeclarationKind::GenericParameter)
-            .into_iter()
             .map(GenericParameterId::Source)
             .collect::<Vec<_>>()
             .into_boxed_slice()
     }
 
-    pub(super) fn child_declarations(&self, owner: DefId, kind: DeclarationKind) -> Vec<DefId> {
-        self.collection
+    pub(super) fn child_declarations(
+        &self,
+        owner: DefId,
+        kind: DeclarationKind,
+    ) -> impl Clone + ExactSizeIterator<Item = DefId> + 'input {
+        let children = self
+            .collection
             .module(owner.module())
-            .into_iter()
-            .flat_map(|module| module.declarations())
-            .filter(|declaration| declaration.parent() == Some(owner) && declaration.kind() == kind)
-            .map(Declaration::id)
-            .collect()
+            .map_or(&[][..], |module| module.child_ids(owner, kind));
+
+        children.iter().copied()
     }
 }

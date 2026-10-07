@@ -12,7 +12,50 @@ use crate::{
     resolve_imports,
 };
 
-mod reexports;
+mod fingerprints;
+mod resolver_children;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct RoleWork {
+    insertions: usize,
+    queries: usize,
+    generic_index_insertions: usize,
+    generic_index_queries: usize,
+}
+
+thread_local! {
+    static ROLE_WORK: Cell<RoleWork> = const { Cell::new(RoleWork {
+        insertions: 0, queries: 0, generic_index_insertions: 0, generic_index_queries: 0,
+    }) };
+}
+
+pub(super) fn observe_role_insertion() {
+    ROLE_WORK.update(|mut work| {
+        work.insertions += 1;
+        work
+    });
+}
+
+pub(super) fn observe_role_query() {
+    ROLE_WORK.update(|mut work| {
+        work.queries += 1;
+        work
+    });
+}
+
+pub(super) fn observe_generic_index_insertion() {
+    ROLE_WORK.update(|mut work| {
+        work.generic_index_insertions += 1;
+        work
+    });
+}
+
+pub(super) fn observe_generic_index_query() {
+    ROLE_WORK.update(|mut work| {
+        work.generic_index_queries += 1;
+        work
+    });
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct ChildWork {
@@ -82,7 +125,11 @@ fn with_sources<R>(texts: &[(&str, &str)], inspect: impl FnOnce(&[SemanticSource
             let validated = source.validate().unwrap();
             let lines = LineIndex::new(validated);
             let parsed = parse_validated(validated);
-            assert!(parsed.diagnostics().is_empty());
+            assert!(
+                parsed.diagnostics().is_empty(),
+                "{text}: {:?}",
+                parsed.diagnostics()
+            );
             let hir = lower(&parsed);
             assert!(hir.invalid_occurrences().is_empty());
             let label = SourceLabel::new(format!("{name}.eglur")).unwrap();
@@ -266,6 +313,16 @@ fn direct_groups_match_collected_role_name_and_owner_in_allocation_order() {
                     .collect::<Vec<_>>(),
                 children
             );
+            for kind in kinds {
+                let expected = module
+                    .declarations()
+                    .filter(|candidate| {
+                        candidate.parent() == Some(declaration.id()) && candidate.kind() == kind
+                    })
+                    .map(Declaration::id)
+                    .collect::<Vec<_>>();
+                assert_eq!(module.child_ids(declaration.id(), kind), expected);
+            }
 
             let expected = module
                 .declarations()

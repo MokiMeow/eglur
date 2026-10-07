@@ -6,6 +6,13 @@ use crate::{
 
 struct FingerprintSupport;
 
+thread_local! {
+    static SIGNATURE_ROLE_WORK: Cell<RoleWork> = const { Cell::new(RoleWork {
+        insertions: 0, queries: 0, generic_index_insertions: 0, generic_index_queries: 0,
+    }) };
+    static SIGNATURE_DECLARATION_VISITS: Cell<usize> = const { Cell::new(0) };
+}
+
 impl CompileSupport for FingerprintSupport {
     fn supports(&self, capability: CompileCapability) -> bool {
         matches!(
@@ -90,6 +97,8 @@ fn fingerprint(texts: &[(&str, &str)], expected_edges: usize) -> SemanticFingerp
             )
             .unwrap(),
         );
+        ROLE_WORK.set(RoleWork::default());
+        DECLARATION_VISITS.set(0);
         let mut semantics = performed(
             resolve_declaration_signatures(
                 &declarations,
@@ -101,6 +110,8 @@ fn fingerprint(texts: &[(&str, &str)], expected_edges: usize) -> SemanticFingerp
             )
             .unwrap(),
         );
+        SIGNATURE_ROLE_WORK.set(ROLE_WORK.get());
+        SIGNATURE_DECLARATION_VISITS.set(DECLARATION_VISITS.get());
         let mut traits = performed(
             build_trait_environment(
                 &declarations,
@@ -182,6 +193,34 @@ fn fingerprint(texts: &[(&str, &str)], expected_edges: usize) -> SemanticFingerp
         .unwrap()
         .expect("complete semantic products produce fingerprints")
     })
+}
+
+#[test]
+fn wide_signature_resolution_borrows_children_and_looks_up_generic_slots() {
+    for count in [8_usize, 32, 128] {
+        let parameters = (0..count)
+            .map(|index| format!("T{index:03}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        for public in [false, true] {
+            let visibility = if public { "pub " } else { "" };
+            let text = format!("{visibility}fn wide[{parameters}](value: Bool) -> Bool = value\n");
+            let _ = fingerprint(&[("main", &text)], count);
+            assert_eq!(
+                SIGNATURE_ROLE_WORK.get(),
+                RoleWork {
+                    queries: 2 * count + 3,
+                    generic_index_queries: 2 * count,
+                    ..RoleWork::default()
+                }
+            );
+            assert!(
+                SIGNATURE_DECLARATION_VISITS.get() <= 32 * (count + 1),
+                "G={count}, visits={}",
+                SIGNATURE_DECLARATION_VISITS.get()
+            );
+        }
+    }
 }
 
 #[test]

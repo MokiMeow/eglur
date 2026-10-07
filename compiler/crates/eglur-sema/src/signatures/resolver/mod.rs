@@ -48,6 +48,8 @@ mod diagnostics;
 mod enums;
 mod impl_headers;
 mod source_types;
+#[cfg(test)]
+mod tests;
 mod trusted_resolution;
 
 /// Boundary inputs selected by the driver for declaration-signature resolution.
