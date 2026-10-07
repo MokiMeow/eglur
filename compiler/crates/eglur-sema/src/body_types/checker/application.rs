@@ -38,6 +38,33 @@ struct ApplicationArguments {
     enclosing_regions: Vec<ControlRegionKey>,
 }
 
+#[derive(Default)]
+struct ApplicationPoison {
+    pending: Option<eglur_diagnostics::PoisonAccumulator>,
+}
+
+impl ApplicationPoison {
+    fn include(&mut self, incoming: &Poison) -> Result<(), BodyTypingError> {
+        #[cfg(test)]
+        poison_tests::observe(poison_tests::Step::Input);
+
+        // Taking the slot preserves the caller's empty state after a foreign-pool refusal.
+        let mut pending = self.pending.take().unwrap_or_default();
+        pending.include(incoming)?;
+        self.pending = Some(pending);
+        Ok(())
+    }
+
+    fn take(&mut self) -> Option<Poison> {
+        let poison = self.pending.take()?.finish();
+
+        #[cfg(test)]
+        poison_tests::observe(poison_tests::Step::Complete);
+
+        poison
+    }
+}
+
 struct PendingApplication {
     origin: OriginId,
     parameters: Box<[GenericParameterId]>,
@@ -61,7 +88,7 @@ pub(super) struct InferenceFrame {
     pass: InferencePass,
     next: usize,
     normal_continuation: NormalContinuation,
-    poison: Option<Poison>,
+    poison: ApplicationPoison,
     unperformed: bool,
     conflict: bool,
 }
@@ -76,7 +103,7 @@ pub(super) struct CheckingFrame {
     result: TypeId,
     next: usize,
     normal_continuation: NormalContinuation,
-    poison: Option<Poison>,
+    poison: ApplicationPoison,
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
@@ -164,7 +191,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     pass: InferencePass::Probe,
                     next: 0,
                     normal_continuation: NormalContinuation::Present,
-                    poison: None,
+                    poison: ApplicationPoison::default(),
                     unperformed: false,
                     conflict: false,
                 }),
@@ -222,7 +249,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
 
-            if let Some(poison) = frame.poison {
+            if let Some(poison) = frame.poison.take() {
                 return Ok(ApplicationPlan::Complete(Outcome::Poisoned(poison)));
             }
             if frame.unperformed {
@@ -280,7 +307,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         }
                         argument.typed = Some(value);
                     }
-                    Outcome::Poisoned(found) => self.merge_poison(&mut frame.poison, &found)?,
+                    Outcome::Poisoned(found) => frame.poison.include(&found)?,
                     Outcome::Deferred => {}
                     Outcome::Unperformed | Outcome::NotApplicable => frame.unperformed = true,
                 }
@@ -367,7 +394,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 result,
                 next: 0,
                 normal_continuation: NormalContinuation::Present,
-                poison: None,
+                poison: ApplicationPoison::default(),
             }),
         )
     }
@@ -408,7 +435,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
         }
-        if let Some(poison) = frame.poison {
+        if let Some(poison) = frame.poison.take() {
             return Ok(ApplicationPlan::Complete(Outcome::Poisoned(poison)));
         }
         Ok(ApplicationPlan::Complete(Outcome::Known(
@@ -442,10 +469,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     frame.normal_continuation.strict(value.normal_continuation);
                 if !assignable {
                     let found = self.call_argument_mismatch(source, slot, expected, value.ty)?;
-                    self.merge_poison(&mut frame.poison, &found)?;
+                    frame.poison.include(&found)?;
                 }
             }
-            Outcome::Poisoned(found) => self.merge_poison(&mut frame.poison, &found)?,
+            Outcome::Poisoned(found) => frame.poison.include(&found)?,
             Outcome::Deferred => {
                 let outcome = if frame.allow_deferred {
                     Outcome::Deferred
@@ -470,3 +497,6 @@ fn application_refusal<T>(outcome: Outcome<T>) -> Outcome<ResolvedApplication> {
         Outcome::Unperformed | Outcome::NotApplicable => Outcome::Unperformed,
     }
 }
+
+#[cfg(test)]
+mod poison_tests;
