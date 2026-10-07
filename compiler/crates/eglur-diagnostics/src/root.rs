@@ -17,12 +17,26 @@ impl BoundaryRootKey {
     }
 }
 
+/// Caller-owned discriminator for failed obligations sharing source blame.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SourceObligationKey(Box<str>);
+
+impl SourceObligationKey {
+    /// Creates a non-empty identity scoped to one compilation.
+    #[must_use]
+    pub fn new(key: impl Into<Box<str>>) -> Option<Self> {
+        let key = key.into();
+        (!key.is_empty()).then_some(Self(key))
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum RootIdentity {
     Source {
         code: DiagnosticCode,
         source: SourceLabel,
         bytes: ByteRange,
+        obligation: Option<SourceObligationKey>,
     },
     Boundary {
         code: DiagnosticCode,
@@ -66,8 +80,23 @@ pub struct DiagnosticRoot {
 }
 
 impl DiagnosticRoot {
-    /// Derives identity from the stable code and canonical source blame.
+    /// Claims one failed source occurrence without an obligation discriminator.
     pub fn source(diagnostic: Diagnostic) -> Result<Self, DiagnosticRootError> {
+        Self::source_with_obligation(diagnostic, None)
+    }
+
+    /// Distinguishes failed obligations that share a code and source blame.
+    pub fn source_obligation(
+        key: SourceObligationKey,
+        diagnostic: Diagnostic,
+    ) -> Result<Self, DiagnosticRootError> {
+        Self::source_with_obligation(diagnostic, Some(key))
+    }
+
+    fn source_with_obligation(
+        diagnostic: Diagnostic,
+        obligation: Option<SourceObligationKey>,
+    ) -> Result<Self, DiagnosticRootError> {
         require_error(&diagnostic)?;
         let Some(primary) = diagnostic.primary_span().as_source() else {
             return Err(DiagnosticRootError::SourcePrimaryRequired);
@@ -76,6 +105,7 @@ impl DiagnosticRoot {
             code: diagnostic.code().clone(),
             source: primary.source().clone(),
             bytes: primary.file_span().range(),
+            obligation,
         };
         Ok(Self {
             identity,

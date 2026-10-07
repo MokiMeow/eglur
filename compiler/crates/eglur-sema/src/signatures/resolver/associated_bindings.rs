@@ -3,7 +3,16 @@ use super::*;
 mod cycles;
 mod dependencies;
 
+#[cfg(test)]
+mod tests;
+
 use dependencies::BindingDependencies;
+
+pub(super) struct AssociatedMismatch<'a> {
+    pub(super) name: &'a str,
+    pub(super) obligation: &'a CanonicalTarget,
+    pub(super) reason: &'static str,
+}
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_impl_bindings(
@@ -69,8 +78,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     binding.name.origin(),
                     binding_id,
                     trait_ref,
-                    name,
-                    reason,
+                    AssociatedMismatch {
+                        name,
+                        obligation: &CanonicalTarget::Source(binding_id),
+                        reason,
+                    },
                 )?;
                 self.declarations.insert(
                     CanonicalTarget::Source(binding_id),
@@ -94,8 +106,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 declaration.origin(),
                 declaration_id,
                 trait_ref,
-                &name,
-                "missing",
+                AssociatedMismatch {
+                    name: &name,
+                    obligation: &associated,
+                    reason: "missing",
+                },
             )?;
             merge_poison(&mut poison, &found)?;
         }

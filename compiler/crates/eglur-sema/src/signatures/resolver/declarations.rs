@@ -1022,15 +1022,20 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         origin: OriginId,
         owner: DefId,
         trait_ref: &TraitRef,
-        associated: &str,
-        reason: &'static str,
+        mismatch: associated_bindings::AssociatedMismatch<'_>,
     ) -> Result<Poison, SignatureResolutionError> {
+        let associated_bindings::AssociatedMismatch {
+            name: associated,
+            obligation,
+            reason,
+        } = mismatch;
         let trait_name =
             DiagnosticTypeRenderer::new(self.collection, &self.diagnostic_type_names, self, owner)
                 .render_trait_ref(trait_ref)?;
-        self.source_error(
+        self.source_error_for_obligation(
             source,
             origin,
+            source_obligation_key(obligation),
             "TRAIT_IMPL_ASSOC_TYPE_MISMATCH",
             format!("trait impl associated type mismatch: `{associated}` is {reason}"),
             BTreeMap::from([

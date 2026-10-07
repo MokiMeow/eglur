@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use eglur_diagnostics::{
     DiagnosticDataValue, DiagnosticStore, DiagnosticStoreError, Poison, PoisonAccumulator,
-    RelatedSpan, SourceSpan,
+    RelatedSpan, SourceObligationKey, SourceSpan,
 };
 use eglur_hir::{
     BodyId, EnumVariantPayload, ExprKind, FunctionBody, GenericParameter, HirFile, ItemKind,
@@ -19,7 +19,8 @@ use crate::capability::{
 };
 use crate::diagnostic::{
     record_name_ambiguous, record_name_not_found, record_type_error,
-    record_type_error_with_related, record_visibility_violation,
+    record_type_error_for_obligation, record_type_error_with_related, record_visibility_violation,
+    source_obligation_key,
 };
 use crate::overloads::{OverloadPairConflict, classify_overload_pair};
 use crate::traits::{

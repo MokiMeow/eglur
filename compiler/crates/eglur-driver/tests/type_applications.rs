@@ -16,6 +16,9 @@ mod generic_poison;
 #[path = "type_applications/enum_poison.rs"]
 mod enum_poison;
 
+#[path = "type_applications/associated_bindings.rs"]
+mod associated_bindings;
+
 fn session(source: &str) -> CompilerSession {
     let request = FileSetRequest::new(
         [FileInput::new("main.eglur", source.as_bytes().to_vec())],

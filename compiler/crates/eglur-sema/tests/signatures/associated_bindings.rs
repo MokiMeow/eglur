@@ -661,3 +661,87 @@ fn trusted_shared_payload_roots_preserve_finite_and_cycle_results() {
         }
     }
 }
+
+#[test]
+fn source_impl_missing_trusted_associated_types_keeps_each_external_obligation() {
+    use eglur_diagnostics::DiagnosticDataValue;
+
+    let module = ModuleAddress::new([Box::<str>::from("std"), Box::<str>::from("linked")]).unwrap();
+    let linked = ExternalDefId::new("std::linked::Linked").unwrap();
+    let external = ExternalNameEnvironment::new(
+        [module.clone()],
+        [ExternalDeclaration::new(
+            linked.clone(),
+            module,
+            NameKey::new("Linked", false).unwrap(),
+            DeclarationKind::Trait,
+        )
+        .unwrap()],
+        [linked.clone()],
+    )
+    .unwrap();
+    let trusted = TrustedSignatureEnvironment::new([TrustedDeclarationSignature::new(
+        linked,
+        TrustedSignatureKind::Trait {
+            closed: false,
+            generic_parameters: Box::new([]),
+            associated_types: ["Item", "Other"]
+                .map(|name| TrustedAssociatedType {
+                    id: ExternalDefId::new(format!("std::linked::Linked::{name}")).unwrap(),
+                    name: name.into(),
+                })
+                .into(),
+        },
+    )])
+    .unwrap();
+    let text = "struct Node {}\nimpl Linked for Node {}\nfn after() -> Unit = ()\n";
+    let analysis = analyze(
+        text,
+        &CapabilitySet::signatures(),
+        Some(&external),
+        Some(&trusted),
+    );
+    assert_eq!(
+        diagnostic_codes(&analysis.diagnostics),
+        ["TRAIT_IMPL_ASSOC_TYPE_MISMATCH"; 2]
+    );
+    let implementation = analysis
+        .declarations
+        .modules()
+        .next()
+        .unwrap()
+        .declarations()
+        .find(|declaration| declaration.kind() == DeclarationKind::Impl)
+        .unwrap();
+    let prepared = prepare("main.eglur", text);
+    let expected_span = prepared.hir.origin(implementation.origin()).source();
+    let mut actual = BTreeSet::new();
+    for diagnostic in analysis.diagnostics.diagnostics() {
+        assert_eq!(
+            diagnostic.primary_span().as_source().unwrap().file_span(),
+            expected_span
+        );
+        assert_eq!(
+            diagnostic.data().get("trait"),
+            Some(&DiagnosticDataValue::from("Linked"))
+        );
+        assert_eq!(
+            diagnostic.data().get("reason"),
+            Some(&DiagnosticDataValue::from("missing"))
+        );
+        actual.insert(diagnostic.data().get("associated_type").unwrap().clone());
+    }
+    assert_eq!(
+        actual,
+        [
+            DiagnosticDataValue::from("Item"),
+            DiagnosticDataValue::from("Other")
+        ]
+        .into()
+    );
+    let after = source_def(&analysis.declarations, "after", DeclarationKind::Function);
+    assert!(matches!(
+        analysis.signatures.unwrap().source_declaration(after),
+        FactState::Known(_)
+    ));
+}
