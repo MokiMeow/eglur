@@ -56,6 +56,9 @@ mod tensor;
 mod traversal;
 mod values;
 
+#[cfg(test)]
+mod test_support;
+
 /// Checks source bodies once against canonical declaration signatures.
 #[allow(
     clippy::too_many_arguments,

@@ -133,3 +133,62 @@ fn tuple_typing_visits_later_elements_after_poison_and_missing_support() {
         ["TUPLE_PROJECTION_NON_TUPLE", "TUPLE_PROJECTION_NON_TUPLE"]
     );
 }
+
+#[test]
+fn wide_tuple_failures_preserve_later_bodies_and_partial_diagnostics() {
+    for count in [8_usize, 32, 128] {
+        for mode in ["names", "projection", "mixed-partial", "normal-absence"] {
+            let values = (0..count)
+                .map(|index| match mode {
+                    "projection" => format!("x.{index}"),
+                    "mixed-partial" if index % 2 == 0 => "[1]".into(),
+                    "normal-absence" if index == 0 => "{ return }".into(),
+                    _ => format!("missing{index}"),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let source = format!(
+                "fn f(x: i64) -> Unit {{ let value = ({values})\nyield () }}\nfn after() -> Unit = ()\n"
+            );
+            let mut session = session(&source);
+            let catalog = TrustedCatalog::first_slice().unwrap();
+            let analysis = session
+                .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+                .unwrap();
+            assert_eq!(analysis.trace().has_missing(), mode == "mixed-partial");
+            let resolution = analysis.resolution().unwrap();
+            let declaration = |name: &str| {
+                resolution
+                    .declarations()
+                    .modules()
+                    .flat_map(|module| module.declarations())
+                    .find(|declaration| declaration.name().is_some_and(|key| key.text() == name))
+                    .unwrap()
+                    .id()
+            };
+            assert!(matches!(
+                resolution.body_types().body(declaration("f")),
+                FactState::Poisoned(_)
+            ));
+            assert!(matches!(
+                resolution.body_types().body(declaration("after")),
+                FactState::Known(_)
+            ));
+
+            let expected_code = if mode == "projection" {
+                "TUPLE_PROJECTION_NON_TUPLE"
+            } else {
+                "NAME_NOT_FOUND"
+            };
+            let expected_count = match mode {
+                "mixed-partial" => count / 2,
+                "normal-absence" => count - 1,
+                _ => count,
+            };
+            assert_eq!(
+                diagnostic_codes(&session.into_diagnostics(None)),
+                vec![expected_code; expected_count]
+            );
+        }
+    }
+}

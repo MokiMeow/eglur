@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod poison_tests;
+
 pub(super) enum ValuePlan {
     Complete(Outcome<TypedExpression>),
     Expression {
@@ -49,7 +52,7 @@ pub(super) struct TupleFrame {
     next: usize,
     types: Vec<TypeId>,
     normal_continuation: NormalContinuation,
-    poison: Option<Poison>,
+    poison: eglur_diagnostics::PoisonAccumulator,
     unperformed: bool,
     deferred: bool,
 }
@@ -77,7 +80,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             next: 0,
             types,
             normal_continuation: NormalContinuation::Present,
-            poison: None,
+            poison: eglur_diagnostics::PoisonAccumulator::new(),
             unperformed: false,
             deferred: false,
         }))
@@ -97,7 +100,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 continuation: ValueContinuation::Tuple(frame),
             });
         }
-        if let Some(poison) = frame.poison {
+        if let Some(poison) = frame.poison.finish() {
+            #[cfg(test)]
+            poison_tests::observe(poison_tests::Step::Complete);
             return Ok(ValuePlan::Complete(Outcome::Poisoned(poison)));
         }
         if frame.unperformed {
@@ -160,7 +165,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         frame.normal_continuation =
                             frame.normal_continuation.strict(value.normal_continuation);
                     }
-                    Outcome::Poisoned(found) => self.merge_poison(&mut frame.poison, &found)?,
+                    Outcome::Poisoned(found) => {
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Input);
+                        frame.poison.include(&found)?;
+                    }
                     Outcome::Deferred => frame.deferred = true,
                     Outcome::Unperformed | Outcome::NotApplicable => frame.unperformed = true,
                 }
