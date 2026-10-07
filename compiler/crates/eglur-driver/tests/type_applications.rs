@@ -4,6 +4,9 @@ use eglur_driver::{
     SupportProfile, TrustedCatalog,
 };
 
+#[path = "type_applications/poison.rs"]
+mod poison;
+
 fn session(source: &str) -> CompilerSession {
     let request = FileSetRequest::new(
         [FileInput::new("main.eglur", source.as_bytes().to_vec())],

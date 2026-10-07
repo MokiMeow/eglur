@@ -6,6 +6,9 @@ mod path_types;
 mod trait_refs;
 mod type_plans;
 
+#[cfg(test)]
+mod poison_tests;
+
 #[derive(Clone)]
 struct SourceSite {
     owner: DefId,
@@ -47,7 +50,7 @@ struct TypeChildren {
     requests: Vec<TypeRequest>,
     next: usize,
     values: Vec<TypeId>,
-    poison: Option<Poison>,
+    poison: PoisonAccumulator,
     unperformed: bool,
 }
 
@@ -57,7 +60,7 @@ impl TypeChildren {
             values: Vec::with_capacity(requests.len()),
             requests,
             next: 0,
-            poison: None,
+            poison: PoisonAccumulator::new(),
             unperformed: false,
         }
     }
@@ -69,7 +72,12 @@ impl TypeChildren {
     fn accept(&mut self, result: Resolution<TypeId>) -> Result<(), SignatureResolutionError> {
         match result {
             Resolution::Known(ty) => self.values.push(ty),
-            Resolution::Poisoned(found) => merge_poison(&mut self.poison, &found)?,
+            Resolution::Poisoned(found) => {
+                #[cfg(test)]
+                poison_tests::observe(super::poison_tests::Step::Input);
+
+                self.poison.include(&found)?;
+            }
             Resolution::Unperformed => self.unperformed = true,
         }
         self.next += 1;
@@ -77,7 +85,10 @@ impl TypeChildren {
     }
 
     fn finish(self) -> Resolution<Vec<TypeId>> {
-        if let Some(poison) = self.poison {
+        if let Some(poison) = self.poison.finish() {
+            #[cfg(test)]
+            poison_tests::observe(super::poison_tests::Step::Complete);
+
             Resolution::Poisoned(poison)
         } else if self.unperformed {
             Resolution::Unperformed
