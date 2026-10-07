@@ -177,16 +177,36 @@ fn raw_name_classification_matches_ancestor_union_and_isolates_siblings() {
         [cases[7], cases[3], cases[9]],
     ] {
         WORK.set(Work::default());
-        with_resolver(&texts, |resolver, _| {
-            assert_eq!(
-                resolver.source_generic_redeclarations,
-                ancestor_union_classification(resolver.collection)
-            );
-            assert_eq!(
-                WORK.get().output,
-                resolver.source_generic_redeclarations.len()
-            );
+        let modules = [
+            ("first", texts[0]),
+            ("second", texts[1]),
+            ("third", texts[2]),
+        ];
+        crate::declaration::tests::with_sources(&modules, |sources| {
+            let crate::PhaseProduct::Performed(collection) =
+                crate::collect_declarations(sources, &CollectionSupport)
+                    .unwrap()
+                    .into_parts()
+                    .0
+            else {
+                panic!("declaration collection is supported");
+            };
+            assert_eq!(collection.modules().len(), modules.len());
+            let result = classify(&collection);
+            assert_eq!(result, ancestor_union_classification(&collection));
+            assert_eq!(WORK.get().output, result.len());
         });
+    }
+}
+
+struct CollectionSupport;
+
+impl crate::CompileSupport for CollectionSupport {
+    fn supports(&self, capability: crate::CompileCapability) -> bool {
+        matches!(
+            capability,
+            crate::CompileCapability::Resolve(crate::ResolveCapability::CollectDeclarations)
+        )
     }
 }
 

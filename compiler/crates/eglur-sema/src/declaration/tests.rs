@@ -115,7 +115,10 @@ struct PreparedSource {
     spans: Vec<(OriginId, SourceSpan)>,
 }
 
-fn with_sources<R>(texts: &[(&str, &str)], inspect: impl FnOnce(&[SemanticSource<'_>]) -> R) -> R {
+pub(crate) fn with_sources<R>(
+    texts: &[(&str, &str)],
+    inspect: impl FnOnce(&[SemanticSource<'_>]) -> R,
+) -> R {
     let prepared = texts
         .iter()
         .enumerate()
