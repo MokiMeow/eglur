@@ -415,17 +415,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         arguments: &[TypeRefId],
     ) -> Result<Outcome<Vec<TypeId>>, BodyTypingError> {
         let mut resolved = Vec::with_capacity(arguments.len());
-        let mut poison = None;
+        let mut poison = PendingPoison::default();
         let mut unperformed = false;
         for &argument in arguments {
             match self.type_occurrence(source, argument)? {
                 Outcome::Known(argument) => resolved.push(argument),
-                Outcome::Poisoned(found) => self.merge_poison(&mut poison, &found)?,
+                Outcome::Poisoned(found) => poison.include(&found)?,
                 Outcome::Unperformed | Outcome::NotApplicable => unperformed = true,
                 Outcome::Deferred => return Ok(Outcome::Deferred),
             }
         }
-        if let Some(poison) = poison {
+        if let Some(poison) = poison.take() {
             Ok(Outcome::Poisoned(poison))
         } else if unperformed {
             Ok(Outcome::Unperformed)

@@ -1,6 +1,91 @@
 use super::*;
 
 #[test]
+fn growing_dispatch_and_explicit_types_keep_late_failures_and_later_bodies() {
+    for count in [8_usize, 32, 128] {
+        for family in ["arguments", "method-types", "overload-types"] {
+            for mode in ["distinct", "mixed", "known"] {
+                let generic = (0..count)
+                    .map(|i| format!("T{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let values = (0..count)
+                    .rev()
+                    .map(|i| {
+                        let value = if mode == "known" || mode == "mixed" && i % 2 == 0 {
+                            "0".into()
+                        } else {
+                            format!("missing{i}")
+                        };
+                        format!("v{i}={value}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let types = (0..count)
+                    .map(|i| {
+                        if mode == "known" || mode == "mixed" && i % 2 == 0 {
+                            "i64".into()
+                        } else {
+                            format!("Missing{i}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let source = match family {
+                    "arguments" => format!(
+                        "overload fn target({}) -> Unit = ()\noverload fn target({}) -> Unit = ()\nfn inspect() -> Unit = target({values})\nfn after() -> Unit = ()\n",
+                        (0..count)
+                            .map(|i| format!("v{i}: i64"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        (0..count)
+                            .map(|i| format!("v{i}: Bool"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                    "method-types" => format!(
+                        "struct Boxed {{ fn run[{generic}](self: &Self) -> Unit = () }}\nfn inspect(value: Boxed) -> Unit = (value.run)::[{types}]()\nfn after() -> Unit = ()\n"
+                    ),
+                    _ => format!(
+                        "overload fn target[{generic}](value: i64) -> Unit = ()\noverload fn target[{generic}](value: Str) -> Unit = ()\nfn inspect() -> Unit = target::[{types}](0)\nfn after() -> Unit = ()\n"
+                    ),
+                };
+                let catalog = TrustedCatalog::first_slice().unwrap();
+                let mut session = session(&source);
+                let analysis = session
+                    .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+                    .unwrap();
+                assert_eq!(analysis.trace().missing().count(), 0);
+                assert_eq!(analysis.fingerprints().is_some(), mode == "known");
+                let resolution = analysis.resolution().unwrap();
+                let after = resolution
+                    .declarations()
+                    .modules()
+                    .flat_map(|m| m.declarations())
+                    .find(|d| d.name().is_some_and(|name| name.text() == "after"))
+                    .unwrap()
+                    .id();
+                assert!(matches!(
+                    resolution.body_types().body(after),
+                    FactState::Known(_)
+                ));
+
+                let snapshot = session.into_diagnostics(None);
+                let expected = match mode {
+                    "known" => 0,
+                    "mixed" => count / 2,
+                    _ => count,
+                };
+                assert_eq!(
+                    diagnostic_codes(&snapshot),
+                    vec!["NAME_NOT_FOUND"; expected]
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn deferred_named_argument_uses_later_evidence_without_reordering_evaluation() {
     let catalog = TrustedCatalog::first_slice().unwrap();
     for (argument_type, value_type, first, second) in [

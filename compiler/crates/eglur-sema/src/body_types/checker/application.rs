@@ -38,33 +38,6 @@ struct ApplicationArguments {
     enclosing_regions: Vec<ControlRegionKey>,
 }
 
-#[derive(Default)]
-struct ApplicationPoison {
-    pending: Option<eglur_diagnostics::PoisonAccumulator>,
-}
-
-impl ApplicationPoison {
-    fn include(&mut self, incoming: &Poison) -> Result<(), BodyTypingError> {
-        #[cfg(test)]
-        poison_tests::observe(poison_tests::Step::Input);
-
-        // Taking the slot preserves the caller's empty state after a foreign-pool refusal.
-        let mut pending = self.pending.take().unwrap_or_default();
-        pending.include(incoming)?;
-        self.pending = Some(pending);
-        Ok(())
-    }
-
-    fn take(&mut self) -> Option<Poison> {
-        let poison = self.pending.take()?.finish();
-
-        #[cfg(test)]
-        poison_tests::observe(poison_tests::Step::Complete);
-
-        poison
-    }
-}
-
 struct PendingApplication {
     origin: OriginId,
     parameters: Box<[GenericParameterId]>,
@@ -88,7 +61,7 @@ pub(super) struct InferenceFrame {
     pass: InferencePass,
     next: usize,
     normal_continuation: NormalContinuation,
-    poison: ApplicationPoison,
+    poison: PendingPoison,
     unperformed: bool,
     conflict: bool,
 }
@@ -103,7 +76,7 @@ pub(super) struct CheckingFrame {
     result: TypeId,
     next: usize,
     normal_continuation: NormalContinuation,
-    poison: ApplicationPoison,
+    poison: PendingPoison,
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
@@ -191,7 +164,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     pass: InferencePass::Probe,
                     next: 0,
                     normal_continuation: NormalContinuation::Present,
-                    poison: ApplicationPoison::default(),
+                    poison: PendingPoison::default(),
                     unperformed: false,
                     conflict: false,
                 }),
@@ -394,7 +367,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 result,
                 next: 0,
                 normal_continuation: NormalContinuation::Present,
-                poison: ApplicationPoison::default(),
+                poison: PendingPoison::default(),
             }),
         )
     }

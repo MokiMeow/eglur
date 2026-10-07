@@ -33,6 +33,7 @@ use crate::{
 };
 
 use super::{BodyTypes, BodyTypingError, *};
+use poison::PendingPoison;
 
 mod application;
 mod branching;
@@ -50,6 +51,7 @@ mod numeric_tree;
 mod orchestration;
 mod ownership;
 mod patterns;
+mod poison;
 mod statements;
 mod support;
 mod tensor;
