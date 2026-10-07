@@ -10,6 +10,9 @@ mod poison;
 #[path = "type_applications/callable_poison.rs"]
 mod callable_poison;
 
+#[path = "type_applications/generic_poison.rs"]
+mod generic_poison;
+
 fn session(source: &str) -> CompilerSession {
     let request = FileSetRequest::new(
         [FileInput::new("main.eglur", source.as_bytes().to_vec())],
