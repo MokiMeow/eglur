@@ -68,7 +68,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         };
         resolver.register_trusted_heads()?;
         resolver.register_source_heads()?;
-        resolver.source_generic_redeclarations = resolver.classify_source_generic_redeclarations();
+        resolver.source_generic_redeclarations = generic_redeclarations::classify(collection);
         resolver.source_generic_names =
             std::rc::Rc::new(generic_names::SourceGenericNameIndex::new(
                 collection,

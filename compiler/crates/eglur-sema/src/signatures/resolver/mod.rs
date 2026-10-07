@@ -47,6 +47,7 @@ mod declarations;
 mod diagnostics;
 mod enums;
 mod generic_names;
+mod generic_redeclarations;
 mod impl_headers;
 mod source_types;
 #[cfg(test)]

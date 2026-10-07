@@ -434,56 +434,6 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         }
     }
 
-    pub(super) fn classify_source_generic_redeclarations(&self) -> BTreeSet<DefId> {
-        let mut by_owner = BTreeMap::<DefId, Vec<(DefId, Box<str>)>>::new();
-        for declaration in self
-            .collection
-            .modules()
-            .flat_map(|module| module.declarations())
-        {
-            if declaration.kind() != DeclarationKind::GenericParameter {
-                continue;
-            }
-            let (Some(owner), Some(name)) = (declaration.parent(), declaration.name()) else {
-                continue;
-            };
-            if is_reserved_type_name(name.text()) {
-                continue;
-            }
-            by_owner
-                .entry(owner)
-                .or_default()
-                .push((declaration.id(), Box::<str>::from(name.text())));
-        }
-
-        let mut redeclarations = BTreeSet::new();
-        for (&owner, direct_parameters) in &by_owner {
-            let mut enclosing_names = BTreeSet::new();
-            let mut ancestor = self
-                .collection
-                .declaration(owner)
-                .and_then(Declaration::parent);
-            while let Some(current) = ancestor {
-                if let Some(parameters) = by_owner.get(&current) {
-                    enclosing_names.extend(parameters.iter().map(|(_, name)| name.clone()));
-                }
-                ancestor = self
-                    .collection
-                    .declaration(current)
-                    .and_then(Declaration::parent);
-            }
-
-            let mut direct_names = BTreeSet::new();
-            for (generic, name) in direct_parameters {
-                if !direct_names.insert(name.clone()) || enclosing_names.contains(name.as_ref()) {
-                    redeclarations.insert(*generic);
-                }
-            }
-        }
-
-        redeclarations
-    }
-
     pub(super) fn prime_source_generic_bounds(
         &mut self,
         generic_ids: &[DefId],
