@@ -155,8 +155,7 @@ pub(crate) fn record_type_error_for_obligation(
     data: BTreeMap<Box<str>, DiagnosticDataValue>,
 ) -> Result<Poison, SemanticDiagnosticError> {
     let diagnostic = type_error_diagnostic(code_spelling, message, span, data);
-    let root = DiagnosticRoot::source_obligation(key, diagnostic)?;
-    Ok(store.record_failure(DiagnosticFailure::Root(root))?)
+    record_root_for_obligation(store, key, diagnostic)
 }
 
 fn type_error_diagnostic(
@@ -200,6 +199,20 @@ pub(crate) fn record_type_error_with_related(
     )
 }
 
+pub(crate) fn record_type_error_with_related_for_obligation(
+    store: &mut DiagnosticStore,
+    key: SourceObligationKey,
+    code_spelling: &'static str,
+    message: impl Into<String>,
+    span: SourceSpan,
+    related: impl IntoIterator<Item = RelatedSpan>,
+    data: BTreeMap<Box<str>, DiagnosticDataValue>,
+) -> Result<Poison, SemanticDiagnosticError> {
+    let diagnostic = type_error_diagnostic(code_spelling, message, span, data)
+        .with_related(related, RelatedOrder::CodeDefined);
+    record_root_for_obligation(store, key, diagnostic)
+}
+
 pub(crate) fn record_effect_violation(
     store: &mut DiagnosticStore,
     message: impl Into<String>,
@@ -239,6 +252,15 @@ fn record_root(
     diagnostic: Diagnostic,
 ) -> Result<Poison, SemanticDiagnosticError> {
     let root = DiagnosticRoot::source(diagnostic)?;
+    Ok(store.record_failure(DiagnosticFailure::Root(root))?)
+}
+
+fn record_root_for_obligation(
+    store: &mut DiagnosticStore,
+    key: SourceObligationKey,
+    diagnostic: Diagnostic,
+) -> Result<Poison, SemanticDiagnosticError> {
+    let root = DiagnosticRoot::source_obligation(key, diagnostic)?;
     Ok(store.record_failure(DiagnosticFailure::Root(root))?)
 }
 

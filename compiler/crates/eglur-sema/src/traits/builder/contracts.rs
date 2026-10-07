@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Debug)]
 enum CheckedCallable {
     Known(CallableSignature),
@@ -840,8 +843,9 @@ fn record_missing_impl_method(
 ) -> Result<Poison, TraitEnvironmentError> {
     let trait_name = render_trait_name(collection, signatures, implementation, header)?;
     let method = trait_method.name().spelling();
-    Ok(record_type_error_with_related(
+    Ok(record_type_error_with_related_for_obligation(
         diagnostics,
+        source_obligation_key(trait_method.declaration()),
         "TRAIT_IMPL_MISSING_METHOD",
         format!("trait `{trait_name}` method `{method}` is missing from impl"),
         source_declaration_span(collection, sources, implementation)?,
