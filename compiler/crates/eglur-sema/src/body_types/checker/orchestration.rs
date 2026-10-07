@@ -187,19 +187,24 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let body = hir.body(value.body);
         if self.evaluate_constant_declarations {
             self.require_constant_declarations(source, item.origin());
-            let mut name_poison: Option<Poison> = None;
+            let mut name_poison = eglur_diagnostics::PoisonAccumulator::new();
             for (expression, _) in body.expressions() {
                 if let FactState::Poisoned(poison) = self
                     .names
                     .fact(ResolutionKey::Expression { module, expression })
                 {
-                    name_poison = Some(match name_poison {
-                        Some(previous) => previous.merge(poison)?,
-                        None => poison.clone(),
-                    });
+                    #[cfg(test)]
+                    super::constants::poison_tests::observe(
+                        super::constants::poison_tests::Step::Input(0),
+                    );
+                    name_poison.include(poison)?;
                 }
             }
-            if let Some(poison) = name_poison {
+            if let Some(poison) = name_poison.finish() {
+                #[cfg(test)]
+                super::constants::poison_tests::observe(
+                    super::constants::poison_tests::Step::Complete(0),
+                );
                 return self.record_body_outcome(declaration, expected, Outcome::Poisoned(poison));
             }
             if !self.is_const_evaluable_expression(module, body, value.value)? {

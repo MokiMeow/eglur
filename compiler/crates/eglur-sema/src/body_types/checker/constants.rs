@@ -94,14 +94,22 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 if matches!(self.bodies.state(&declaration), FactState::Poisoned(_)) {
                     continue;
                 }
-                let mut inherited: Option<Poison> = None;
+                let mut inherited = eglur_diagnostics::PoisonAccumulator::new();
                 for dependency in dependencies[&declaration].keys() {
                     if let FactState::Poisoned(poison) = self.bodies.state(dependency) {
-                        inherited = Some(match inherited {
-                            Some(previous) => previous.merge(poison)?,
-                            None => poison.clone(),
-                        });
+                        #[cfg(test)]
+                        super::constants::poison_tests::observe(
+                            super::constants::poison_tests::Step::Input(1),
+                        );
+                        inherited.include(poison)?;
                     }
+                }
+                let inherited = inherited.finish();
+                #[cfg(test)]
+                if inherited.is_some() {
+                    super::constants::poison_tests::observe(
+                        super::constants::poison_tests::Step::Complete(1),
+                    );
                 }
                 let depends_on_cycle = dependencies[&declaration]
                     .keys()
@@ -215,3 +223,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Ok(Outcome::Known(typed))
     }
 }
+
+#[cfg(test)]
+pub(super) mod poison_tests;
