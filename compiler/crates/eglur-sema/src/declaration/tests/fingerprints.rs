@@ -209,7 +209,7 @@ fn wide_signature_resolution_borrows_children_and_looks_up_generic_slots() {
             assert_eq!(
                 SIGNATURE_ROLE_WORK.get(),
                 RoleWork {
-                    queries: 2 * count + 3,
+                    queries: 2,
                     generic_index_queries: 2 * count,
                     ..RoleWork::default()
                 }

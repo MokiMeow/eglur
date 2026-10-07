@@ -53,6 +53,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             generic_types: BTreeMap::new(),
             generic_bounds: BTreeMap::new(),
             source_generic_redeclarations: BTreeSet::new(),
+            source_generic_names: std::rc::Rc::default(),
             source_generic_bound_seeds: BTreeMap::new(),
             source_generic_states: BTreeMap::new(),
             source_generic_stack: Vec::new(),
@@ -68,6 +69,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         resolver.register_trusted_heads()?;
         resolver.register_source_heads()?;
         resolver.source_generic_redeclarations = resolver.classify_source_generic_redeclarations();
+        resolver.source_generic_names =
+            std::rc::Rc::new(generic_names::SourceGenericNameIndex::new(
+                collection,
+                &resolver.source_generic_redeclarations,
+            ));
         resolver.register_generic_types()?;
         Ok(resolver)
     }

@@ -86,31 +86,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .and_then(Declaration::parent);
         }
         chain.reverse();
-        let mut generics = BTreeMap::new();
-        for declaration in &chain {
-            for generic in self.child_declarations(*declaration, DeclarationKind::GenericParameter)
-            {
-                if self.source_generic_redeclarations.contains(&generic) {
-                    continue;
-                }
-                let generic_declaration = self
-                    .collection
-                    .declaration(generic)
-                    .expect("generic child belongs to collection");
-                if let Some(name) = generic_declaration.name() {
-                    generics
-                        .entry(Box::<str>::from(name.text()))
-                        .or_insert(GenericParameterId::Source(generic));
-                }
-            }
-        }
         let self_binding = if allow_self {
             self.self_binding(&chain)?
         } else {
             None
         };
         Ok(SourceTypeContext {
-            generics,
+            generics: self.source_generic_names.for_chain(chain),
             self_binding,
             structure_validation: TypeStructureValidation::Immediate,
             application_region: self.application_region(owner),

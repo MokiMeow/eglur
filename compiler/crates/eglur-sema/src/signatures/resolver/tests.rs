@@ -17,7 +17,7 @@ fn performed<T>(phase: PhaseAnalysis<T>) -> T {
     value
 }
 
-fn with_resolver(
+pub(super) fn with_resolver(
     texts: &[&str],
     inspect: impl for<'input, 'hir> FnOnce(
         &mut SignatureResolver<'input, 'hir>,
@@ -32,7 +32,11 @@ fn with_resolver(
             let validated = source.validate().unwrap();
             let lines = LineIndex::new(validated);
             let parsed = eglur_syntax::parse_validated(validated);
-            assert!(parsed.diagnostics().is_empty());
+            assert!(
+                parsed.diagnostics().is_empty(),
+                "{:?}",
+                parsed.diagnostics()
+            );
             let hir = eglur_hir::lower(&parsed);
             assert!(hir.invalid_occurrences().is_empty());
             let label = SourceLabel::new("main.eglur").unwrap();
