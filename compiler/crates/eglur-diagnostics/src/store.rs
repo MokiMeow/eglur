@@ -34,6 +34,17 @@ impl Poison {
         }
     }
 
+    fn contains_root(&self, root: &usize) -> bool {
+        self.roots
+            .binary_search_by(|candidate| {
+                #[cfg(test)]
+                suppression_tests::observe_comparison();
+
+                candidate.cmp(root)
+            })
+            .is_ok()
+    }
+
     /// Merges two provenance sets from the same diagnostic store.
     pub fn merge(&self, other: &Self) -> Result<Self, DiagnosticStoreError> {
         if !Arc::ptr_eq(&self.store, &other.store) {
@@ -312,7 +323,7 @@ impl DiagnosticStore {
         for root in later
             .roots
             .iter()
-            .filter(|root| !preceding.roots.contains(root))
+            .filter(|root| !preceding.contains_root(root))
         {
             self.superseded.insert(*root);
         }
@@ -377,3 +388,6 @@ impl Default for DiagnosticStore {
 
 #[cfg(test)]
 mod poison_tests;
+
+#[cfg(test)]
+mod suppression_tests;
