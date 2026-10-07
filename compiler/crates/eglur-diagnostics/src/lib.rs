@@ -20,4 +20,5 @@ pub use span::{
 };
 pub use store::{
     DiagnosticCheckpoint, DiagnosticFailure, DiagnosticStore, DiagnosticStoreError, Poison,
+    PoisonAccumulator,
 };

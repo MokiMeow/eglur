@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use eglur_diagnostics::{
-    DiagnosticDataValue, DiagnosticStore, DiagnosticStoreError, Poison, RelatedSpan, SourceSpan,
+    DiagnosticDataValue, DiagnosticStore, DiagnosticStoreError, Poison, PoisonAccumulator,
+    RelatedSpan, SourceSpan,
 };
 use eglur_hir::{
     BodyId, EnumVariantPayload, ExprKind, FunctionBody, GenericParameter, HirFile, ItemKind,

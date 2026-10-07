@@ -29,6 +29,8 @@ mod direct_children;
 mod enums;
 #[path = "signatures/impl_arguments.rs"]
 mod impl_arguments;
+#[path = "signatures/poison_contexts.rs"]
+mod poison_contexts;
 #[path = "signatures/source_type_depth.rs"]
 mod source_type_depth;
 #[path = "signatures/type_applications.rs"]
