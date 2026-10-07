@@ -395,8 +395,7 @@ impl InterfaceWriter<'_, '_> {
             SemanticFingerprintError::UnknownDeclaration(declaration.id()),
         )?;
         let mut children = module
-            .declarations()
-            .filter(|child| child.parent() == Some(declaration.id()))
+            .children(declaration.id())
             .map(|child| {
                 let reachable =
                     child_is_externally_reachable(child, declaration.id(), declarations)?;

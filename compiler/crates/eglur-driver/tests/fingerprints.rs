@@ -15,6 +15,9 @@ mod traversal;
 #[path = "fingerprints/binder_contexts.rs"]
 mod binder_contexts;
 
+#[path = "fingerprints/reexports.rs"]
+mod reexports;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FingerprintSnapshot {
     analysis: AnalysisFingerprints,

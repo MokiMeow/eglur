@@ -209,6 +209,7 @@ pub struct ModuleDeclarations {
     item_defs: BTreeMap<ItemId, DefId>,
     module_bindings: BTreeMap<(Namespace, NameKey), Vec<DefId>>,
     direct_declarations: BTreeMap<(Option<DefId>, DeclarationKind, Option<NameKey>), Vec<DefId>>,
+    children_by_parent: BTreeMap<DefId, Vec<DefId>>,
     imports: Vec<ImportRecord>,
     declaration_poison: Option<Poison>,
     import_poison: Option<Poison>,
@@ -269,6 +270,23 @@ impl ModuleDeclarations {
         self.direct_declarations
             .get(&(parent, kind, name.cloned()))
             .map_or(&[], Vec::as_slice)
+    }
+
+    /// Immediate children in allocation order, without visibility or role filtering.
+    pub(crate) fn children(&self, parent: DefId) -> impl ExactSizeIterator<Item = &Declaration> {
+        #[cfg(test)]
+        tests::observe_child_query();
+
+        let children = self
+            .children_by_parent
+            .get(&parent)
+            .map_or(&[][..], Vec::as_slice);
+        #[cfg(test)]
+        let children = children.iter().inspect(|_| tests::observe_child_visit());
+        #[cfg(not(test))]
+        let children = children.iter();
+
+        children.map(|id| &self.declarations[id.index()])
     }
 
     pub fn imports(&self) -> impl ExactSizeIterator<Item = &ImportRecord> {
@@ -453,6 +471,7 @@ pub fn collect_declarations(
             item_defs: BTreeMap::new(),
             module_bindings: BTreeMap::new(),
             direct_declarations: BTreeMap::new(),
+            children_by_parent: BTreeMap::new(),
             imports: Vec::new(),
             declaration_poison: source.source_poison().cloned(),
             import_poison: source.source_poison().cloned(),
@@ -667,6 +686,15 @@ fn allocate_declaration(
         .entry((parent, kind, name.clone()))
         .or_default()
         .push(id);
+    if let Some(parent) = parent {
+        #[cfg(test)]
+        tests::observe_child_insertion();
+        module
+            .children_by_parent
+            .entry(parent)
+            .or_default()
+            .push(id);
+    }
     if parent.is_none()
         && let (Some(name), Some(namespace)) = (name, kind.namespace())
     {

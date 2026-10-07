@@ -12,12 +12,42 @@ use crate::{
     resolve_imports,
 };
 
+mod reexports;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ChildWork {
+    insertions: usize,
+    queries: usize,
+    visits: usize,
+}
+
 thread_local! {
     static DECLARATION_VISITS: Cell<usize> = const { Cell::new(0) };
+    static CHILD_WORK: Cell<ChildWork> = const { Cell::new(ChildWork {
+        insertions: 0, queries: 0, visits: 0,
+    }) };
 }
 
 pub(super) fn observe_declaration_visit() {
     DECLARATION_VISITS.set(DECLARATION_VISITS.get() + 1);
+}
+
+pub(super) fn observe_child_insertion() {
+    let mut work = CHILD_WORK.get();
+    work.insertions += 1;
+    CHILD_WORK.set(work);
+}
+
+pub(super) fn observe_child_query() {
+    let mut work = CHILD_WORK.get();
+    work.queries += 1;
+    CHILD_WORK.set(work);
+}
+
+pub(super) fn observe_child_visit() {
+    let mut work = CHILD_WORK.get();
+    work.visits += 1;
+    CHILD_WORK.set(work);
 }
 
 struct Support;
@@ -224,6 +254,19 @@ fn direct_groups_match_collected_role_name_and_owner_in_allocation_order() {
 
     for module in collection.modules() {
         for declaration in module.declarations() {
+            let children = module
+                .declarations()
+                .filter(|child| child.parent() == Some(declaration.id()))
+                .map(Declaration::id)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                module
+                    .children(declaration.id())
+                    .map(Declaration::id)
+                    .collect::<Vec<_>>(),
+                children
+            );
+
             let expected = module
                 .declarations()
                 .filter(|candidate| {
@@ -257,12 +300,14 @@ fn direct_groups_match_collected_role_name_and_owner_in_allocation_order() {
             2
         );
         let missing = DefId::from_index(module.id(), module.declarations.len()).unwrap();
+        assert_eq!(module.children(missing).len(), 0);
         assert!(
             collection
                 .child_candidates(missing, &same, DeclarationKind::Function)
                 .is_empty()
         );
         let other = DefId::from_index(ModuleId::from_index(9).unwrap(), 0).unwrap();
+        assert_eq!(module.children(other).len(), 0);
         assert!(
             module
                 .direct_candidates(Some(other), Some(&same), DeclarationKind::Function)
@@ -310,6 +355,69 @@ fn child_queries_do_not_rescan_wide_modules() {
             );
         }
         assert_eq!(DECLARATION_VISITS.get(), 0, "methods={count}");
+    }
+}
+
+#[test]
+fn all_child_queries_visit_only_stored_edges() {
+    for count in [8, 32, 128] {
+        let methods = (0..count)
+            .map(|index| {
+                format!("pub fn method_{index:03}[T](self: &Self, value: T) -> T = value\n")
+            })
+            .collect::<String>();
+        let source = format!("pub struct Host[A] {{\n{methods}}}\n");
+        CHILD_WORK.set(ChildWork::default());
+        let collection = collect(&[("first", &source), ("second", &source)]);
+        let prepared = CHILD_WORK.get();
+        let expected_edges = 2 * (2 * count + 1);
+        assert_eq!(prepared.insertions, expected_edges);
+        assert_eq!(prepared.queries, 0);
+        assert_eq!(prepared.visits, 0);
+
+        let stored = collection
+            .modules()
+            .map(|module| {
+                module
+                    .children_by_parent
+                    .values()
+                    .map(Vec::len)
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
+        assert_eq!(stored, expected_edges);
+        let declarations = collection
+            .modules()
+            .flat_map(|module| {
+                module
+                    .declarations()
+                    .map(move |declaration| (module, declaration))
+            })
+            .collect::<Vec<_>>();
+        DECLARATION_VISITS.set(0);
+        for (module, declaration) in &declarations {
+            let children = module.children(declaration.id()).collect::<Vec<_>>();
+            assert!(
+                children
+                    .iter()
+                    .all(|child| child.parent() == Some(declaration.id()))
+            );
+            assert!(children.windows(2).all(|pair| pair[0].id() < pair[1].id()));
+        }
+        assert_eq!(DECLARATION_VISITS.get(), 0);
+        assert_eq!(
+            CHILD_WORK.get(),
+            ChildWork {
+                insertions: expected_edges,
+                queries: declarations.len(),
+                visits: expected_edges,
+            }
+        );
+
+        let first = collection.modules().next().unwrap();
+        let second = collection.modules().nth(1).unwrap();
+        let foreign = second.declarations().next().unwrap().id();
+        assert_eq!(first.children(foreign).len(), 0);
     }
 }
 
