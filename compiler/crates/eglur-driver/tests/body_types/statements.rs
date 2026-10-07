@@ -127,3 +127,68 @@ fn unreachable_statements_are_checked_without_enclosing_question_transfers() {
         ["ASSIGNMENT_TYPE_MISMATCH"]
     );
 }
+
+#[test]
+fn wide_block_failures_preserve_later_statements_bodies_and_partial_diagnostics() {
+    for count in [8_usize, 32, 128] {
+        for mode in ["names", "projection", "mixed-partial", "return-leading"] {
+            let statements = (0..count)
+                .map(|index| match mode {
+                    "projection" => format!("let v{index} = x.{index}\n"),
+                    "mixed-partial" if index % 2 == 0 => format!("let v{index} = [1]\n"),
+                    _ => format!("let v{index} = missing{index}\n"),
+                })
+                .collect::<String>();
+            let prefix = if mode == "return-leading" {
+                "return\n"
+            } else {
+                ""
+            };
+            let source = format!(
+                "fn f(x: i64) -> Unit {{ {prefix}{statements}yield () }}\nfn after() -> Unit = ()\n"
+            );
+            let mut session = session(&source);
+            let catalog = TrustedCatalog::first_slice().unwrap();
+            let analysis = session
+                .resolve(
+                    &eglur_driver::SupportProfile::semantic_core_v1(),
+                    Some(&catalog),
+                )
+                .unwrap();
+            assert_eq!(analysis.trace().has_missing(), mode == "mixed-partial");
+            let resolution = analysis.resolution().unwrap();
+            let declaration = |name: &str| {
+                resolution
+                    .declarations()
+                    .modules()
+                    .flat_map(|module| module.declarations())
+                    .find(|declaration| declaration.name().is_some_and(|key| key.text() == name))
+                    .unwrap()
+                    .id()
+            };
+            assert!(matches!(
+                resolution.body_types().body(declaration("f")),
+                FactState::Poisoned(_)
+            ));
+            assert!(matches!(
+                resolution.body_types().body(declaration("after")),
+                FactState::Known(_)
+            ));
+
+            let expected_code = if mode == "projection" {
+                "TUPLE_PROJECTION_NON_TUPLE"
+            } else {
+                "NAME_NOT_FOUND"
+            };
+            let expected_count = if mode == "mixed-partial" {
+                count / 2
+            } else {
+                count
+            };
+            assert_eq!(
+                diagnostic_codes(&session.into_diagnostics(None)),
+                vec![expected_code; expected_count]
+            );
+        }
+    }
+}

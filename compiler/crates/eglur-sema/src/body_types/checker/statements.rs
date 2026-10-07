@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod poison_tests;
+
 pub(super) enum StatementPlan {
     Complete(Outcome<BlockStep>),
     Expression {
@@ -39,10 +42,59 @@ pub(super) struct PreparedLet {
     expected: Option<TypeId>,
 }
 
+enum BlockState {
+    Known,
+    Poisoned(eglur_diagnostics::PoisonAccumulator),
+    Unperformed,
+    Deferred,
+    NotApplicable,
+}
+
+impl BlockState {
+    fn include(self, next: Outcome<()>) -> Result<Self, BodyTypingError> {
+        let (mut pending, poison) = match (self, next) {
+            (Self::Poisoned(pending), Outcome::Poisoned(poison)) => (pending, poison),
+            (Self::Poisoned(pending), _) => return Ok(Self::Poisoned(pending)),
+            (_, Outcome::Poisoned(poison)) => (eglur_diagnostics::PoisonAccumulator::new(), poison),
+            (Self::Unperformed, _) | (_, Outcome::Unperformed) => return Ok(Self::Unperformed),
+            (Self::Deferred, _) | (_, Outcome::Deferred) => return Ok(Self::Deferred),
+            (Self::NotApplicable, _) | (_, Outcome::NotApplicable) => {
+                return Ok(Self::NotApplicable);
+            }
+            (Self::Known, Outcome::Known(())) => return Ok(Self::Known),
+        };
+
+        #[cfg(test)]
+        poison_tests::observe(poison_tests::Step::Input);
+
+        pending.include(&poison)?;
+        Ok(Self::Poisoned(pending))
+    }
+
+    fn finish(self) -> Outcome<()> {
+        match self {
+            Self::Known => Outcome::Known(()),
+            Self::Poisoned(pending) => {
+                let poison = pending
+                    .finish()
+                    .expect("poisoned block includes provenance");
+
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Complete);
+
+                Outcome::Poisoned(poison)
+            }
+            Self::Unperformed => Outcome::Unperformed,
+            Self::Deferred => Outcome::Deferred,
+            Self::NotApplicable => Outcome::NotApplicable,
+        }
+    }
+}
+
 pub(super) struct BlockFrame {
     remaining: std::vec::IntoIter<StmtId>,
     expected: Option<TypeId>,
-    state: Outcome<()>,
+    state: BlockState,
     result: Option<TypeId>,
     reachable: bool,
 }
@@ -52,7 +104,7 @@ impl BlockFrame {
         Self {
             remaining: statements.into_vec().into_iter(),
             expected,
-            state: Outcome::Known(()),
+            state: BlockState::Known,
             result: None,
             reachable: true,
         }
@@ -85,7 +137,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             block.reachable = step.normal_continuation.is_present();
         }
-        block.state = self.merge_unit(block.state, next.map_unit())?;
+        block.state = block.state.include(next.map_unit())?;
         Ok(block)
     }
 
@@ -93,7 +145,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         block: BlockFrame,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        match block.state {
+        match block.state.finish() {
             Outcome::Known(()) => {
                 if block.reachable {
                     let region = self.current_control_region()?.clone();
