@@ -119,7 +119,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let region = ControlRegionKey::Callable(declaration);
         self.enter_control_region(region.clone())?;
         let outcome = (|| {
-            let mut setup = Outcome::Known(());
+            let mut setup = UnitOutcomeFold::Known;
             for parameter in signature.parameters() {
                 if let Some(pattern) = parameter.source_pattern() {
                     let origin = body
@@ -130,11 +130,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         match self.normalize_type_at(source, origin, parameter.ty())? {
                             Outcome::Known(ty) => ty,
                             Outcome::Poisoned(poison) => {
-                                setup = self.merge_unit(setup, Outcome::Poisoned(poison))?;
+                                setup = setup.include(Outcome::Poisoned(poison))?;
                                 continue;
                             }
                             Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => {
-                                setup = self.merge_unit(setup, Outcome::Unperformed)?;
+                                setup = setup.include(Outcome::Unperformed)?;
                                 continue;
                             }
                         };
@@ -146,10 +146,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         parameter_ty,
                         PatternBindingMode::Parameter,
                     )?;
-                    setup = self.merge_unit(setup, bound)?;
+                    setup = setup.include(bound)?;
                 }
             }
-            match setup {
+            match setup.finish() {
                 Outcome::Known(()) => match function.body_form {
                     FunctionBody::Absent => Ok(Outcome::NotApplicable),
                     FunctionBody::Expression(expression) | FunctionBody::Block(expression) => {

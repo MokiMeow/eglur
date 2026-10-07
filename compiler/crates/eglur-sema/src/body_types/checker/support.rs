@@ -107,25 +107,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Ok(())
     }
 
-    pub(super) fn merge_unit(
-        &mut self,
-        left: Outcome<()>,
-        right: Outcome<()>,
-    ) -> Result<Outcome<()>, BodyTypingError> {
-        match (left, right) {
-            (Outcome::Poisoned(left), Outcome::Poisoned(right)) => {
-                Ok(Outcome::Poisoned(left.merge(&right)?))
-            }
-            (Outcome::Poisoned(poison), _) | (_, Outcome::Poisoned(poison)) => {
-                Ok(Outcome::Poisoned(poison))
-            }
-            (Outcome::Unperformed, _) | (_, Outcome::Unperformed) => Ok(Outcome::Unperformed),
-            (Outcome::Deferred, _) | (_, Outcome::Deferred) => Ok(Outcome::Deferred),
-            (Outcome::NotApplicable, _) | (_, Outcome::NotApplicable) => Ok(Outcome::NotApplicable),
-            (Outcome::Known(()), Outcome::Known(())) => Ok(Outcome::Known(())),
-        }
-    }
-
     pub(super) fn merge_poison(
         &mut self,
         retained: &mut Option<Poison>,

@@ -59,6 +59,9 @@ mod values;
 #[cfg(test)]
 mod test_support;
 
+#[cfg(test)]
+mod unit_outcome_tests;
+
 /// Checks source bodies once against canonical declaration signatures.
 #[allow(
     clippy::too_many_arguments,
@@ -227,6 +230,55 @@ impl<T> Outcome<T> {
 
     fn map_unit(self) -> Outcome<()> {
         self.map(|_| ())
+    }
+}
+
+enum UnitOutcomeFold {
+    Known,
+    Poisoned(eglur_diagnostics::PoisonAccumulator),
+    Unperformed,
+    Deferred,
+    NotApplicable,
+}
+
+impl UnitOutcomeFold {
+    fn include(self, next: Outcome<()>) -> Result<Self, BodyTypingError> {
+        let (mut pending, poison) = match (self, next) {
+            (Self::Poisoned(pending), Outcome::Poisoned(poison)) => (pending, poison),
+            (Self::Poisoned(pending), _) => return Ok(Self::Poisoned(pending)),
+            (_, Outcome::Poisoned(poison)) => (eglur_diagnostics::PoisonAccumulator::new(), poison),
+            (Self::Unperformed, _) | (_, Outcome::Unperformed) => return Ok(Self::Unperformed),
+            (Self::Deferred, _) | (_, Outcome::Deferred) => return Ok(Self::Deferred),
+            (Self::NotApplicable, _) | (_, Outcome::NotApplicable) => {
+                return Ok(Self::NotApplicable);
+            }
+            (Self::Known, Outcome::Known(())) => return Ok(Self::Known),
+        };
+
+        #[cfg(test)]
+        unit_outcome_tests::observe(unit_outcome_tests::Step::Input);
+
+        pending.include(&poison)?;
+        Ok(Self::Poisoned(pending))
+    }
+
+    fn finish(self) -> Outcome<()> {
+        match self {
+            Self::Known => Outcome::Known(()),
+            Self::Poisoned(pending) => {
+                let poison = pending
+                    .finish()
+                    .expect("poisoned unit fold includes provenance");
+
+                #[cfg(test)]
+                unit_outcome_tests::observe(unit_outcome_tests::Step::Complete);
+
+                Outcome::Poisoned(poison)
+            }
+            Self::Unperformed => Outcome::Unperformed,
+            Self::Deferred => Outcome::Deferred,
+            Self::NotApplicable => Outcome::NotApplicable,
+        }
     }
 }
 

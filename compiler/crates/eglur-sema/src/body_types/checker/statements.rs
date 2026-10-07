@@ -42,59 +42,10 @@ pub(super) struct PreparedLet {
     expected: Option<TypeId>,
 }
 
-enum BlockState {
-    Known,
-    Poisoned(eglur_diagnostics::PoisonAccumulator),
-    Unperformed,
-    Deferred,
-    NotApplicable,
-}
-
-impl BlockState {
-    fn include(self, next: Outcome<()>) -> Result<Self, BodyTypingError> {
-        let (mut pending, poison) = match (self, next) {
-            (Self::Poisoned(pending), Outcome::Poisoned(poison)) => (pending, poison),
-            (Self::Poisoned(pending), _) => return Ok(Self::Poisoned(pending)),
-            (_, Outcome::Poisoned(poison)) => (eglur_diagnostics::PoisonAccumulator::new(), poison),
-            (Self::Unperformed, _) | (_, Outcome::Unperformed) => return Ok(Self::Unperformed),
-            (Self::Deferred, _) | (_, Outcome::Deferred) => return Ok(Self::Deferred),
-            (Self::NotApplicable, _) | (_, Outcome::NotApplicable) => {
-                return Ok(Self::NotApplicable);
-            }
-            (Self::Known, Outcome::Known(())) => return Ok(Self::Known),
-        };
-
-        #[cfg(test)]
-        poison_tests::observe(poison_tests::Step::Input);
-
-        pending.include(&poison)?;
-        Ok(Self::Poisoned(pending))
-    }
-
-    fn finish(self) -> Outcome<()> {
-        match self {
-            Self::Known => Outcome::Known(()),
-            Self::Poisoned(pending) => {
-                let poison = pending
-                    .finish()
-                    .expect("poisoned block includes provenance");
-
-                #[cfg(test)]
-                poison_tests::observe(poison_tests::Step::Complete);
-
-                Outcome::Poisoned(poison)
-            }
-            Self::Unperformed => Outcome::Unperformed,
-            Self::Deferred => Outcome::Deferred,
-            Self::NotApplicable => Outcome::NotApplicable,
-        }
-    }
-}
-
 pub(super) struct BlockFrame {
     remaining: std::vec::IntoIter<StmtId>,
     expected: Option<TypeId>,
-    state: BlockState,
+    state: UnitOutcomeFold,
     result: Option<TypeId>,
     reachable: bool,
 }
@@ -104,7 +55,7 @@ impl BlockFrame {
         Self {
             remaining: statements.into_vec().into_iter(),
             expected,
-            state: BlockState::Known,
+            state: UnitOutcomeFold::Known,
             result: None,
             reachable: true,
         }
@@ -137,6 +88,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             block.reachable = step.normal_continuation.is_present();
         }
+
+        #[cfg(test)]
+        if matches!(next, Outcome::Poisoned(_)) {
+            poison_tests::observe(poison_tests::Step::Input);
+        }
+
         block.state = block.state.include(next.map_unit())?;
         Ok(block)
     }
@@ -164,7 +121,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 };
                 Ok(Outcome::Known(self.value_expression(result)))
             }
-            Outcome::Poisoned(poison) => Ok(Outcome::Poisoned(poison)),
+            Outcome::Poisoned(poison) => {
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Complete);
+
+                Ok(Outcome::Poisoned(poison))
+            }
             Outcome::Unperformed => Ok(Outcome::Unperformed),
             Outcome::Deferred => Ok(Outcome::Deferred),
             Outcome::NotApplicable => Ok(Outcome::NotApplicable),
