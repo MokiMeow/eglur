@@ -427,6 +427,10 @@ The v0.1 trait solver is a finite, first-order nominal obligation resolver.
 
 1. An obligation first matches impl heads by nominal trait and target-type unification without treating bounds as negative filters, then recursively emits only the inline bounds declared by the unique structural match.
 2. Implementations MUST memoize normalized obligations or provide an equivalent termination guarantee; revisiting an unresolved obligation cycle MUST NOT count as proof and an otherwise unresolved root obligation MUST fail with `TRAIT_BOUND_NOT_SATISFIED`.
+   An early rejection of transformed recursive obligations MUST establish that
+   no finite proof exists under the current impl and exact symbolic-assumption
+   environment. Growing type arguments, or revisiting the same impl with
+   different arguments, do not by themselves establish failure.
 3. An exact symbolic obligation in the current declaration's generic well-formedness environment is discharged locally; concrete obligations still require unique impl lookup.
 4. Impl lookup MUST be indexed by trait and nominal target head plus a bounded blanket-impl bucket, or provide an equivalent bounded candidate set. It MUST NOT perform unrestricted whole-program proof search per obligation.
 5. Projection normalization reuses the same unique-impl lookup and MUST NOT invoke a separate shape, value, effect, or ownership solver.

@@ -10,6 +10,8 @@ use eglur_sema::{
     TypecheckCapability,
 };
 
+#[path = "trait_evidence/growing_cycles.rs"]
+mod growing_cycles;
 #[path = "trait_evidence/missing_methods.rs"]
 mod missing_methods;
 

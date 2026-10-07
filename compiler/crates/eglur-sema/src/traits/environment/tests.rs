@@ -10,6 +10,8 @@ use eglur_hir::lower;
 use eglur_source::{FileId, LineIndex, SourceFile};
 use eglur_syntax::parse_validated;
 
+mod growing_cycles;
+
 struct AllCapabilities;
 
 impl CompileSupport for AllCapabilities {
@@ -42,14 +44,17 @@ impl Fixture {
 }
 
 fn fixture() -> Fixture {
-    let text = concat!(
+    fixture_from_source(concat!(
         "trait Link[A] {}\ntrait Carries { type Item }\nstruct Carrier {}\n",
         "impl Carries for Carrier { type Item = i64 }\n",
         "type Item[T: Carries] = T::Item\n",
         "fn take[T: Link[Item[Carrier]]](x: T) -> Item[Carrier] = 1\n",
         "fn independent[T: Link[Bool]](x: T) -> Bool = true\n",
         "fn direct() -> Unit = ()\n",
-    );
+    ))
+}
+
+fn fixture_from_source(text: &str) -> Fixture {
     let file = FileId::new(0);
     let input = SourceFile::new(file, text.as_bytes().to_vec());
     let validated = input.validate().unwrap();
@@ -136,7 +141,7 @@ fn fixture() -> Fixture {
         &mut signatures,
         &mut diagnostics,
     )
-    .unwrap()
+    .unwrap_or_else(|error| panic!("trait environment failed for {text}: {error}"))
     .into_parts()
     .0
     else {

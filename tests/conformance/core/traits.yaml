@@ -1431,6 +1431,68 @@ tests:
       data_keys:
       - trait
       - type
+- id: TRT-growing-wrapper-obligation-does-not-prove-itself
+  category: traits
+  title: Growing wrapper obligations have no finite proof
+  code: |
+    trait Loop[A] {}
+    impl[A, T: Loop[Opt[A]]] Loop[A] for T {}
+    fn bounded[T: Loop[i64]](value: T) -> T = value
+
+    fn main!() -> Res[Str, Str] {
+      _ = bounded(1)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: TRT-mutual-growing-wrapper-obligations-do-not-prove-themselves
+  category: traits
+  title: Mutual growing wrapper obligations have no finite proof
+  code: |
+    trait Loop[A] {}
+    trait Next[A] {}
+    impl[A, T: Next[Opt[A]]] Loop[A] for T {}
+    impl[A, T: Loop[A]] Next[A] for T {}
+    fn bounded[T: Loop[i64]](value: T) -> T = value
+
+    fn main!() -> Res[Str, Str] {
+      _ = bounded(1)
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: TRAIT_BOUND_NOT_SATISFIED
+      message_contains:
+      - trait
+      - bound
+      - not satisfied
+      data_keys:
+      - trait
+      - type
+- id: TRT-growing-wrapper-proof-can-reach-a-future-exact-bound
+  category: traits
+  title: A future exact bound discharges a growing wrapper proof
+  code: |
+    trait Loop[A] {}
+    impl[A, T: Loop[Opt[A]]] Loop[A] for T {}
+    fn bounded[T: Loop[i64]](value: T) -> T = value
+    fn forward[T: Loop[Opt[Opt[i64]]]](value: T) -> T = bounded(value)
+
+    fn main!() -> Res[Str, Str] {
+      yield Ok("x")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
 - id: TRT-trait-impl-must-bind-every-associated-type
   category: traits
   title: trait impl must bind every associated type

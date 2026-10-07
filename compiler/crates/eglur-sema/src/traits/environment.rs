@@ -20,11 +20,13 @@ use super::overlap::{
 
 mod applications;
 mod assumptions;
+mod growing_cycles;
 mod normalization;
 #[cfg(test)]
 mod tests;
 pub(super) use applications::ApplicationCheck;
 use assumptions::AssumptionNormalization;
+use growing_cycles::{CycleBlockers, GrowingCycles};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct TraitAssumption {
@@ -85,6 +87,7 @@ impl SelectionOutcome {
 struct LocalQueryCache {
     projections: BTreeMap<TypeId, TraitNormalization>,
     selections: BTreeMap<TraitObligation, SelectionOutcome>,
+    cycle_blockers: Option<CycleBlockers>,
 }
 
 pub(super) enum CollectedImplementations {
@@ -105,6 +108,8 @@ pub struct TraitEnvironment {
     buckets: ImplBuckets,
     assumptions: BTreeMap<DefId, Box<[TraitAssumption]>>,
     owner_assumption_cache: BTreeMap<DefId, Vec<TraitAssumption>>,
+    growing_cycles: Option<GrowingCycles>,
+    owner_cycle_blockers: BTreeMap<DefId, CycleBlockers>,
     method_targets: BTreeMap<(CanonicalTarget, CanonicalTarget), CanonicalTarget>,
     normalization_cache: BTreeMap<(DefId, TypeId), TraitNormalization>,
     projection_cache: BTreeMap<(DefId, TypeId), TraitNormalization>,
@@ -123,6 +128,8 @@ impl TraitEnvironment {
             buckets,
             assumptions,
             owner_assumption_cache: BTreeMap::new(),
+            growing_cycles: None,
+            owner_cycle_blockers: BTreeMap::new(),
             method_targets: BTreeMap::new(),
             normalization_cache: BTreeMap::new(),
             projection_cache: BTreeMap::new(),
@@ -196,6 +203,8 @@ impl TraitEnvironment {
 
     pub(super) fn clear_query_caches(&mut self) {
         self.owner_assumption_cache.clear();
+        self.growing_cycles = None;
+        self.owner_cycle_blockers.clear();
         self.normalization_cache.clear();
         self.projection_cache.clear();
         self.selection_cache.clear();
@@ -599,6 +608,13 @@ impl TraitEnvironment {
                 impl_argument_violation(signatures.types(), &implementation.header, &replacements)?
             {
                 SelectionOutcome::InvalidArgument(violation)
+            } else if self.is_unprovable_growing_cycle(
+                owner,
+                signatures,
+                &obligation,
+                assumptions,
+            )? {
+                SelectionOutcome::Unsatisfied(obligation.clone())
             } else {
                 let mut failed = None;
                 for parameter in implementation.header.generic_parameters() {

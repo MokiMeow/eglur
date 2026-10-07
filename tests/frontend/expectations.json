@@ -20903,6 +20903,42 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-traits",
+        "test_id": "TRT-growing-wrapper-obligation-does-not-prove-itself"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Loop[A] {}\nimpl[A, T: Loop[Opt[A]]] Loop[A] for T {}\nfn bounded[T: Loop[i64]](value: T) -> T = value\n\nfn main!() -> Res[Str, Str] {\n  _ = bounded(1)\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-growing-wrapper-proof-can-reach-a-future-exact-bound"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Loop[A] {}\nimpl[A, T: Loop[Opt[A]]] Loop[A] for T {}\nfn bounded[T: Loop[i64]](value: T) -> T = value\nfn forward[T: Loop[Opt[Opt[i64]]]](value: T) -> T = bounded(value)\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
         "test_id": "TRT-impl-generic-cannot-occur-under-error-union"
       },
       "public_examples": [],
@@ -21197,6 +21233,24 @@
       "source": {
         "kind": "utf8",
         "text": "struct C {\n  overload fn f(self: &Self, x: i64) -> i64 = 1\n  overload fn f(self: &Self, x: f32) -> i64 = 2\n}\n\nfn main!() -> Res[Str, Str] {\n  let c = C{}\n  let x: u8 = 1\n  _ = c.f(x)\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-mutual-growing-wrapper-obligations-do-not-prove-themselves"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Loop[A] {}\ntrait Next[A] {}\nimpl[A, T: Next[Opt[A]]] Loop[A] for T {}\nimpl[A, T: Loop[A]] Next[A] for T {}\nfn bounded[T: Loop[i64]](value: T) -> T = value\n\nfn main!() -> Res[Str, Str] {\n  _ = bounded(1)\n  yield Ok(\"x\")\n}\n"
       }
     },
     {
@@ -39261,6 +39315,6 @@
       }
     }
   ],
-  "input_digest": "sha256:e1c700a141c5d4b561eb6c3d80190f58e2caaca8df99995794bf79d7546b992f",
+  "input_digest": "sha256:93dbdb8ffce353267861614367e2c81a23152b55f1aa5bfb9ba695dc7c4a9d0c",
   "schema_version": "0.1"
 }
