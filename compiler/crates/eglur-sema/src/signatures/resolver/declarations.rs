@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod poison_tests;
+
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_declarations(&mut self) -> Result<(), SignatureResolutionError> {
         let declarations = self
@@ -630,7 +633,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let (parameter_position, result_position) = declaration.type_positions();
         let body_hir = hir.body(body);
         let mut resolved_parameters = Vec::with_capacity(parameters.len());
-        let mut poison = None;
+        let mut parameter_poison = PoisonAccumulator::new();
         let mut unperformed = false;
         for parameter in parameters {
             let parameter_name = match body_hir.pattern(parameter.pattern) {
@@ -645,7 +648,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                 origin: name.origin(),
                             },
                         )?;
-                        merge_poison(&mut poison, &found)?;
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Input(
+                            poison_tests::Stage::Parameters,
+                        ));
+
+                        parameter_poison.include(&found)?;
                         None
                     }
                     PatternKind::Invalid => {
@@ -655,7 +663,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                 origin: pattern.origin(),
                             },
                         )?;
-                        merge_poison(&mut poison, &found)?;
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Input(
+                            poison_tests::Stage::Parameters,
+                        ));
+
+                        parameter_poison.include(&found)?;
                         None
                     }
                     _ => {
@@ -666,7 +679,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             "parameter pattern is unsupported in v0.1",
                             BTreeMap::new(),
                         )?;
-                        merge_poison(&mut poison, &found)?;
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Input(
+                            poison_tests::Stage::Parameters,
+                        ));
+
+                        parameter_poison.include(&found)?;
                         None
                     }
                 },
@@ -679,7 +697,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         origin: parameter.origin,
                     },
                 )?;
-                merge_poison(&mut poison, &found)?;
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Parameters));
+
+                parameter_poison.include(&found)?;
                 continue;
             };
             match self.resolve_source_type(
@@ -695,7 +716,14 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     ty,
                     source_pattern: Some(parameter.pattern),
                 }),
-                Resolution::Poisoned(found) => merge_poison(&mut poison, &found)?,
+                Resolution::Poisoned(found) => {
+                    #[cfg(test)]
+                    poison_tests::observe(poison_tests::Step::Input(
+                        poison_tests::Stage::Parameters,
+                    ));
+
+                    parameter_poison.include(&found)?;
+                }
                 Resolution::Unperformed => unperformed = true,
             }
         }
@@ -710,7 +738,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             )? {
                 Resolution::Known(ty) => Some(ty),
                 Resolution::Poisoned(found) => {
-                    merge_poison(&mut poison, &found)?;
+                    #[cfg(test)]
+                    poison_tests::observe(poison_tests::Step::Input(
+                        poison_tests::Stage::Parameters,
+                    ));
+
+                    parameter_poison.include(&found)?;
                     None
                 }
                 Resolution::Unperformed => {
@@ -726,9 +759,20 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 "named function return type is required",
                 BTreeMap::new(),
             )?;
-            merge_poison(&mut poison, &found)?;
+            #[cfg(test)]
+            poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Parameters));
+
+            parameter_poison.include(&found)?;
             None
         };
+
+        let mut poison = parameter_poison.finish();
+        #[cfg(test)]
+        if poison.is_some() {
+            poison_tests::observe(poison_tests::Step::Complete(
+                poison_tests::Stage::Parameters,
+            ));
+        }
 
         let is_method = self.is_method(declaration_id);
         let mut receiver_kind = None;
@@ -770,6 +814,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             )?);
         }
         if poison.is_none() && !unperformed && !name.is_bang() {
+            let mut mutability_poison = PoisonAccumulator::new();
             for (index, parameter) in resolved_parameters
                 .iter()
                 .enumerate()
@@ -794,7 +839,17 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     "non-bang callable `&mut` parameter is forbidden",
                     BTreeMap::new(),
                 )?;
-                merge_poison(&mut poison, &found)?;
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Mutability));
+
+                mutability_poison.include(&found)?;
+            }
+            poison = mutability_poison.finish();
+            #[cfg(test)]
+            if poison.is_some() {
+                poison_tests::observe(poison_tests::Step::Complete(
+                    poison_tests::Stage::Mutability,
+                ));
             }
         }
         if let Some(poison) = poison {

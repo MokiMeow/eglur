@@ -7,6 +7,9 @@ use eglur_driver::{
 #[path = "type_applications/poison.rs"]
 mod poison;
 
+#[path = "type_applications/callable_poison.rs"]
+mod callable_poison;
+
 fn session(source: &str) -> CompilerSession {
     let request = FileSetRequest::new(
         [FileInput::new("main.eglur", source.as_bytes().to_vec())],
