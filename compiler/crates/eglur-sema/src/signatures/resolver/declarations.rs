@@ -3,6 +3,9 @@ use super::*;
 #[cfg(test)]
 mod poison_tests;
 
+#[cfg(test)]
+mod enum_poison_tests;
+
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_declarations(&mut self) -> Result<(), SignatureResolutionError> {
         let declarations = self
@@ -1111,7 +1114,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let declarations =
                     self.child_declarations(declaration_id, DeclarationKind::EnumVariantField);
                 let mut resolved = Vec::with_capacity(fields.len());
-                let mut poison = None;
+                let mut poison = PoisonAccumulator::new();
                 let mut unperformed = false;
                 for field in fields {
                     let field_id = declarations
@@ -1135,7 +1138,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             CanonicalTarget::Source(field_id),
                             SemanticFact::Poisoned(found.clone()),
                         )?;
-                        merge_poison(&mut poison, &found)?;
+                        #[cfg(test)]
+                        enum_poison_tests::observe(enum_poison_tests::Step::Input);
+
+                        poison.include(&found)?;
                         continue;
                     }
                     match self.resolve_source_type(
@@ -1161,12 +1167,18 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                 CanonicalTarget::Source(field_id),
                                 SemanticFact::Poisoned(found.clone()),
                             )?;
-                            merge_poison(&mut poison, &found)?;
+                            #[cfg(test)]
+                            enum_poison_tests::observe(enum_poison_tests::Step::Input);
+
+                            poison.include(&found)?;
                         }
                         Resolution::Unperformed => unperformed = true,
                     }
                 }
-                Ok(if let Some(poison) = poison {
+                Ok(if let Some(poison) = poison.finish() {
+                    #[cfg(test)]
+                    enum_poison_tests::observe(enum_poison_tests::Step::Complete);
+
                     Resolution::Poisoned(poison)
                 } else if unperformed {
                     Resolution::Unperformed

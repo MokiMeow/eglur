@@ -13,6 +13,9 @@ mod callable_poison;
 #[path = "type_applications/generic_poison.rs"]
 mod generic_poison;
 
+#[path = "type_applications/enum_poison.rs"]
+mod enum_poison;
+
 fn session(source: &str) -> CompilerSession {
     let request = FileSetRequest::new(
         [FileInput::new("main.eglur", source.as_bytes().to_vec())],

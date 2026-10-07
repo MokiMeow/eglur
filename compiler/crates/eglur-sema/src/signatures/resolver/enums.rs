@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod poison_tests;
+
 impl SignatureResolver<'_, '_> {
     pub(super) fn resolve_trusted_enum(
         &mut self,
@@ -83,19 +86,27 @@ impl SignatureResolver<'_, '_> {
             };
 
             let mut names = HashSet::with_capacity(variants.len());
-            let mut poison = None;
+            let mut poison = PoisonAccumulator::new();
             let mut unperformed = false;
             for variant in variants {
                 match self.declarations.state(variant) {
                     FactState::Known(DeclarationSignature::EnumVariant { name, .. }) => {
                         names.insert(name.clone());
                     }
-                    FactState::Poisoned(found) => merge_poison(&mut poison, found)?,
+                    FactState::Poisoned(found) => {
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Input);
+
+                        poison.include(found)?;
+                    }
                     FactState::Unperformed | FactState::NotApplicable => unperformed = true,
                     FactState::Known(_) => unreachable!("enum members are variant declarations"),
                 }
             }
-            let fact = if let Some(poison) = poison {
+            let fact = if let Some(poison) = poison.finish() {
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Complete);
+
                 SemanticFact::Poisoned(poison)
             } else if unperformed {
                 continue;
