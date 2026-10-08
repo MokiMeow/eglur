@@ -1,8 +1,51 @@
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use eglur_sema::{DeclarationKind, FactState};
 
 use super::*;
+
+#[test]
+fn shared_alias_projection_dags_preserve_symbolic_and_concrete_source_outcomes() {
+    for depth in [1, 3, 5, 7] {
+        for implemented in [false, true] {
+            let mut source = String::from(
+                "trait Carries { type Item }\nstruct Host {}\ntype D0[T: Carries] = T::Item\n",
+            );
+            if implemented {
+                source.push_str("impl Carries for Host { type Item = i64 }\n");
+            }
+            for layer in 1..=depth {
+                let previous = layer - 1;
+                writeln!(
+                    source,
+                    "type D{layer}[T: Carries] = (D{previous}[T], D{previous}[T])"
+                )
+                .unwrap();
+            }
+            writeln!(
+                source,
+                "fn symbolic[T: Carries](value: D{depth}[T]) -> D{depth}[T] = value"
+            )
+            .unwrap();
+            writeln!(
+                source,
+                "fn concrete(value: D{depth}[Host]) -> D{depth}[Host] = value"
+            )
+            .unwrap();
+
+            let (codes, disposition) = compile(&source);
+            if implemented {
+                assert_eq!(disposition, CompileDisposition::Succeeded);
+                assert!(codes.is_empty());
+            } else {
+                assert_eq!(disposition, CompileDisposition::Rejected);
+                assert!(!codes.is_empty());
+                assert!(codes.iter().all(|code| code == "TRAIT_BOUND_NOT_SATISFIED"));
+            }
+        }
+    }
+}
 
 #[test]
 fn binding_value_cycle_and_structure_failures_preserve_later_declarations() {

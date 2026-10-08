@@ -103,6 +103,8 @@ pub(super) struct ImplementationValidationInput {
 
 /// Checked impl index and bounded associated-projection normalizer.
 pub struct TraitEnvironment {
+    #[cfg(test)]
+    normalization_expansions: usize,
     local_query_cache: Option<LocalQueryCache>,
     implementations: BTreeMap<CanonicalTarget, TraitImpl>,
     buckets: ImplBuckets,
@@ -123,6 +125,8 @@ impl TraitEnvironment {
         assumptions: BTreeMap<DefId, Box<[TraitAssumption]>>,
     ) -> Self {
         Self {
+            #[cfg(test)]
+            normalization_expansions: 0,
             local_query_cache: None,
             implementations,
             buckets,
