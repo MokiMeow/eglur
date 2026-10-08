@@ -47,6 +47,7 @@ mod associated_bindings;
 mod contexts;
 mod declarations;
 mod diagnostics;
+mod enum_variants;
 mod enums;
 mod generic_names;
 mod generic_redeclarations;
@@ -270,6 +271,7 @@ struct SignatureResolver<'input, 'hir> {
     diagnostic_type_names: DiagnosticTypeNames,
     declarations: FactTable<CanonicalTarget, DeclarationSignature>,
     enum_variant_names: HashMap<CanonicalTarget, SemanticFact<HashSet<NameKey>>>,
+    source_enum_variants: enum_variants::SourceEnumVariantIndex<'hir>,
     overload_family_poisons: BTreeMap<DefId, Poison>,
     generic_parameters: FactTable<GenericParameterId, GenericParameterSignature>,
     occurrences: FactTable<TypeOccurrenceId, ResolvedTypeOccurrence>,

@@ -1080,13 +1080,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let item = parent_declaration
             .item()
             .ok_or(SignatureResolutionError::MissingDeclarationItem(parent))?;
-        let ItemKind::Enum(parent_item) = hir.item(item).kind() else {
+        let ItemKind::Enum(_) = hir.item(item).kind() else {
             return Err(SignatureResolutionError::WrongDeclarationItem(parent));
         };
-        let variant = parent_item
-            .variants
-            .iter()
-            .find(|variant| variant.origin == declaration.origin())
+        let variant = self
+            .source_enum_variants
+            .get(hir.file(), item, declaration.origin())
             .ok_or(SignatureResolutionError::WrongDeclarationItem(
                 declaration_id,
             ))?;

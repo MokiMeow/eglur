@@ -41,6 +41,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             diagnostic_type_names,
             declarations: FactTable::new(),
             enum_variant_names: HashMap::new(),
+            source_enum_variants: enum_variants::SourceEnumVariantIndex::default(),
             overload_family_poisons: BTreeMap::new(),
             generic_parameters: FactTable::new(),
             occurrences: FactTable::new(),
@@ -77,6 +78,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 &resolver.source_generic_redeclarations,
             ));
         resolver.register_generic_types()?;
+        resolver.source_enum_variants = enum_variants::SourceEnumVariantIndex::new(
+            resolver.sources.values().filter_map(|source| source.hir()),
+        );
         Ok(resolver)
     }
 
