@@ -5,6 +5,122 @@ use eglur_sema::{DeclarationKind, FactState};
 use super::*;
 
 #[test]
+fn application_poison_retains_generic_names_in_later_header_diagnostics() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for (declarations, parameter) in [
+        (
+            "trait Other {}\ntrait Loop[A: Other] {}\nimpl[A: Other, T: Loop[Opt[A]]] Loop[A] for T {}\n",
+            "A",
+        ),
+        (
+            "type Maybe[X] = Opt[X]\ntrait Other {}\ntrait Loop[Key: Other] {}\nimpl[Key: Other, Value: Loop[Maybe[Key]]] Loop[Key] for Value {}\n",
+            "Key",
+        ),
+        (
+            "trait Other {}\ntrait Loop[Key: Other] {}\ntrait Next[Key: Other] {}\nimpl[Key: Other, Value: Next[Opt[Key]]] Loop[Key] for Value {}\n",
+            "Key",
+        ),
+    ] {
+        let source = format!("{declarations}fn after() -> Unit = ()\n");
+        let mut observed = Vec::new();
+        for _ in 0..2 {
+            let mut session = session(&source);
+            let analysis = session
+                .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+                .unwrap();
+            assert!(!analysis.trace().has_missing());
+            let resolution = analysis.resolution().unwrap();
+            let declarations = resolution
+                .declarations()
+                .modules()
+                .flat_map(|module| module.declarations())
+                .collect::<Vec<_>>();
+            let implementation = declarations
+                .iter()
+                .find(|declaration| declaration.kind() == DeclarationKind::Impl)
+                .unwrap();
+            assert!(matches!(
+                resolution
+                    .signatures()
+                    .source_declaration(implementation.id()),
+                FactState::Poisoned(_)
+            ));
+            for generic in declarations.iter().filter(|declaration| {
+                declaration.kind() == DeclarationKind::GenericParameter
+                    && declaration.parent() == Some(implementation.id())
+            }) {
+                assert!(matches!(
+                    resolution
+                        .signatures()
+                        .generic_parameter(&eglur_sema::GenericParameterId::Source(generic.id())),
+                    FactState::Poisoned(_)
+                ));
+            }
+            let after = declarations
+                .iter()
+                .find(|declaration| {
+                    declaration
+                        .name()
+                        .is_some_and(|name| name.text() == "after")
+                })
+                .unwrap();
+            assert!(matches!(
+                resolution.signatures().source_declaration(after.id()),
+                FactState::Known(_)
+            ));
+
+            let sealed = session.seal(None).unwrap();
+            let snapshot = sealed.diagnostics();
+            assert!(!snapshot.diagnostics().is_empty());
+            for diagnostic in snapshot.diagnostics() {
+                assert_eq!(diagnostic.code().as_str(), "TRAIT_BOUND_NOT_SATISFIED");
+                assert_eq!(
+                    diagnostic.data().get("trait"),
+                    Some(&DiagnosticDataValue::from("Other"))
+                );
+                assert!(diagnostic.primary_span().as_source().is_some());
+            }
+            assert!(snapshot.diagnostics().iter().any(|diagnostic| {
+                diagnostic.data().get("type")
+                    == Some(&DiagnosticDataValue::from(format!("Opt[{parameter}]")))
+            }));
+            observed.push(
+                snapshot
+                    .diagnostics()
+                    .iter()
+                    .map(|diagnostic| {
+                        (diagnostic.data().clone(), diagnostic.primary_span().clone())
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            assert_ne!(
+                CompileAttempt::finalize(sealed, None)
+                    .unwrap()
+                    .disposition(),
+                CompileDisposition::Succeeded
+            );
+        }
+        assert_eq!(observed[0], observed[1]);
+    }
+}
+
+#[test]
+fn a_valid_bound_impl_does_not_poison_the_generic_declaration() {
+    let declarations = concat!(
+        "trait Other {}\ntrait Loop[A: Other] {}\n",
+        "impl[A: Other, T: Loop[Opt[A]]] Loop[A] for T {}\n",
+    );
+    for source in [
+        format!("{declarations}impl[A: Other] Other for Opt[A] {{}}\n"),
+        format!("impl[A: Other] Other for Opt[A] {{}}\n{declarations}"),
+    ] {
+        let (codes, disposition) = compile(&source);
+        assert!(codes.is_empty(), "{codes:?}");
+        assert_eq!(disposition, CompileDisposition::Succeeded);
+    }
+}
+
+#[test]
 fn generic_and_header_failures_keep_roots_and_later_declarations() {
     let catalog = TrustedCatalog::first_slice().unwrap();
     for count in [8, 32, 128] {

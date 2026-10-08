@@ -2,6 +2,8 @@ use super::*;
 use eglur_diagnostics::SourceLabel;
 use eglur_source::{LineIndex, SourceFile};
 
+mod diagnostic_names;
+
 struct Support;
 
 impl CompileSupport for Support {

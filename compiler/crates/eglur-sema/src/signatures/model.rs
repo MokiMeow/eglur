@@ -706,7 +706,8 @@ impl DiagnosticTypeFacts for DeclarationSignatures {
     }
 
     fn generic_parameter_name(&self, parameter: &GenericParameterId) -> Option<&str> {
-        match self.generic_parameter(parameter) {
+        // Use-site poison invalidates bounds, not the retained declaration's name.
+        match self.generic_parameters.state(parameter) {
             FactState::Known(parameter) => Some(parameter.name()),
             FactState::Poisoned(_) | FactState::Unperformed | FactState::NotApplicable => None,
         }
