@@ -206,6 +206,11 @@ pub struct TraitEvidence {
 }
 
 impl TraitEvidence {
+    #[cfg(test)]
+    pub(crate) fn replace_proofs_for_test(&mut self, proofs: Vec<EvidenceSource>) {
+        self.proofs = proofs.into_boxed_slice();
+    }
+
     #[must_use]
     pub fn invocation(&self, key: ExpressionKey) -> FactState<'_, CheckedInvocation> {
         self.invocations.state(&key)
