@@ -14,3 +14,4 @@ pub use resolver::{SignatureResolutionInputs, resolve_declaration_signatures};
 pub use trusted::*;
 
 pub(crate) use applications::{TypeApplication, TypeApplicationRegion, TypeApplicationSite};
+pub(crate) use generics::InstantiatedParameterBound;

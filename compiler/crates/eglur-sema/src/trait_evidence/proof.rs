@@ -1,11 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    DeclarationSignature, DeclarationSignatures, DefId, EvidenceProofId, FactState,
-    GenericParameterId, TraitEnvironment, TraitImplEvidence, TraitObligation, TraitProof, TypeId,
+    DeclarationSignatures, DefId, EvidenceProofId, TraitEnvironment, TraitObligation, TraitProof,
 };
 
 use super::{EvidenceSource, TraitEvidenceError};
+
+mod implementation;
+
+use implementation::{ImplementationFrame, ImplementationStep};
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Default)]
 pub(super) struct ProofArena {
@@ -28,150 +34,79 @@ impl ProofArena {
         signatures: &mut DeclarationSignatures,
         environment: &mut TraitEnvironment,
     ) -> Result<EvidenceProofId, TraitEvidenceError> {
-        if let Some(&id) = self.by_obligation.get(&(owner, obligation.clone())) {
-            return Ok(id);
-        }
-        if !self.active.insert((owner, obligation.clone())) {
-            return Err(TraitEvidenceError::CyclicCheckedProof(obligation));
-        }
+        let mut pending = Some((obligation, selected));
+        let mut completed = None;
+        let mut frames: Vec<(TraitObligation, ImplementationFrame)> = Vec::new();
 
-        let node = match selected {
-            TraitProof::Bound(slot) => EvidenceSource::Bound(slot),
-            TraitProof::Implementation(evidence) => {
-                self.implementation(owner, &evidence, signatures, environment)?
-            }
-            TraitProof::Poisoned(_)
-            | TraitProof::InvalidArgument(_)
-            | TraitProof::Unsatisfied(_)
-            | TraitProof::Ambiguous(_) => {
-                return Err(TraitEvidenceError::UnmaterializablePrerequisite(obligation));
-            }
-        };
+        loop {
+            if let Some((obligation, selected)) = pending.take() {
+                if let Some(&id) = self.by_obligation.get(&(owner, obligation.clone())) {
+                    completed = Some(id);
+                } else {
+                    if !self.active.insert((owner, obligation.clone())) {
+                        return Err(TraitEvidenceError::CyclicCheckedProof(obligation));
+                    }
 
+                    match selected {
+                        TraitProof::Bound(slot) => {
+                            completed = Some(self.finish(
+                                owner,
+                                obligation,
+                                EvidenceSource::Bound(slot),
+                            )?);
+                        }
+                        TraitProof::Implementation(evidence) => frames.push((
+                            obligation,
+                            ImplementationFrame::new(evidence, signatures, environment)?,
+                        )),
+                        TraitProof::Poisoned(_)
+                        | TraitProof::InvalidArgument(_)
+                        | TraitProof::Unsatisfied(_)
+                        | TraitProof::Ambiguous(_) => {
+                            return Err(TraitEvidenceError::UnmaterializablePrerequisite(
+                                obligation,
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if let Some(id) = completed.take() {
+                let Some((_, frame)) = frames.last_mut() else {
+                    return Ok(id);
+                };
+                frame.accept(id);
+            }
+
+            match frames
+                .last_mut()
+                .expect("an unfinished implementation has a frame")
+                .1
+                .advance(signatures)?
+            {
+                ImplementationStep::Prerequisite(obligation) => {
+                    let selected =
+                        environment.prove_for_owner(owner, signatures, obligation.clone())?;
+                    pending = Some((obligation, selected));
+                }
+                ImplementationStep::Complete(node) => {
+                    let (obligation, _) = frames.pop().unwrap();
+                    completed = Some(self.finish(owner, obligation, node)?);
+                }
+            }
+        }
+    }
+
+    fn finish(
+        &mut self,
+        owner: DefId,
+        obligation: TraitObligation,
+        node: EvidenceSource,
+    ) -> Result<EvidenceProofId, TraitEvidenceError> {
         self.active.remove(&(owner, obligation.clone()));
         let id = self.intern(node)?;
         self.by_obligation.insert((owner, obligation), id);
         Ok(id)
-    }
-
-    fn implementation(
-        &mut self,
-        owner: DefId,
-        selected: &TraitImplEvidence,
-        signatures: &mut DeclarationSignatures,
-        environment: &mut TraitEnvironment,
-    ) -> Result<EvidenceSource, TraitEvidenceError> {
-        let (header, _) = environment
-            .checked_implementation_contract(selected.implementation())
-            .ok_or_else(|| {
-                TraitEvidenceError::UnknownCheckedImplementation(selected.implementation().clone())
-            })?;
-        let header = header.clone();
-        let arguments = signatures
-            .types()
-            .substitution(selected.substitution())
-            .map_err(crate::TraitEnvironmentError::from)?
-            .to_vec();
-        if header.generic_parameters().len() != arguments.len() {
-            return Err(TraitEvidenceError::InvalidCheckedProof(
-                "implementation substitution arity",
-            ));
-        }
-        let replacements = header
-            .generic_parameters()
-            .iter()
-            .cloned()
-            .zip(arguments)
-            .collect::<BTreeMap<_, _>>();
-        let implementation_bounds = self.parameter_bounds(
-            owner,
-            header.generic_parameters(),
-            &replacements,
-            signatures,
-            environment,
-        )?;
-
-        let trait_arguments = signatures
-            .types()
-            .substitution(header.trait_ref().substitution())
-            .map_err(crate::TraitEnvironmentError::from)?
-            .to_vec();
-        let trait_arguments = trait_arguments
-            .into_iter()
-            .map(|argument| {
-                signatures
-                    .types_mut()
-                    .substitute(argument, &replacements)
-                    .map_err(crate::TraitEnvironmentError::from)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let trait_parameters = match signatures.declaration(header.trait_ref().declaration()) {
-            FactState::Known(DeclarationSignature::Trait {
-                generic_parameters, ..
-            }) => generic_parameters.to_vec(),
-            _ => {
-                return Err(TraitEvidenceError::InvalidCheckedProof(
-                    "selected trait signature",
-                ));
-            }
-        };
-        if trait_parameters.len() != trait_arguments.len() {
-            return Err(TraitEvidenceError::InvalidCheckedProof(
-                "trait substitution arity",
-            ));
-        }
-        let trait_replacements = trait_parameters
-            .iter()
-            .cloned()
-            .zip(trait_arguments)
-            .collect::<BTreeMap<_, _>>();
-        let trait_bounds = self.parameter_bounds(
-            owner,
-            &trait_parameters,
-            &trait_replacements,
-            signatures,
-            environment,
-        )?;
-
-        Ok(EvidenceSource::Implementation {
-            implementation: selected.implementation().clone(),
-            substitution: selected.substitution(),
-            implementation_bounds,
-            trait_bounds,
-        })
-    }
-
-    fn parameter_bounds(
-        &mut self,
-        owner: DefId,
-        parameters: &[GenericParameterId],
-        replacements: &BTreeMap<GenericParameterId, TypeId>,
-        signatures: &mut DeclarationSignatures,
-        environment: &mut TraitEnvironment,
-    ) -> Result<Box<[EvidenceProofId]>, TraitEvidenceError> {
-        let mut proofs = Vec::new();
-        for parameter in parameters {
-            let signature = match signatures.generic_parameter(parameter) {
-                FactState::Known(signature) => signature.clone(),
-                _ => return Err(TraitEvidenceError::InvalidCheckedProof("generic signature")),
-            };
-            let bounds = signature
-                .instantiate_bounds(signatures.types_mut(), replacements)
-                .map_err(crate::TraitEnvironmentError::from)?;
-            for bound in bounds {
-                let obligation = bound.into_obligation();
-                let selected =
-                    environment.prove_for_owner(owner, signatures, obligation.clone())?;
-                proofs.push(self.materialize(
-                    owner,
-                    obligation,
-                    selected,
-                    signatures,
-                    environment,
-                )?);
-            }
-        }
-        Ok(proofs.into_boxed_slice())
     }
 
     fn intern(&mut self, node: EvidenceSource) -> Result<EvidenceProofId, TraitEvidenceError> {
