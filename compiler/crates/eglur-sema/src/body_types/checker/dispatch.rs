@@ -387,7 +387,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
 
         let mut candidates = Vec::with_capacity(targets.len());
-        let mut poison = None;
+        let mut poison = PendingPoison::default();
         let mut unperformed = false;
         for target in targets {
             match self.signatures.declaration(target) {
@@ -401,7 +401,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
                 FactState::Poisoned(found) => {
                     let found = found.clone();
-                    self.merge_poison(&mut poison, &found)?;
+                    poison.include(&found)?;
                 }
                 FactState::Unperformed => unperformed = true,
                 FactState::Known(_) | FactState::NotApplicable => {
@@ -413,7 +413,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
             }
         }
-        if let Some(poison) = poison {
+        if let Some(poison) = poison.take() {
             return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
         }
         if unperformed {

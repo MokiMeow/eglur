@@ -45,6 +45,9 @@ pub(super) enum ExpressionPlan {
     },
 }
 
+#[cfg(test)]
+mod overload_poison_tests;
+
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn type_expression(
         &mut self,
@@ -683,7 +686,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
 
                 let mut callables = Vec::with_capacity(targets.len());
-                let mut poison = None;
+                let mut poison = PendingPoison::default();
                 let mut unperformed = false;
                 for target in targets {
                     match self.signatures.declaration(target) {
@@ -692,7 +695,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         }
                         FactState::Poisoned(found) => {
                             let found = found.clone();
-                            self.merge_poison(&mut poison, &found)?;
+                            poison.include(&found)?;
                         }
                         FactState::Unperformed | FactState::NotApplicable => unperformed = true,
                         FactState::Known(_) => {
@@ -704,7 +707,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         }
                     }
                 }
-                if let Some(poison) = poison {
+                if let Some(poison) = poison.take() {
                     return Ok(Outcome::Poisoned(poison));
                 }
                 if unperformed {
