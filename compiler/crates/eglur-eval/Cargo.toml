@@ -9,5 +9,10 @@ publish.workspace = true
 eglur-hir = { path = "../eglur-hir" }
 eglur-sema = { path = "../eglur-sema" }
 
+[dev-dependencies]
+eglur-diagnostics = { path = "../eglur-diagnostics" }
+eglur-source = { path = "../eglur-source" }
+eglur-syntax = { path = "../eglur-syntax" }
+
 [lints]
 workspace = true

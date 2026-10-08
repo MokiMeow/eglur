@@ -7,11 +7,10 @@ use eglur_hir::{
 use eglur_sema::{
     ArgumentPassing, CallableSignature, CanonicalTarget, CheckedDispatch, CheckedEntryResult,
     CheckedInvocation, CheckedNumericOperator, CheckedProgram, DeclarationSignature, DefId,
-    EvidenceEnvironment, EvidenceSource, ExpressionKey, ExternalDefId, FactState,
-    IntegerEvaluation, InvocationArgument, InvocationFact, InvocationTarget, LanguageItem,
-    LocalBindingId, MemberKind, ModuleId, NumericFaultCause, PhaseProduct, PrimitiveType,
-    ResolutionKey, ResolvedName, SubstId, TraitEvidence, TypeId, TypeKind, TypedPlaceKind,
-    WitnessSlotId,
+    EvidenceEnvironment, ExpressionKey, ExternalDefId, FactState, IntegerEvaluation,
+    InvocationArgument, InvocationFact, InvocationTarget, LanguageItem, LocalBindingId, MemberKind,
+    ModuleId, NumericFaultCause, PhaseProduct, PrimitiveType, ResolutionKey, ResolvedName, SubstId,
+    TraitEvidence, TypeId, TypeKind, TypedPlaceKind, WitnessSlotId,
 };
 
 use crate::{

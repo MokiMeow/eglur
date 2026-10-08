@@ -1,5 +1,7 @@
 use super::*;
 
+mod witness;
+
 pub(super) struct InvalidTraitAdapterDispatch;
 
 pub(super) struct TraitAdapterDispatch {
@@ -307,56 +309,12 @@ impl WitnessStore {
         parent: &Witnesses,
     ) -> Option<WitnessId> {
         self.resolve_inner(
-            evidence,
+            &|id| evidence.proof(id),
             proof,
             parent,
             &mut BTreeMap::new(),
             &mut BTreeSet::new(),
         )
-    }
-
-    fn resolve_inner(
-        &mut self,
-        evidence: &TraitEvidence,
-        proof: eglur_sema::EvidenceProofId,
-        parent: &Witnesses,
-        cache: &mut BTreeMap<eglur_sema::EvidenceProofId, WitnessId>,
-        active: &mut BTreeSet<eglur_sema::EvidenceProofId>,
-    ) -> Option<WitnessId> {
-        if let Some(&id) = cache.get(&proof) {
-            return Some(id);
-        }
-        if !active.insert(proof) {
-            return None;
-        }
-        let id = match evidence.proof(proof)? {
-            EvidenceSource::Bound(slot) => *parent.get(slot)?,
-            EvidenceSource::Implementation {
-                implementation,
-                substitution,
-                implementation_bounds,
-                trait_bounds,
-            } => {
-                let mut resolve = |bounds: &[eglur_sema::EvidenceProofId]| {
-                    bounds
-                        .iter()
-                        .map(|&child| self.resolve_inner(evidence, child, parent, cache, active))
-                        .collect::<Option<Vec<_>>>()
-                        .map(Vec::into_boxed_slice)
-                };
-                let implementation_bounds = resolve(implementation_bounds)?;
-                let trait_bounds = resolve(trait_bounds)?;
-                self.intern(WitnessValue {
-                    implementation: implementation.clone(),
-                    substitution: *substitution,
-                    implementation_bounds,
-                    trait_bounds,
-                })
-            }
-        };
-        active.remove(&proof);
-        cache.insert(proof, id);
-        Some(id)
     }
 
     fn intern(&mut self, value: WitnessValue) -> WitnessId {
@@ -379,8 +337,13 @@ impl WitnessStore {
         let mut cache = BTreeMap::new();
         let mut active = BTreeSet::new();
         for entry in environment.entries() {
-            let value =
-                self.resolve_inner(evidence, entry.proof(), parent, &mut cache, &mut active)?;
+            let value = self.resolve_inner(
+                &|id| evidence.proof(id),
+                entry.proof(),
+                parent,
+                &mut cache,
+                &mut active,
+            )?;
             if let Some(destination) = entry.destination()
                 && child.insert(destination, value).is_some()
             {

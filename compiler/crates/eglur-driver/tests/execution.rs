@@ -10,6 +10,8 @@ use eglur_sema::{CompileCapability, ResolveCapability, TypecheckCapability};
 mod grouped_calls;
 #[path = "execution/receiver_adjustment.rs"]
 mod receiver_adjustment;
+#[path = "execution/witnesses.rs"]
+mod witnesses;
 
 fn execution_profile() -> SupportProfile {
     SupportProfile::new(
