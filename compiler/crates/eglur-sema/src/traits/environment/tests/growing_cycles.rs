@@ -341,3 +341,51 @@ fn unsupported_templates_do_not_produce_negative_certificates() {
         );
     }
 }
+
+#[test]
+fn distinct_impl_bounds_share_closed_alias_suffix_preparation() {
+    for (width, depth) in [(8, 32), (32, 8), (64, 64), (128, 128)] {
+        let mut source = String::from("type Deep0 = i64\n");
+        for level in 1..=depth {
+            source.push_str(&format!("type Deep{level} = Opt[Deep{}]\n", level - 1));
+        }
+        for index in 0..width {
+            source.push_str(&format!(
+                "trait Loop{index}[A] {{}}\nimpl[A, T: Loop{index}[Deep{depth}]] Loop{index}[A] for T {{}}\n"
+            ));
+        }
+        source.push_str("fn direct() -> Unit = ()\n");
+        let mut fixture = fixture_from_source(&source);
+        assert_eq!(fixture.environment.implementations.len(), width);
+        assert!(
+            fixture
+                .environment
+                .implementations
+                .values()
+                .all(|implementation| implementation.poison.is_none())
+        );
+        let owner = fixture.declaration("direct");
+        let integer = integer(&mut fixture);
+        let mut deep = integer;
+        for _ in 0..depth {
+            deep = opt(&mut fixture, deep);
+        }
+        for index in [0, width - 1, 0] {
+            let root = required(&mut fixture, integer, &format!("Loop{index}"), integer);
+            let failed = required(&mut fixture, integer, &format!("Loop{index}"), deep);
+            assert!(matches!(
+                fixture.environment.prove_for_owner(owner, &mut fixture.signatures, root.clone()).unwrap(),
+                TraitProof::Unsatisfied(found) if found == failed
+            ));
+            let cycles = fixture.environment.growing_cycles.as_ref().unwrap();
+            assert_eq!(cycles.wrapper_work, (depth + 1, depth));
+            assert!(
+                !fixture
+                    .environment
+                    .is_unprovable_growing_cycle(Some(owner), &fixture.signatures, &root, &[])
+                    .unwrap()
+            );
+        }
+        assert!(fixture.diagnostics.finalize(None).diagnostics().is_empty());
+    }
+}

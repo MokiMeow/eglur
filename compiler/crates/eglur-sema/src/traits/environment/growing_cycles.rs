@@ -15,6 +15,8 @@ struct WrapperEdge {
 
 pub(super) struct GrowingCycles {
     groups: HashMap<CanonicalTarget, CycleId>,
+    #[cfg(test)]
+    pub(super) wrapper_work: (usize, usize),
 }
 
 #[derive(Default)]
@@ -43,11 +45,12 @@ impl GrowingCycles {
             }
         }
 
+        let mut chains = WrapperChains::new(signatures.types());
         let mut edges = Vec::new();
         let mut indices = HashMap::new();
         for target in ordered_traits {
             if let Some(implementation) = unique[&target]
-                && let Some(edge) = wrapper_edge(implementation, signatures)?
+                && let Some(edge) = wrapper_edge(implementation, signatures, &mut chains)?
             {
                 indices.insert(target.clone(), edges.len());
                 edges.push((target, edge));
@@ -69,7 +72,11 @@ impl GrowingCycles {
             .zip(classification.groups)
             .filter_map(|((target, _), group)| group.map(|group| (target, group)))
             .collect();
-        Ok(Self { groups })
+        Ok(Self {
+            groups,
+            #[cfg(test)]
+            wrapper_work: (chains.kind_reads, chains.substitution_reads),
+        })
     }
 
     fn blockers(&self, assumptions: &[TraitAssumption]) -> CycleBlockers {
@@ -125,6 +132,7 @@ impl TraitEnvironment {
 fn wrapper_edge(
     implementation: &TraitImpl,
     signatures: &DeclarationSignatures,
+    chains: &mut WrapperChains<'_>,
 ) -> Result<Option<WrapperEdge>, TraitEnvironmentError> {
     let header = &implementation.header;
     if implementation.poison.is_some() || !implementation.bindings.is_empty() {
@@ -166,7 +174,7 @@ fn wrapper_edge(
         if !slots.insert(parameter.clone()) {
             return Ok(None);
         }
-        argument_slots.push(parameter);
+        argument_slots.push(argument);
     }
     if slots.len() != header.generic_parameters().len() {
         return Ok(None);
@@ -198,29 +206,96 @@ fn wrapper_edge(
     }
     let mut grows = false;
     for (&argument, slot) in required_arguments.iter().zip(argument_slots) {
-        let mut current = argument;
-        loop {
-            match types.kind(current)? {
-                TypeKind::GenericParameter(parameter) if parameter == slot => break,
-                TypeKind::Nominal {
-                    head: NominalHead::Intrinsic(IntrinsicNominal::Opt),
-                    substitution,
-                } => {
-                    let [inner] = types.substitution(*substitution)? else {
-                        return Ok(None);
-                    };
-                    current = *inner;
-                    grows = true;
-                }
-                _ => return Ok(None),
-            }
-        }
+        let Some(argument_grows) = chains.match_slot(argument, slot)? else {
+            return Ok(None);
+        };
+        grows |= argument_grows;
     }
     Ok(Some(WrapperEdge {
         required: required.declaration().clone(),
         arity: arguments.len(),
         grows,
     }))
+}
+
+#[derive(Clone, Copy)]
+struct WrapperTail {
+    terminal: TypeId,
+    grows: bool,
+}
+
+struct WrapperChains<'store> {
+    types: &'store CanonicalTypeStore,
+    tails: BTreeMap<TypeId, Option<WrapperTail>>,
+    #[cfg(test)]
+    kind_reads: usize,
+    #[cfg(test)]
+    substitution_reads: usize,
+}
+
+impl<'store> WrapperChains<'store> {
+    fn new(types: &'store CanonicalTypeStore) -> Self {
+        Self {
+            types,
+            tails: BTreeMap::new(),
+            #[cfg(test)]
+            kind_reads: 0,
+            #[cfg(test)]
+            substitution_reads: 0,
+        }
+    }
+
+    fn match_slot(
+        &mut self,
+        root: TypeId,
+        slot: TypeId,
+    ) -> Result<Option<bool>, crate::TypeStoreError> {
+        let mut path = Vec::new();
+        let mut current = root;
+        let mut tail = loop {
+            if let Some(&tail) = self.tails.get(&current) {
+                break tail;
+            }
+            #[cfg(test)]
+            {
+                self.kind_reads += 1;
+            }
+            let tail = match self.types.kind(current)? {
+                TypeKind::Nominal {
+                    head: NominalHead::Intrinsic(IntrinsicNominal::Opt),
+                    substitution,
+                } => {
+                    #[cfg(test)]
+                    {
+                        self.substitution_reads += 1;
+                    }
+                    match self.types.substitution(*substitution)? {
+                        [inner] => {
+                            path.push(current);
+                            current = *inner;
+                            continue;
+                        }
+                        _ => None,
+                    }
+                }
+                _ => Some(WrapperTail {
+                    terminal: current,
+                    grows: false,
+                }),
+            };
+            self.tails.insert(current, tail);
+            break tail;
+        };
+
+        // Summaries are slot-independent and published only after a complete walk.
+        for parent in path.into_iter().rev() {
+            if let Some(tail) = &mut tail {
+                tail.grows = true;
+            }
+            self.tails.insert(parent, tail);
+        }
+        Ok(tail.and_then(|tail| (tail.terminal == slot).then_some(tail.grows)))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -379,3 +454,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod wrapper_tests;
