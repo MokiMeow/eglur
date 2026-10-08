@@ -599,9 +599,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 }
             }
         }
-        for (index, left) in headers.iter().enumerate() {
-            for right in &headers[index + 1..] {
-                if classify_overlap(self, left, right)?.is_some() {
+        let mut index = CoherenceIndex::default();
+        for header in headers {
+            index.insert(&self.types, header.clone())?;
+        }
+        for (ordinal, left) in index.headers().iter().enumerate() {
+            for (next, right) in index.candidates(&self.types, left)? {
+                if next > ordinal && classify_overlap(self, left, right)?.is_some() {
                     let CanonicalTarget::External(left) = left.declaration() else {
                         unreachable!("trusted header has an external declaration")
                     };

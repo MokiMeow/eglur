@@ -24,7 +24,7 @@ use crate::diagnostic::{
 };
 use crate::overloads::{OverloadPairConflict, classify_overload_pair};
 use crate::traits::{
-    HeaderConflict, TraitHeaderFacts, classify_overlap, header_mentions_parameter,
+    CoherenceIndex, HeaderConflict, TraitHeaderFacts, classify_overlap, header_mentions_parameter,
     header_parameter_below_error_union,
 };
 use crate::type_namespace::{

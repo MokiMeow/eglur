@@ -21,6 +21,7 @@ use crate::{
     TraitImplHeader, TraitMethodSignature, TraitRef, TypeId, WitnessSlotId,
 };
 
+use super::coherence_index::CoherenceIndex;
 use super::environment::{
     CollectedImplementations, TraitAssumption, TraitAssumptionEvidence, TraitEnvironment, TraitImpl,
 };
