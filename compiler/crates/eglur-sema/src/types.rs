@@ -561,8 +561,7 @@ impl CanonicalTypeStore {
             return Ok(root);
         }
 
-        let mut memo = BTreeMap::new();
-        self.substitute_inner(root, replacements, &mut memo)
+        self.rewrite(root, rewrite::LeafRewrite::Generic(replacements))
     }
 
     /// Replaces one declaration-owned `Self` throughout an interned type graph.
@@ -574,8 +573,7 @@ impl CanonicalTypeStore {
     ) -> Result<TypeId, TypeStoreError> {
         self.require_type(root)?;
         self.require_type(replacement)?;
-        let mut memo = BTreeMap::new();
-        self.replace_self_type_inner(root, owner, replacement, &mut memo)
+        self.rewrite(root, rewrite::LeafRewrite::OwnedSelf { owner, replacement })
     }
 
     pub fn contains_reference(&self, root: TypeId) -> Result<bool, TypeStoreError> {
@@ -831,174 +829,6 @@ impl CanonicalTypeStore {
         Ok(())
     }
 
-    fn substitute_inner(
-        &mut self,
-        root: TypeId,
-        replacements: &BTreeMap<GenericParameterId, TypeId>,
-        memo: &mut BTreeMap<TypeId, TypeId>,
-    ) -> Result<TypeId, TypeStoreError> {
-        if let Some(&resolved) = memo.get(&root) {
-            return Ok(resolved);
-        }
-        #[cfg(test)]
-        tests::observe_substitution_read();
-        let kind = self.kind(root)?.clone();
-        let resolved = match kind {
-            TypeKind::Never | TypeKind::Primitive(_) | TypeKind::SelfType(_) => root,
-            TypeKind::GenericParameter(parameter) => {
-                replacements.get(&parameter).copied().unwrap_or(root)
-            }
-            TypeKind::Nominal { head, substitution } => {
-                let arguments = self.substitution(substitution)?.to_vec();
-                let arguments = self.substitute_many(&arguments, replacements, memo)?;
-                self.nominal(head, arguments)?
-            }
-            TypeKind::Reference {
-                mutability,
-                referent,
-            } => {
-                let referent = self.substitute_inner(referent, replacements, memo)?;
-                self.reference(mutability, referent)?
-            }
-            TypeKind::RawPointer {
-                mutability,
-                referent,
-            } => {
-                let referent = self.substitute_inner(referent, replacements, memo)?;
-                self.raw_pointer(mutability, referent)?
-            }
-            TypeKind::Tuple(elements) => {
-                let elements = self.substitute_many(&elements, replacements, memo)?;
-                self.tuple(elements)?
-            }
-            TypeKind::Callable { parameters, result } => {
-                let parameters = self.substitute_many(&parameters, replacements, memo)?;
-                let result = self.substitute_inner(result, replacements, memo)?;
-                self.callable(parameters, result)?
-            }
-            TypeKind::ErrorUnion(members) => {
-                let members = self.substitute_many(&members, replacements, memo)?;
-                self.error_union(members)?
-            }
-            TypeKind::AssociatedProjection(projection) => {
-                let base = self.substitute_inner(projection.base, replacements, memo)?;
-                let arguments = self
-                    .substitution(projection.trait_ref.substitution)?
-                    .to_vec();
-                let arguments = self.substitute_many(&arguments, replacements, memo)?;
-                let substitution = self.intern_substitution(arguments)?;
-                self.associated_projection(AssociatedProjection::new(
-                    base,
-                    TraitRef::new(projection.trait_ref.declaration, substitution),
-                    projection.associated,
-                ))?
-            }
-        };
-        memo.insert(root, resolved);
-        Ok(resolved)
-    }
-
-    fn substitute_many(
-        &mut self,
-        values: &[TypeId],
-        replacements: &BTreeMap<GenericParameterId, TypeId>,
-        memo: &mut BTreeMap<TypeId, TypeId>,
-    ) -> Result<Vec<TypeId>, TypeStoreError> {
-        values
-            .iter()
-            .map(|&value| self.substitute_inner(value, replacements, memo))
-            .collect()
-    }
-
-    fn replace_self_type_inner(
-        &mut self,
-        root: TypeId,
-        owner: &CanonicalTarget,
-        replacement: TypeId,
-        memo: &mut BTreeMap<TypeId, TypeId>,
-    ) -> Result<TypeId, TypeStoreError> {
-        if let Some(&resolved) = memo.get(&root) {
-            return Ok(resolved);
-        }
-        let kind = self.kind(root)?.clone();
-        let resolved = match kind {
-            TypeKind::SelfType(found) if &found == owner => replacement,
-            TypeKind::Nominal { head, substitution } => {
-                let arguments = self.substitution(substitution)?.to_vec();
-                let arguments = arguments
-                    .into_iter()
-                    .map(|argument| {
-                        self.replace_self_type_inner(argument, owner, replacement, memo)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.nominal(head, arguments)?
-            }
-            TypeKind::Reference {
-                mutability,
-                referent,
-            } => {
-                let referent = self.replace_self_type_inner(referent, owner, replacement, memo)?;
-                self.reference(mutability, referent)?
-            }
-            TypeKind::RawPointer {
-                mutability,
-                referent,
-            } => {
-                let referent = self.replace_self_type_inner(referent, owner, replacement, memo)?;
-                self.raw_pointer(mutability, referent)?
-            }
-            TypeKind::Tuple(elements) => {
-                let elements = elements
-                    .iter()
-                    .map(|&element| self.replace_self_type_inner(element, owner, replacement, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.tuple(elements)?
-            }
-            TypeKind::Callable { parameters, result } => {
-                let parameters = parameters
-                    .iter()
-                    .map(|&parameter| {
-                        self.replace_self_type_inner(parameter, owner, replacement, memo)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let result = self.replace_self_type_inner(result, owner, replacement, memo)?;
-                self.callable(parameters, result)?
-            }
-            TypeKind::ErrorUnion(members) => {
-                let members = members
-                    .iter()
-                    .map(|&member| self.replace_self_type_inner(member, owner, replacement, memo))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.error_union(members)?
-            }
-            TypeKind::AssociatedProjection(projection) => {
-                let base =
-                    self.replace_self_type_inner(projection.base, owner, replacement, memo)?;
-                let arguments = self
-                    .substitution(projection.trait_ref.substitution)?
-                    .to_vec();
-                let arguments = arguments
-                    .into_iter()
-                    .map(|argument| {
-                        self.replace_self_type_inner(argument, owner, replacement, memo)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let substitution = self.intern_substitution(arguments)?;
-                self.associated_projection(AssociatedProjection::new(
-                    base,
-                    TraitRef::new(projection.trait_ref.declaration, substitution),
-                    projection.associated,
-                ))?
-            }
-            TypeKind::Never
-            | TypeKind::Primitive(_)
-            | TypeKind::GenericParameter(_)
-            | TypeKind::SelfType(_) => root,
-        };
-        memo.insert(root, resolved);
-        Ok(resolved)
-    }
-
     fn contains(
         &self,
         root: TypeId,
@@ -1093,6 +923,11 @@ impl From<IdentityOverflow> for TypeStoreError {
         Self::IdentityOverflow(error)
     }
 }
+
+mod rewrite;
+
+#[cfg(test)]
+mod rewrite_tests;
 
 #[cfg(test)]
 mod substitution_tests;
