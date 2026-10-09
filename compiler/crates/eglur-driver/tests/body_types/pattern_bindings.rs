@@ -251,6 +251,43 @@ fn parser_budgeted_let_groups_preserve_duplicate_and_initializer_errors() {
 }
 
 #[test]
+fn deep_let_groups_preserve_tuple_siblings_mutability_and_inner_blame() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let groups = "(".repeat(245);
+    let closes = ")".repeat(245);
+    let source = format!(
+        "fn f(input: (i64, i64)) -> i64 {{ let mut ({groups}left{closes}, right) = input\n left = right\n yield left }}\n"
+    );
+    let mut accepted = session(&source);
+    let analysis = accepted
+        .resolve(&branching_profile(), Some(&catalog))
+        .unwrap();
+    assert!(analysis.trace().missing().next().is_none());
+    assert!(diagnostic_codes(&accepted.into_diagnostics(None)).is_empty());
+
+    let source = format!(
+        "fn f(input: (i64, Unit)) -> i64 {{ let ({groups}(){closes}, ()) = input\n yield 0 }}\n"
+    );
+    let mut rejected = session(&source);
+    rejected
+        .resolve(&branching_profile(), Some(&catalog))
+        .unwrap();
+    let snapshot = rejected.into_diagnostics(None);
+    assert_eq!(diagnostic_codes(&snapshot), ["LET_PATTERN_TYPE_MISMATCH"]);
+    let range = snapshot.diagnostics()[0]
+        .primary_span()
+        .as_source()
+        .unwrap()
+        .file_span()
+        .range();
+    assert_eq!(range.start().as_usize(), source.find("()").unwrap());
+    assert_eq!(
+        &source[range.start().as_usize()..range.end().as_usize()],
+        "()"
+    );
+}
+
+#[test]
 fn bare_enum_variant_spellings_are_not_whole_value_bindings() {
     let catalog = TrustedCatalog::first_slice().unwrap();
     for (declarations, ty, pattern, name) in [
