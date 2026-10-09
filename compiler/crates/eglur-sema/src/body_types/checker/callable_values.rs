@@ -47,11 +47,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 if matches!(&owner.target, CanonicalTarget::External(_)) =>
             {
                 let origin = self.expression_origin(source, expression)?;
-                Ok(self.unsupported(
-                    TypecheckCapability::ResolveTrustedInherentMethods,
-                    source,
-                    origin,
-                ))
+                Ok(self.unsupported_trusted_inherent_methods(&owner.target, source, origin))
             }
             FactState::Known(_) | FactState::NotApplicable => self.method_not_found(source, member),
             FactState::Poisoned(poison) => Ok(Outcome::Poisoned(poison.clone())),
@@ -87,11 +83,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(Outcome::Unperformed);
         }
         let CanonicalTarget::Source(owner_id) = owner else {
-            return Ok(self.unsupported(
-                TypecheckCapability::ResolveTrustedInherentMethods,
-                source,
-                origin,
-            ));
+            return Ok(self.unsupported_trusted_inherent_methods(owner, source, origin));
         };
         let targets = self
             .collection

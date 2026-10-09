@@ -346,6 +346,32 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Outcome::Unperformed
     }
 
+    pub(super) fn unsupported_trusted_inherent_methods<T>(
+        &mut self,
+        owner: &CanonicalTarget,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
+    ) -> Outcome<T> {
+        if let CanonicalTarget::External(owner) = owner {
+            let head = crate::ConcreteOwnerHead::Nominal(NominalHead::Declaration(
+                CanonicalTarget::External(owner.clone()),
+            ));
+            if self.signatures.trusted_inherent_owner(&head).is_none() {
+                self.recorder.refuse_input(
+                    crate::UnavailableCompileInput::TrustedInherentInventory {
+                        owner: owner.clone(),
+                    },
+                    SemanticLocation::origin(source.file(), origin),
+                );
+            }
+        }
+        self.unsupported(
+            TypecheckCapability::ResolveTrustedInherentMethods,
+            source,
+            origin,
+        )
+    }
+
     pub(super) fn format_type(&self, ty: TypeId) -> Result<String, BodyTypingError> {
         let owner = self
             .current_owner

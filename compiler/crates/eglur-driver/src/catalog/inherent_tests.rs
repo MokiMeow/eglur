@@ -138,3 +138,58 @@ fn complete_owner_metadata_changes_real_analysis_keys_without_changing_source_se
     assert_ne!(absent.1, empty.1);
     assert_eq!(absent.2, empty.2);
 }
+
+#[test]
+fn complete_empty_inventory_does_not_claim_an_unavailable_input() {
+    for complete in [false, true] {
+        let TrustedCatalog {
+            names,
+            signatures,
+            inhabitance,
+            effects,
+            language_items,
+            runtime_hooks,
+        } = TrustedCatalog::first_slice().unwrap();
+        let owner = external_id(NUMERIC_ERROR);
+        let signatures = TrustedSignatureEnvironment::with_inherent_owners(
+            signatures.declarations().cloned(),
+            complete.then(|| TrustedInherentOwner {
+                head: TrustedInherentOwnerHead::Nominal(owner.clone()),
+                members: Box::new([]),
+            }),
+        )
+        .unwrap();
+        let catalog = TrustedCatalog::new_with_language_items(
+            names,
+            signatures,
+            inhabitance,
+            effects,
+            language_items,
+            runtime_hooks,
+        )
+        .unwrap();
+        let mut session = CompilerSession::build(
+            FileSetRequest::single(
+                "main.eglur",
+                b"fn inspect(value: &NumericError) -> Unit = NumericError.missing(value)\n"
+                    .to_vec(),
+            )
+            .unwrap(),
+            SessionOptions::default(),
+        )
+        .unwrap();
+        session
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        let sealed = session.seal(None).unwrap();
+        assert!(sealed.checked_program().is_none());
+        let entry = sealed.trace().unsupported().next().unwrap();
+        assert_eq!(entry.input_refusals().is_empty(), complete);
+        if !complete {
+            assert_eq!(
+                entry.input_refusals()[0].input(),
+                &eglur_sema::UnavailableCompileInput::TrustedInherentInventory { owner }
+            );
+        }
+    }
+}

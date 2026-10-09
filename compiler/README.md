@@ -166,6 +166,12 @@ capabilities. Five separate probe groups cover import SCCs, recursive effect
 SCCs, diagnostic roots and poison, support/fingerprint properties, and tensor
 non-interference.
 
+Profile selection and catalog coverage are separate. For trusted inherent
+methods, the development attempt's capability trace records unavailable owner
+inventories with their canonical identities and demand locations. A missing
+capability or required input prevents a conclusive source-language result. The
+attempt reports `Unsupported` unless a tool-limit failure takes precedence.
+
 Run the frozen corpus and all five probe groups with:
 
 ```bash

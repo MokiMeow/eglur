@@ -122,7 +122,7 @@ fn capability_trace_deduplicates_locations_and_rejects_profile_drift() {
     assert!(matches!(analysis.product(), PhaseProduct::Performed(_)));
     let mut demands = analysis.demands().to_vec();
     demands.reverse();
-    demands.push(demands[0]);
+    demands.push(demands[0].clone());
 
     let trace = CapabilityTrace::from_demands(&supported, demands.clone()).unwrap();
     assert!(!trace.has_missing());
@@ -141,7 +141,7 @@ fn capability_trace_deduplicates_locations_and_rejects_profile_drift() {
 
     let missing_analysis = collect_declarations(&sources, &unsupported).unwrap();
     let missing =
-        CapabilityTrace::from_demands(&unsupported, missing_analysis.demands().iter().copied())
+        CapabilityTrace::from_demands(&unsupported, missing_analysis.demands().iter().cloned())
             .unwrap();
     assert!(missing.has_missing());
     assert_eq!(missing.missing().count(), 1);

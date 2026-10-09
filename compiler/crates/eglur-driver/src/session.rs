@@ -420,7 +420,7 @@ impl CompilerSession {
             return Err(SessionError::ResolutionNotCompleted);
         };
         let (mode, resolution, trace, manifest) = (*analysis).into_parts();
-        let checked_program = if diagnostics.has_errors() || trace.has_missing() {
+        let checked_program = if diagnostics.has_errors() || trace.has_unsupported() {
             None
         } else if let Some(resolution) = resolution {
             let sources = sources

@@ -120,11 +120,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             FactState::Known(DeclarationSignature::Nominal { .. })
                 if matches!(&owner.target, CanonicalTarget::External(_)) =>
             {
-                return Ok(InvocationPlan::Complete(self.unsupported(
-                    TypecheckCapability::ResolveTrustedInherentMethods,
-                    source,
-                    request.origin,
-                )));
+                return Ok(InvocationPlan::Complete(
+                    self.unsupported_trusted_inherent_methods(
+                        &owner.target,
+                        source,
+                        request.origin,
+                    ),
+                ));
             }
             FactState::Known(_) | FactState::NotApplicable => {
                 return self
@@ -147,11 +149,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             NameKey::from_hir(request.member).expect("valid method name has canonical spelling");
         let source_methods = if concrete {
             let CanonicalTarget::Source(owner) = &owner.target else {
-                return Ok(InvocationPlan::Complete(self.unsupported(
-                    TypecheckCapability::ResolveTrustedInherentMethods,
-                    source,
-                    request.origin,
-                )));
+                return Ok(InvocationPlan::Complete(
+                    self.unsupported_trusted_inherent_methods(
+                        &owner.target,
+                        source,
+                        request.origin,
+                    ),
+                ));
             };
             Some(
                 self.collection

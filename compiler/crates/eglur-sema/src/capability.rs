@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::SemanticLocation;
+use crate::{ExternalDefId, SemanticLocation};
+
+#[cfg(test)]
+mod tests;
 
 /// Independently selectable operations owned by name resolution.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -283,32 +286,75 @@ pub trait CompileSupport {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DemandDisposition {
+    /// Selected by the profile, independently of required input availability.
     Satisfied,
     Missing,
 }
 
+/// Required catalog input, independently of the selected implementation profile.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum UnavailableCompileInput {
+    TrustedInherentInventory { owner: ExternalDefId },
+}
+
+impl UnavailableCompileInput {
+    #[must_use]
+    pub const fn capability(&self) -> CompileCapability {
+        match self {
+            Self::TrustedInherentInventory { .. } => {
+                CompileCapability::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods)
+            }
+        }
+    }
+}
+
 /// One actual phase-owned capability demand and its semantic provenance.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapabilityDemand {
     capability: CompileCapability,
     location: SemanticLocation,
     disposition: DemandDisposition,
+    unavailable_input: Option<UnavailableCompileInput>,
 }
 
 impl CapabilityDemand {
     #[must_use]
-    pub const fn capability(self) -> CompileCapability {
+    pub const fn capability(&self) -> CompileCapability {
         self.capability
     }
 
     #[must_use]
-    pub const fn location(self) -> SemanticLocation {
+    pub const fn location(&self) -> SemanticLocation {
         self.location
     }
 
     #[must_use]
-    pub const fn disposition(self) -> DemandDisposition {
+    pub const fn disposition(&self) -> DemandDisposition {
         self.disposition
+    }
+
+    #[must_use]
+    pub const fn unavailable_input(&self) -> Option<&UnavailableCompileInput> {
+        self.unavailable_input.as_ref()
+    }
+}
+
+/// One unavailable input and the exact demand sites requiring it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompileInputRefusal {
+    input: UnavailableCompileInput,
+    locations: Box<[SemanticLocation]>,
+}
+
+impl CompileInputRefusal {
+    #[must_use]
+    pub const fn input(&self) -> &UnavailableCompileInput {
+        &self.input
+    }
+
+    #[must_use]
+    pub fn locations(&self) -> &[SemanticLocation] {
+        &self.locations
     }
 }
 
@@ -318,6 +364,7 @@ pub struct CapabilityTraceEntry {
     capability: CompileCapability,
     disposition: DemandDisposition,
     locations: Box<[SemanticLocation]>,
+    input_refusals: Box<[CompileInputRefusal]>,
 }
 
 impl CapabilityTraceEntry {
@@ -335,6 +382,22 @@ impl CapabilityTraceEntry {
     pub fn locations(&self) -> &[SemanticLocation] {
         &self.locations
     }
+
+    #[must_use]
+    pub fn input_refusals(&self) -> &[CompileInputRefusal] {
+        &self.input_refusals
+    }
+
+    #[must_use]
+    pub fn is_unsupported(&self) -> bool {
+        self.disposition == DemandDisposition::Missing || !self.input_refusals.is_empty()
+    }
+}
+
+#[derive(Default)]
+struct MergedDemand {
+    locations: BTreeSet<SemanticLocation>,
+    inputs: BTreeMap<UnavailableCompileInput, BTreeSet<SemanticLocation>>,
 }
 
 /// Actual phase-owned capability demands merged against one selected support policy.
@@ -348,8 +411,7 @@ impl CapabilityTrace {
         support: &dyn CompileSupport,
         demands: impl IntoIterator<Item = CapabilityDemand>,
     ) -> Result<Self, CapabilityTraceError> {
-        let mut merged =
-            BTreeMap::<CompileCapability, (DemandDisposition, BTreeSet<SemanticLocation>)>::new();
+        let mut merged = BTreeMap::<CompileCapability, (DemandDisposition, MergedDemand)>::new();
         for demand in demands {
             let capability = demand.capability();
             let expected = if support.supports(capability) {
@@ -366,18 +428,32 @@ impl CapabilityTrace {
             }
             let entry = merged
                 .entry(capability)
-                .or_insert_with(|| (expected, BTreeSet::new()));
-            entry.1.insert(demand.location());
+                .or_insert_with(|| (expected, MergedDemand::default()));
+            entry.1.locations.insert(demand.location());
+            if let Some(input) = demand.unavailable_input {
+                entry
+                    .1
+                    .inputs
+                    .entry(input)
+                    .or_default()
+                    .insert(demand.location);
+            }
         }
         let entries = merged
             .into_iter()
-            .map(
-                |(capability, (disposition, locations))| CapabilityTraceEntry {
-                    capability,
-                    disposition,
-                    locations: locations.into_iter().collect::<Vec<_>>().into_boxed_slice(),
-                },
-            )
+            .map(|(capability, (disposition, merged))| CapabilityTraceEntry {
+                capability,
+                disposition,
+                locations: merged.locations.into_iter().collect(),
+                input_refusals: merged
+                    .inputs
+                    .into_iter()
+                    .map(|(input, locations)| CompileInputRefusal {
+                        input,
+                        locations: locations.into_iter().collect(),
+                    })
+                    .collect(),
+            })
             .collect::<Vec<_>>()
             .into_boxed_slice();
         Ok(Self { entries })
@@ -388,11 +464,21 @@ impl CapabilityTrace {
         &self.entries
     }
 
+    /// Reports missing profile capabilities, not unavailable catalog inputs.
     #[must_use]
     pub fn has_missing(&self) -> bool {
         self.entries
             .iter()
             .any(|entry| entry.disposition == DemandDisposition::Missing)
+    }
+
+    #[must_use]
+    pub fn has_unsupported(&self) -> bool {
+        self.unsupported().next().is_some()
+    }
+
+    pub fn unsupported(&self) -> impl Iterator<Item = &CapabilityTraceEntry> {
+        self.entries.iter().filter(|entry| entry.is_unsupported())
     }
 
     pub fn satisfied(&self) -> impl Iterator<Item = &CapabilityTraceEntry> {
@@ -498,8 +584,28 @@ impl<'support> DemandRecorder<'support> {
             } else {
                 DemandDisposition::Missing
             },
+            unavailable_input: None,
         });
         supported
+    }
+
+    pub(crate) fn refuse_input(
+        &mut self,
+        input: UnavailableCompileInput,
+        location: SemanticLocation,
+    ) {
+        let capability = input.capability();
+        let disposition = if self.support.supports(capability) {
+            DemandDisposition::Satisfied
+        } else {
+            DemandDisposition::Missing
+        };
+        self.demands.push(CapabilityDemand {
+            capability,
+            location,
+            disposition,
+            unavailable_input: Some(input),
+        });
     }
 
     pub(crate) fn finish<T>(self, product: PhaseProduct<T>) -> PhaseAnalysis<T> {
