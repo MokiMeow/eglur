@@ -43,7 +43,6 @@ class TraceabilityCodecTests(unittest.TestCase):
             codec.encode_report(report),
             (REPO_ROOT / repository.TRACEABILITY_PATH).read_bytes(),
         )
-        self.assertEqual(report.summary.diagnostic_code_count, 273)
 
     def test_rejects_every_mutated_summary_projection(self) -> None:
         canonical = self.document()

@@ -34,7 +34,10 @@ class DiagnosticRegistryTests(unittest.TestCase):
         )
 
     def test_registry_covers_every_diagnostic_contract(self) -> None:
-        self.assertEqual(len(self.registry), 273)
+        contracts = diagnostic_contracts.load_contracts(
+            REPO_ROOT / diagnostic_contracts.DEFAULT_CONTRACT_PATH
+        )
+        self.assertEqual(set(self.registry), set(contracts))
         self.assertTrue(
             all(
                 entry.channels.allowed_channels <= diagnostic_model.CHANNELS

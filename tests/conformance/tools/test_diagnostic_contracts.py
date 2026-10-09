@@ -10,6 +10,7 @@ TOOLS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOLS_DIR.parents[2]
 
 
+from eglur_conformance.diagnostics import catalog as diagnostic_catalog
 from eglur_conformance.diagnostics import contracts as diagnostic_contracts
 from eglur_conformance.yaml_document import YamlValue, load_yaml
 
@@ -122,7 +123,8 @@ class DiagnosticContractTests(unittest.TestCase):
         document = diagnostic_contracts.load_contract_document(CONTRACT_PATH)
         contracts = document.codes
 
-        self.assertEqual(len(contracts), 273)
+        catalog = diagnostic_catalog.load_catalog(CONTRACT_PATH.parent)
+        self.assertEqual(set(contracts), catalog.codes)
         self.assertEqual(
             contracts["EFFECT_VIOLATION"].message_any_of,
             (("non-bang", "Fn", "pure"),),
