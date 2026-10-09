@@ -121,7 +121,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 if matches!(&owner.target, CanonicalTarget::External(_)) =>
             {
                 return Ok(InvocationPlan::Complete(self.unsupported(
-                    TypecheckCapability::CheckClosures,
+                    TypecheckCapability::ResolveTrustedInherentMethods,
                     source,
                     request.origin,
                 )));
@@ -148,7 +148,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let source_methods = if concrete {
             let CanonicalTarget::Source(owner) = &owner.target else {
                 return Ok(InvocationPlan::Complete(self.unsupported(
-                    TypecheckCapability::CheckClosures,
+                    TypecheckCapability::ResolveTrustedInherentMethods,
                     source,
                     request.origin,
                 )));

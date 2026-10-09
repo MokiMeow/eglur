@@ -44,6 +44,7 @@ pub enum TypecheckCapability {
     ComputeEffectSummaries,
     ResolveMembers,
     ResolveMethods,
+    ResolveTrustedInherentMethods,
     ResolveOverloads,
     CheckOperators,
     CheckSelectedCheckedIntegerArithmetic,
@@ -77,6 +78,7 @@ impl TypecheckCapability {
             Self::ComputeEffectSummaries => "typecheck.effect_summaries",
             Self::ResolveMembers => "typecheck.members",
             Self::ResolveMethods => "typecheck.methods",
+            Self::ResolveTrustedInherentMethods => "typecheck.trusted_inherent_methods",
             Self::ResolveOverloads => "typecheck.overloads",
             Self::CheckOperators => "typecheck.operators",
             Self::CheckSelectedCheckedIntegerArithmetic => {
@@ -114,7 +116,7 @@ pub enum CompileCapability {
 
 impl CompileCapability {
     /// Complete closed capability vocabulary for this compiler revision.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::Resolve(ResolveCapability::CollectDeclarations),
         Self::Resolve(ResolveCapability::ResolveFileSetImports),
         Self::Resolve(ResolveCapability::ResolveLexicalValues),
@@ -131,6 +133,7 @@ impl CompileCapability {
         Self::Typecheck(TypecheckCapability::ComputeEffectSummaries),
         Self::Typecheck(TypecheckCapability::ResolveMembers),
         Self::Typecheck(TypecheckCapability::ResolveMethods),
+        Self::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods),
         Self::Typecheck(TypecheckCapability::ResolveOverloads),
         Self::Typecheck(TypecheckCapability::CheckOperators),
         Self::Typecheck(TypecheckCapability::CheckSelectedCheckedIntegerArithmetic),
@@ -196,6 +199,9 @@ impl CompileCapability {
             Self::Typecheck(TypecheckCapability::ResolveTraitEnvironment) => DECLARATION_SIGNATURES,
             Self::Typecheck(TypecheckCapability::CheckBodies) => TRAIT_ENVIRONMENT,
             Self::Typecheck(TypecheckCapability::ResolveTraitEvidence) => BODIES,
+            Self::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods) => {
+                &[Self::Typecheck(TypecheckCapability::ResolveMethods)]
+            }
             Self::Typecheck(TypecheckCapability::CheckCompleteOwnershipFlow) => {
                 &[Self::Typecheck(TypecheckCapability::CheckOwnershipFlow)]
             }
