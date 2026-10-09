@@ -160,6 +160,14 @@ impl DiagnosticTypeNames {
         }
 
         if let Some(trusted) = trusted {
+            for owner in trusted.inherent_owners() {
+                for member in &owner.members {
+                    target_names.insert(
+                        CanonicalTarget::External(member.callable.clone()),
+                        Box::<str>::from(member.name.text()),
+                    );
+                }
+            }
             for declaration in trusted.declarations() {
                 if let TrustedSignatureKind::Trait {
                     associated_types, ..

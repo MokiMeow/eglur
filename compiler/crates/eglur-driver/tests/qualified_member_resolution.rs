@@ -365,7 +365,13 @@ fn qualified_trait_value_requires_method_resolution_capability() {
         SupportProfile::semantic_core_v1()
             .compile_capabilities()
             .filter(|capability| {
-                *capability != CompileCapability::Typecheck(TypecheckCapability::ResolveMethods)
+                !matches!(
+                    capability,
+                    CompileCapability::Typecheck(
+                        TypecheckCapability::ResolveMethods
+                            | TypecheckCapability::ResolveTrustedInherentMethods
+                    )
+                )
             }),
     )
     .unwrap();

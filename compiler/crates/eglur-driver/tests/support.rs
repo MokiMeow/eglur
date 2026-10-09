@@ -163,14 +163,14 @@ fn complete_ownership_flow_cannot_be_enabled_before_it_is_implemented() {
 }
 
 #[test]
-fn trusted_inherent_resolution_cannot_be_enabled_before_it_is_implemented() {
+fn trusted_inherent_resolution_requires_the_method_operation() {
     let trusted = CompileCapability::Typecheck(
         eglur_sema::TypecheckCapability::ResolveTrustedInherentMethods,
     );
     let core = SupportProfile::semantic_core_v1();
     assert!(matches!(
-        profile(core.compile_capabilities().chain([trusted])),
-        Err(SupportProfileError::UnimplementedCapability(capability)) if capability == trusted
+        profile(core.compile_capabilities().filter(|capability| *capability != CompileCapability::Typecheck(eglur_sema::TypecheckCapability::ResolveMethods))),
+        Err(SupportProfileError::MissingPrerequisite { capability, prerequisite }) if capability == trusted && prerequisite == CompileCapability::Typecheck(eglur_sema::TypecheckCapability::ResolveMethods)
     ));
 }
 

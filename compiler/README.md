@@ -172,6 +172,15 @@ inventories with their canonical identities and demand locations. A missing
 capability or required input prevents a conclusive source-language result. The
 attempt reports `Unsupported` unless a tool-limit failure takes precedence.
 
+Catalog-declared nominal inherent families support qualified calls, receiver
+calls, and pure named `Fn` values. Owner type parameters and explicit method
+type arguments remain separate. Associated members have no receiver; they
+use the owner's qualified name. Complete empty inventories allow a missing
+method diagnostic. Execution still requires a compatible runtime hook and
+supported argument values; resolving a method does not make opaque values
+executable. Primitive and intrinsic inherent families are not yet connected
+to these call paths.
+
 Run the frozen corpus and all five probe groups with:
 
 ```bash

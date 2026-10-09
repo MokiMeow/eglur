@@ -2098,6 +2098,24 @@ fn nested_error_union_parameters_are_underconstrained_in_any_member_order() {
 }
 
 #[test]
+fn overload_union_applicability_uses_later_independent_arguments() {
+    let mut session = session(concat!(
+        "struct IoError {}\nstruct ParseError {}\n",
+        "overload fn choose[E](value: Res[i64, Union[E, ParseError]], error: E) -> Unit = ()\n",
+        "overload fn choose(value: Bool, error: Bool) -> Unit = ()\n",
+        "fn use(value: Res[i64, Union[IoError, ParseError]]) -> Unit = choose(value, IoError {})\n",
+    ));
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    session.resolve(&body_profile(), Some(&catalog)).unwrap();
+    let snapshot = session.into_diagnostics(None);
+    assert!(
+        matches!(snapshot, DiagnosticSnapshot::Accepted(_)),
+        "{:?}",
+        diagnostic_codes(&snapshot)
+    );
+}
+
+#[test]
 fn call_shape_precedes_argument_typing() {
     let mut session = session(concat!(
         "fn choose(first: i64, second: i64) -> i64 = first\n",

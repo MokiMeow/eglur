@@ -45,6 +45,7 @@ mod control;
 mod dispatch;
 mod expression;
 mod failure;
+mod inherent;
 mod invocation;
 mod numeric;
 mod numeric_tree;
@@ -537,6 +538,7 @@ struct MethodCandidate {
     callable: CallableSignature,
     explicit_parameters: Box<[GenericParameterId]>,
     preset_replacements: BTreeMap<GenericParameterId, TypeId>,
+    owner_constraint: Option<inherent::InherentOwnerConstraint>,
     dispatch: MethodDispatchTemplate,
 }
 

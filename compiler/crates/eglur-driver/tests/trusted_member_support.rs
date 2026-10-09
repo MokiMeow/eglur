@@ -77,7 +77,10 @@ fn assert_missing(attempt: &CompileAttempt, expected: &[&str], owner: Option<&st
                 .unwrap()
                 .is_empty()
         );
-        labels[0].push_str(&format!(" (missing inherent inventory: {owner})"));
+        labels.insert(
+            0,
+            format!("typecheck.trusted_inherent_methods (missing inherent inventory: {owner})"),
+        );
     }
     assert_eq!(
         attempt.render_human(),
@@ -122,11 +125,7 @@ fn trusted_qualified_calls_and_values_report_missing_inherent_resolution() {
         ),
     ] {
         let result = attempt(&[("main.eglur", source)]);
-        assert_missing(
-            &result,
-            &["typecheck.trusted_inherent_methods"],
-            Some(owner),
-        );
+        assert_missing(&result, &[], Some(owner));
     }
 }
 
@@ -144,11 +143,7 @@ fn trusted_owner_reexports_preserve_the_missing_inherent_operation() {
                 "pub import std::io::IoError as PublicError\n",
             ),
         ]);
-        assert_missing(
-            &result,
-            &["typecheck.trusted_inherent_methods"],
-            Some("std::io::IoError"),
-        );
+        assert_missing(&result, &[], Some("std::io::IoError"));
     }
 }
 
@@ -165,7 +160,7 @@ fn genuine_closures_remain_distinct_from_trusted_member_refusals() {
         format!("fn source(value: &NumericError) -> Unit = NumericError.missing(value)\n{closure}");
     assert_missing(
         &attempt(&[("main.eglur", &source)]),
-        &["typecheck.trusted_inherent_methods", "typecheck.closures"],
+        &["typecheck.closures"],
         Some("std::prelude::NumericError"),
     );
 }

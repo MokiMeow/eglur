@@ -257,6 +257,7 @@ impl CompileCapability {
                 | Self::Typecheck(TypecheckCapability::ComputeEffectSummaries)
                 | Self::Typecheck(TypecheckCapability::ResolveMembers)
                 | Self::Typecheck(TypecheckCapability::ResolveMethods)
+                | Self::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods)
                 | Self::Typecheck(TypecheckCapability::ResolveOverloads)
                 | Self::Typecheck(TypecheckCapability::CheckSelectedCheckedIntegerArithmetic)
                 | Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstExpressions)

@@ -87,23 +87,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         })
     }
 
-    pub(super) fn inherent_method_targets(
-        &self,
-        subject: TypeId,
-        name: &NameKey,
-    ) -> Result<Vec<DefId>, BodyTypingError> {
-        let TypeKind::Nominal {
-            head: NominalHead::Declaration(CanonicalTarget::Source(owner)),
-            ..
-        } = self.signatures.types().kind(subject)?
-        else {
-            return Ok(Vec::new());
-        };
-        Ok(self
-            .collection
-            .child_candidates(*owner, name, DeclarationKind::Function))
-    }
-
     pub(super) fn inherent_family_is_inaccessible(
         &self,
         module: ModuleId,
@@ -186,6 +169,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 callable,
                 explicit_parameters,
                 preset_replacements: BTreeMap::new(),
+                owner_constraint: None,
                 dispatch: MethodDispatchTemplate::Direct,
             });
         }
@@ -326,6 +310,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             callable,
             explicit_parameters,
             preset_replacements,
+            owner_constraint: None,
             dispatch: MethodDispatchTemplate::Trait {
                 subject,
                 trait_ref: receiver.trait_ref().clone(),

@@ -5,6 +5,8 @@ use eglur_sema::{
     InherentMemberForm, TrustedInherentMember, TrustedInherentOwner, TrustedInherentOwnerHead,
 };
 
+mod dispatch;
+
 fn signatures() -> TrustedSignatureEnvironment {
     let id = external_id("fixture::integer_zero");
     TrustedSignatureEnvironment::with_inherent_owners(
@@ -183,9 +185,18 @@ fn complete_empty_inventory_does_not_claim_an_unavailable_input() {
             .unwrap();
         let sealed = session.seal(None).unwrap();
         assert!(sealed.checked_program().is_none());
-        let entry = sealed.trace().unsupported().next().unwrap();
-        assert_eq!(entry.input_refusals().is_empty(), complete);
-        if !complete {
+        if complete {
+            assert!(!sealed.trace().has_unsupported());
+            assert!(
+                sealed
+                    .diagnostics()
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == "METHOD_NOT_FOUND")
+            );
+        } else {
+            let entry = sealed.trace().unsupported().next().unwrap();
+            assert!(sealed.trace().missing().next().is_none());
             assert_eq!(
                 entry.input_refusals()[0].input(),
                 &eglur_sema::UnavailableCompileInput::TrustedInherentInventory { owner }

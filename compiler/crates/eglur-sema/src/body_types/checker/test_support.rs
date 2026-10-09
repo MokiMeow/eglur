@@ -21,6 +21,16 @@ fn performed<T>(phase: PhaseAnalysis<T>) -> T {
 }
 
 pub(super) fn with_checker(text: &str, inspect: impl FnOnce(&mut BodyChecker<'_, '_, '_>)) {
+    let external = ExternalNameEnvironment::new([], [], []).unwrap();
+    with_checker_inputs(text, &external, None, inspect);
+}
+
+pub(super) fn with_checker_inputs(
+    text: &str,
+    external: &ExternalNameEnvironment,
+    trusted: Option<&crate::TrustedSignatureEnvironment>,
+    inspect: impl FnOnce(&mut BodyChecker<'_, '_, '_>),
+) {
     let file = FileId::new(0);
     let raw = SourceFile::new(file, text.as_bytes().to_vec());
     let validated = raw.validate().unwrap();
@@ -46,14 +56,13 @@ pub(super) fn with_checker(text: &str, inspect: impl FnOnce(&mut BodyChecker<'_,
     .unwrap();
     let sources = [source];
     let mut diagnostics = DiagnosticStore::new();
-    let external = ExternalNameEnvironment::new([], [], []).unwrap();
     let collection = performed(crate::collect_declarations(&sources, &Support).unwrap());
     let plan = performed(
         crate::plan_imports(
             &collection,
             &sources,
             &Support,
-            Some(&external),
+            Some(external),
             &mut diagnostics,
         )
         .unwrap(),
@@ -66,7 +75,7 @@ pub(super) fn with_checker(text: &str, inspect: impl FnOnce(&mut BodyChecker<'_,
             &[unit],
             &sources,
             &Support,
-            Some(&external),
+            Some(external),
             &mut diagnostics,
         )
         .unwrap(),
@@ -77,7 +86,7 @@ pub(super) fn with_checker(text: &str, inspect: impl FnOnce(&mut BodyChecker<'_,
             &imports,
             &sources,
             &Support,
-            Some(&external),
+            Some(external),
             &mut diagnostics,
         )
         .unwrap(),
@@ -88,7 +97,10 @@ pub(super) fn with_checker(text: &str, inspect: impl FnOnce(&mut BodyChecker<'_,
             &imports,
             &sources,
             &Support,
-            crate::SignatureResolutionInputs::new(Some(&external), None),
+            crate::SignatureResolutionInputs::new(
+                Some(external),
+                trusted.map(|signatures| crate::TrustedDeclarationInputs::new(signatures, None)),
+            ),
             &mut diagnostics,
         )
         .unwrap(),
@@ -108,7 +120,7 @@ pub(super) fn with_checker(text: &str, inspect: impl FnOnce(&mut BodyChecker<'_,
         collection: &collection,
         imports: &imports,
         names: &names,
-        external_names: Some(&external),
+        external_names: Some(external),
         sources: BTreeMap::from([(file, &sources[0])]),
         signatures,
         inhabitance,

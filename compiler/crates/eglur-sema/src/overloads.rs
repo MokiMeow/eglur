@@ -8,6 +8,9 @@ use crate::{
     CallableSignature, CanonicalTypeStore, GenericParameterId, TypeId, TypeKind, TypeStoreError,
 };
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OverloadPairConflict {
     ReturnOnlyDifference,
@@ -135,7 +138,7 @@ impl OverloadShape {
 }
 
 pub(crate) fn exact_parameter_match(
-    types: &CanonicalTypeStore,
+    types: &mut CanonicalTypeStore,
     callable: &CallableSignature,
     actual: &[TypeId],
     replacements: &mut BTreeMap<GenericParameterId, TypeId>,
@@ -148,115 +151,189 @@ pub(crate) fn exact_parameter_match(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    for (parameter, &actual) in callable.parameters().iter().zip(actual) {
-        if !exact_type_match(
-            types,
-            parameter.ty(),
-            actual,
-            &parameters,
-            replacements,
-            true,
-        )? {
+    match_inference_patterns(
+        types,
+        callable
+            .parameters()
+            .iter()
+            .zip(actual)
+            .map(|(parameter, &actual)| (parameter.ty(), actual, true)),
+        &parameters,
+        replacements,
+    )
+}
+
+pub(crate) fn match_inference_patterns(
+    types: &mut CanonicalTypeStore,
+    roots: impl IntoIterator<Item = (TypeId, TypeId, bool)>,
+    parameters: &BTreeSet<GenericParameterId>,
+    replacements: &mut BTreeMap<GenericParameterId, TypeId>,
+) -> Result<bool, TypeStoreError> {
+    let mut pending = roots.into_iter().collect::<Vec<_>>();
+    pending.reverse();
+    let mut visited = BTreeSet::new();
+    let mut unions = BTreeSet::new();
+    while let Some((template, actual, parameter_root)) = pending.pop() {
+        if !visited.insert((template, actual, parameter_root)) {
+            continue;
+        }
+        if let TypeKind::GenericParameter(parameter) = types.kind(template)?
+            && parameters.contains(parameter)
+        {
+            if let Some(&replacement) = replacements.get(parameter) {
+                if replacement != actual {
+                    return Ok(false);
+                }
+                continue;
+            }
+            if parameter_root && actual == types.never() {
+                return Ok(false);
+            }
+            replacements.insert(parameter.clone(), actual);
+            continue;
+        }
+        if template == actual {
+            continue;
+        }
+        if actual == types.never() {
+            return Ok(false);
+        }
+
+        let pairs = match (types.kind(template)?, types.kind(actual)?) {
+            (
+                TypeKind::Nominal {
+                    head: left_head,
+                    substitution: left_substitution,
+                },
+                TypeKind::Nominal {
+                    head: right_head,
+                    substitution: right_substitution,
+                },
+            ) if left_head == right_head => {
+                let left = types.substitution(*left_substitution)?;
+                let right = types.substitution(*right_substitution)?;
+                if left.len() != right.len() {
+                    return Ok(false);
+                }
+                left.iter().copied().zip(right.iter().copied()).collect()
+            }
+            (
+                TypeKind::Reference {
+                    mutability: left_mutability,
+                    referent: left_referent,
+                },
+                TypeKind::Reference {
+                    mutability: right_mutability,
+                    referent: right_referent,
+                },
+            ) if left_mutability == right_mutability => vec![(*left_referent, *right_referent)],
+            (
+                TypeKind::RawPointer {
+                    mutability: left_mutability,
+                    referent: left_referent,
+                },
+                TypeKind::RawPointer {
+                    mutability: right_mutability,
+                    referent: right_referent,
+                },
+            ) if left_mutability == right_mutability => vec![(*left_referent, *right_referent)],
+            (TypeKind::Tuple(left), TypeKind::Tuple(right)) if left.len() == right.len() => {
+                left.iter().copied().zip(right.iter().copied()).collect()
+            }
+            (
+                TypeKind::Callable {
+                    parameters: left_parameters,
+                    result: left_result,
+                },
+                TypeKind::Callable {
+                    parameters: right_parameters,
+                    result: right_result,
+                },
+            ) if left_parameters.len() == right_parameters.len() => left_parameters
+                .iter()
+                .copied()
+                .zip(right_parameters.iter().copied())
+                .chain([(*left_result, *right_result)])
+                .collect(),
+            (TypeKind::ErrorUnion(_), _) => {
+                unions.insert((template, actual));
+                continue;
+            }
+            (TypeKind::AssociatedProjection(_), _) => continue,
+            _ => return Ok(false),
+        };
+
+        pending.extend(
+            pairs
+                .into_iter()
+                .rev()
+                .map(|(template, actual)| (template, actual, false)),
+        );
+    }
+
+    if unions.is_empty() {
+        return Ok(true);
+    }
+    // One substitution walk shares work across deferred union subgraphs.
+    let forest = types.tuple(unions.iter().map(|&(template, _)| template))?;
+    let specialized = types.substitute(forest, replacements)?;
+    let TypeKind::Tuple(specialized) = types.kind(specialized)? else {
+        unreachable!("substitution preserves tuple shape");
+    };
+    let mut unbound = BTreeMap::new();
+    for ((template, actual), &specialized) in unions.into_iter().zip(specialized) {
+        if has_unbound_parameter(types, template, parameters, replacements, &mut unbound)? {
+            continue;
+        }
+        if specialized != actual {
             return Ok(false);
         }
     }
     Ok(true)
 }
 
-fn exact_type_match(
+fn has_unbound_parameter(
     types: &CanonicalTypeStore,
-    template: TypeId,
-    actual: TypeId,
+    root: TypeId,
     parameters: &BTreeSet<GenericParameterId>,
-    replacements: &mut BTreeMap<GenericParameterId, TypeId>,
-    parameter_root: bool,
+    replacements: &BTreeMap<GenericParameterId, TypeId>,
+    memo: &mut BTreeMap<TypeId, bool>,
 ) -> Result<bool, TypeStoreError> {
-    if let TypeKind::GenericParameter(parameter) = types.kind(template)?
-        && parameters.contains(parameter)
-    {
-        if let Some(&replacement) = replacements.get(parameter) {
-            return Ok(replacement == actual);
+    let mut pending = vec![(root, false)];
+    while let Some((ty, complete)) = pending.pop() {
+        if memo.contains_key(&ty) {
+            continue;
         }
-        if parameter_root && actual == types.never() {
-            return Ok(false);
-        }
-        replacements.insert(parameter.clone(), actual);
-        return Ok(true);
-    }
-    if template == actual {
-        return Ok(true);
-    }
-    if actual == types.never() {
-        return Ok(false);
-    }
-
-    let pairs = match (types.kind(template)?, types.kind(actual)?) {
-        (
-            TypeKind::Nominal {
-                head: left_head,
-                substitution: left_substitution,
-            },
-            TypeKind::Nominal {
-                head: right_head,
-                substitution: right_substitution,
-            },
-        ) if left_head == right_head => {
-            let left = types.substitution(*left_substitution)?;
-            let right = types.substitution(*right_substitution)?;
-            if left.len() != right.len() {
-                return Ok(false);
+        let children = match types.kind(ty)? {
+            TypeKind::GenericParameter(parameter) => {
+                memo.insert(
+                    ty,
+                    parameters.contains(parameter) && !replacements.contains_key(parameter),
+                );
+                continue;
             }
-            left.iter().copied().zip(right.iter().copied()).collect()
-        }
-        (
-            TypeKind::Reference {
-                mutability: left_mutability,
-                referent: left_referent,
-            },
-            TypeKind::Reference {
-                mutability: right_mutability,
-                referent: right_referent,
-            },
-        ) if left_mutability == right_mutability => vec![(*left_referent, *right_referent)],
-        (
-            TypeKind::RawPointer {
-                mutability: left_mutability,
-                referent: left_referent,
-            },
-            TypeKind::RawPointer {
-                mutability: right_mutability,
-                referent: right_referent,
-            },
-        ) if left_mutability == right_mutability => vec![(*left_referent, *right_referent)],
-        (TypeKind::Tuple(left), TypeKind::Tuple(right))
-        | (TypeKind::ErrorUnion(left), TypeKind::ErrorUnion(right))
-            if left.len() == right.len() =>
-        {
-            left.iter().copied().zip(right.iter().copied()).collect()
-        }
-        (
-            TypeKind::Callable {
-                parameters: left_parameters,
-                result: left_result,
-            },
-            TypeKind::Callable {
-                parameters: right_parameters,
-                result: right_result,
-            },
-        ) if left_parameters.len() == right_parameters.len() => left_parameters
-            .iter()
-            .copied()
-            .zip(right_parameters.iter().copied())
-            .chain([(*left_result, *right_result)])
-            .collect(),
-        (TypeKind::AssociatedProjection(_), _) => return Ok(true),
-        _ => return Ok(false),
-    };
-
-    for (template, actual) in pairs {
-        if !exact_type_match(types, template, actual, parameters, replacements, false)? {
-            return Ok(false);
+            TypeKind::Nominal { substitution, .. } => types.substitution(*substitution)?.to_vec(),
+            TypeKind::Tuple(elements) | TypeKind::ErrorUnion(elements) => elements.to_vec(),
+            TypeKind::Reference { referent, .. } | TypeKind::RawPointer { referent, .. } => {
+                vec![*referent]
+            }
+            TypeKind::Callable { parameters, result } => {
+                parameters.iter().copied().chain([*result]).collect()
+            }
+            TypeKind::AssociatedProjection(projection) => types
+                .substitution(projection.trait_ref().substitution())?
+                .iter()
+                .copied()
+                .chain([projection.base()])
+                .collect(),
+            TypeKind::Never | TypeKind::Primitive(_) | TypeKind::SelfType(_) => Vec::new(),
+        };
+        if complete {
+            memo.insert(ty, children.iter().any(|child| memo[child]));
+        } else {
+            pending.push((ty, true));
+            pending.extend(children.into_iter().rev().map(|child| (child, false)));
         }
     }
-    Ok(true)
+    Ok(memo[&root])
 }

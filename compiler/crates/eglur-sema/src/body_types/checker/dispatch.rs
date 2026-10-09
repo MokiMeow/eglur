@@ -1,3 +1,4 @@
+use super::inherent::InherentMethodTemplate;
 use super::invocation::{InvocationContinuation, InvocationFrame, InvocationPlan};
 use super::*;
 
@@ -56,7 +57,7 @@ enum DispatchSelection {
     QualifiedConcrete {
         owner: QualifiedMethodOwner,
         member: Name,
-        candidates: Vec<OverloadCandidate>,
+        candidates: Vec<QualifiedConcreteCandidate>,
     },
 }
 
@@ -70,6 +71,11 @@ struct MethodSelection {
 
 struct OverloadCandidate {
     callable: CallableSignature,
+    bindings: Option<Vec<usize>>,
+}
+
+struct QualifiedConcreteCandidate {
+    template: InherentMethodTemplate,
     bindings: Option<Vec<usize>>,
 }
 
@@ -117,17 +123,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let concrete = match self.signatures.declaration(&owner.target) {
             FactState::Known(DeclarationSignature::Trait { .. }) => false,
             FactState::Known(DeclarationSignature::Struct { .. }) => true,
-            FactState::Known(DeclarationSignature::Nominal { .. })
-                if matches!(&owner.target, CanonicalTarget::External(_)) =>
-            {
-                return Ok(InvocationPlan::Complete(
-                    self.unsupported_trusted_inherent_methods(
-                        &owner.target,
-                        source,
-                        request.origin,
-                    ),
-                ));
-            }
+            FactState::Known(
+                DeclarationSignature::Nominal { .. } | DeclarationSignature::Enum { .. },
+            ) if matches!(&owner.target, CanonicalTarget::External(_)) => true,
             FactState::Known(_) | FactState::NotApplicable => {
                 return self
                     .method_not_found(source, request.member)
@@ -147,54 +145,19 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
         let name =
             NameKey::from_hir(request.member).expect("valid method name has canonical spelling");
-        let source_methods = if concrete {
-            let CanonicalTarget::Source(owner) = &owner.target else {
-                return Ok(InvocationPlan::Complete(
-                    self.unsupported_trusted_inherent_methods(
-                        &owner.target,
-                        source,
-                        request.origin,
-                    ),
-                ));
-            };
-            Some(
-                self.collection
-                    .child_candidates(*owner, &name, DeclarationKind::Function),
-            )
-        } else {
-            None
-        };
-        let methods = if let Some(source_methods) = &source_methods {
-            source_methods
-                .iter()
-                .copied()
-                .map(CanonicalTarget::Source)
-                .collect::<Vec<_>>()
-        } else {
-            self.signatures
-                .trait_methods(&owner.target)
-                .iter()
-                .filter(|method| method.name() == &name)
-                .map(|method| method.declaration().clone())
-                .collect::<Vec<_>>()
-        };
+        if concrete {
+            return self.prepare_qualified_inherent_call(context, request, owner, &name);
+        }
+        let methods = self
+            .signatures
+            .trait_methods(&owner.target)
+            .iter()
+            .filter(|method| method.name() == &name)
+            .map(|method| method.declaration().clone())
+            .collect::<Vec<_>>();
         if methods.is_empty() {
             return self
                 .method_not_found(source, request.member)
-                .map(InvocationPlan::Complete);
-        }
-        if let Some(source_methods) = &source_methods
-            && self.inherent_family_is_inaccessible(context.module, source_methods)?
-        {
-            return self
-                .type_error(
-                    source,
-                    request.member.origin(),
-                    "VISIBILITY_VIOLATION",
-                    "visibility violation: inherent method family is private",
-                    BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned)
                 .map(InvocationPlan::Complete);
         }
         let mut candidates = Vec::with_capacity(methods.len());
@@ -244,18 +207,89 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     call: request.call.clone(),
                     ty: request.ty,
                 },
-                if concrete {
-                    DispatchSelection::QualifiedConcrete {
-                        owner,
-                        member: request.member.clone(),
-                        candidates,
-                    }
-                } else {
-                    DispatchSelection::QualifiedTrait {
-                        owner: owner.target,
-                        member: request.member.clone(),
-                        candidates,
-                    }
+                DispatchSelection::QualifiedTrait {
+                    owner: owner.target,
+                    member: request.member.clone(),
+                    candidates,
+                },
+                NormalContinuation::Present,
+            )),
+        )
+    }
+
+    fn prepare_qualified_inherent_call(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        request: QualifiedMemberCallRequest<'_>,
+        owner: QualifiedMethodOwner,
+        name: &NameKey,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
+        let family =
+            match self.inherent_method_family(source, request.origin, &owner.target, name)? {
+                Outcome::Known(Some(family)) => family,
+                Outcome::Known(None) => {
+                    return self
+                        .method_not_found(source, request.member)
+                        .map(InvocationPlan::Complete);
+                }
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+        if self.inaccessible_inherent_family(context.module, &family)? {
+            return self
+                .type_error(
+                    source,
+                    request.member.origin(),
+                    "VISIBILITY_VIOLATION",
+                    "visibility violation: inherent method family is private",
+                    BTreeMap::new(),
+                )
+                .map(Outcome::Poisoned)
+                .map(InvocationPlan::Complete);
+        }
+        let templates = match self.inherent_family_templates(&family)? {
+            Outcome::Known(templates) => templates,
+            outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+        };
+        let candidates = templates
+            .into_iter()
+            .map(|template| {
+                let bindings =
+                    Self::bind_call_argument_indices(template.callable(), &request.call.arguments)
+                        .ok();
+                QualifiedConcreteCandidate { template, bindings }
+            })
+            .collect::<Vec<_>>();
+        if candidates
+            .iter()
+            .all(|candidate| candidate.bindings.is_none())
+        {
+            let first = candidates
+                .first()
+                .ok_or(BodyTypingError::EmptyDeclarationSet)?;
+            return Ok(InvocationPlan::Complete(
+                self.bind_call_slots(
+                    source,
+                    request.origin,
+                    first.template.callable(),
+                    &request.call.arguments,
+                )?
+                .map(|_| unreachable!()),
+            ));
+        }
+        self.advance_dispatch_arguments(
+            context,
+            Box::new(DispatchArgumentsFrame::new(
+                DispatchRequest {
+                    expression: request.expression,
+                    origin: request.origin,
+                    call: request.call.clone(),
+                    ty: request.ty,
+                },
+                DispatchSelection::QualifiedConcrete {
+                    owner,
+                    member: request.member.clone(),
+                    candidates,
                 },
                 NormalContinuation::Present,
             )),
@@ -318,37 +352,61 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let subject = self.method_subject(value.ty)?;
         let name =
             NameKey::from_hir(&frame.member).expect("valid method name has canonical spelling");
-        let inherent_targets = self.inherent_method_targets(subject, &name)?;
-        let (trait_tier, candidates) = if inherent_targets.is_empty() {
-            let candidates = match self.trait_method_candidates(
-                module,
-                source,
-                frame.request.origin,
-                subject,
-                &name,
-            )? {
-                Outcome::Known(candidates) => candidates,
+        let family =
+            match self.receiver_inherent_family(source, frame.request.origin, subject, &name)? {
+                Outcome::Known(family) => family,
                 outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
             };
-            (true, candidates)
-        } else {
-            if self.inherent_family_is_inaccessible(module, &inherent_targets)? {
-                return self
-                    .type_error(
-                        source,
-                        frame.member.origin(),
-                        "VISIBILITY_VIOLATION",
-                        "visibility violation: inherent method family is private",
-                        BTreeMap::new(),
-                    )
-                    .map(Outcome::Poisoned)
-                    .map(InvocationPlan::Complete);
+        let (trait_tier, candidates) = match family {
+            None => {
+                let candidates = match self.trait_method_candidates(
+                    module,
+                    source,
+                    frame.request.origin,
+                    subject,
+                    &name,
+                )? {
+                    Outcome::Known(candidates) => candidates,
+                    outcome => {
+                        return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!())));
+                    }
+                };
+                (true, candidates)
             }
-            let candidates = match self.inherent_method_candidates(subject, &inherent_targets)? {
-                Outcome::Known(candidates) => candidates,
-                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
-            };
-            (false, candidates)
+            Some(family) => {
+                if self.inaccessible_inherent_family(module, &family)? {
+                    return self
+                        .type_error(
+                            source,
+                            frame.member.origin(),
+                            "VISIBILITY_VIOLATION",
+                            "visibility violation: inherent method family is private",
+                            BTreeMap::new(),
+                        )
+                        .map(Outcome::Poisoned)
+                        .map(InvocationPlan::Complete);
+                }
+                let templates = match self.inherent_family_templates(&family)? {
+                    Outcome::Known(templates) => templates,
+                    outcome => {
+                        return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!())));
+                    }
+                };
+                let mut candidates = Vec::new();
+                for template in templates
+                    .into_iter()
+                    .filter(InherentMethodTemplate::has_receiver)
+                {
+                    match self.inherent_template_candidate(template, Some(subject))? {
+                        Outcome::Known(Some(candidate)) => candidates.push(candidate),
+                        Outcome::Known(None) => {}
+                        outcome => {
+                            return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!())));
+                        }
+                    }
+                }
+                (false, candidates)
+            }
         };
         if candidates.is_empty() {
             return self
@@ -566,6 +624,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Known(arguments) => arguments,
             outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
         };
+        if !explicit.is_empty()
+            && !selection
+                .candidates
+                .iter()
+                .any(|candidate| candidate.explicit_parameters.len() == explicit.len())
+        {
+            return self
+                .type_argument_inference_failure(source, request.origin)
+                .map(InvocationPlan::Complete);
+        }
         let mut applicable = Vec::new();
         for candidate in &selection.candidates {
             let Ok(bindings) =
@@ -597,7 +665,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     .zip(explicit.iter().copied()),
             );
             if exact_parameter_match(
-                self.signatures.types(),
+                self.signatures.types_mut(),
                 &candidate.callable,
                 &actual,
                 &mut replacements,
@@ -654,6 +722,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
             };
 
+        if !explicit.is_empty()
+            && !candidates
+                .iter()
+                .any(|candidate| candidate.callable.generic_parameters().len() == explicit.len())
+        {
+            return self
+                .type_argument_inference_failure(source, request.origin)
+                .map(InvocationPlan::Complete);
+        }
+
         let mut applicable = Vec::new();
         let mut missing_subject = None;
         let mut found_candidates = false;
@@ -698,7 +776,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .zip(explicit.iter().copied()),
                 );
                 if exact_parameter_match(
-                    self.signatures.types(),
+                    self.signatures.types_mut(),
                     &candidate.callable,
                     &actual,
                     &mut replacements,
@@ -735,14 +813,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: DispatchRequest,
         qualified_owner: &QualifiedMethodOwner,
         member: &Name,
-        candidates: Vec<OverloadCandidate>,
+        candidates: Vec<QualifiedConcreteCandidate>,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let source = context.source;
         let owner = &qualified_owner.target;
         let presented = candidates
             .iter()
-            .map(|candidate| candidate.callable.clone())
+            .map(|candidate| candidate.template.callable().clone())
             .collect::<Vec<_>>();
         let explicit =
             match self.resolve_explicit_method_arguments(source, &request.call.type_arguments)? {
@@ -750,63 +828,83 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
             };
 
+        if !explicit.is_empty()
+            && !candidates
+                .iter()
+                .any(|candidate| candidate.template.explicit_parameters().len() == explicit.len())
+        {
+            return self
+                .type_argument_inference_failure(source, request.origin)
+                .map(InvocationPlan::Complete);
+        }
+
         let mut applicable = Vec::new();
-        for OverloadCandidate { callable, bindings } in candidates {
+        for QualifiedConcreteCandidate { template, bindings } in candidates {
             let Some(bindings) = bindings else {
                 continue;
             };
-            let receiver_ty = typed_arguments[&request.call.arguments[bindings[0]].value].ty;
-            let subject = self.method_subject(receiver_ty)?;
-            let TypeKind::Nominal {
-                head: NominalHead::Declaration(found),
-                ..
-            } = self.signatures.types().kind(subject)?
-            else {
-                continue;
-            };
-            if found != owner {
-                continue;
-            }
-            if qualified_owner
-                .fixed_subject
-                .is_some_and(|fixed| fixed != subject)
-            {
-                continue;
-            }
-            let CanonicalTarget::Source(method) = callable.declaration() else {
-                unreachable!("source struct child is a source method");
-            };
-            let methods = match self.inherent_method_candidates(subject, &[*method])? {
-                Outcome::Known(methods) => methods,
-                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
-            };
-            for candidate in methods
-                .into_iter()
-                .filter(|candidate| candidate.callable.id() == callable.id())
-            {
-                if !explicit.is_empty() && explicit.len() != candidate.explicit_parameters.len() {
+            let subject = if template.has_receiver() {
+                let Some(&receiver_index) = bindings.first() else {
+                    continue;
+                };
+                let subject = self.method_subject(
+                    typed_arguments[&request.call.arguments[receiver_index].value].ty,
+                )?;
+                let TypeKind::Nominal {
+                    head: NominalHead::Declaration(found),
+                    ..
+                } = self.signatures.types().kind(subject)?
+                else {
+                    continue;
+                };
+                if found != owner
+                    || qualified_owner
+                        .fixed_subject
+                        .is_some_and(|fixed| fixed != subject)
+                {
                     continue;
                 }
-                let actual = bindings
+                Some(subject)
+            } else {
+                qualified_owner.fixed_subject
+            };
+            let candidate = match self.inherent_template_candidate(template, subject)? {
+                Outcome::Known(Some(candidate)) => candidate,
+                Outcome::Known(None) => continue,
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+            if !explicit.is_empty() && explicit.len() != candidate.explicit_parameters.len() {
+                continue;
+            }
+            let actual = bindings
+                .iter()
+                .map(|&index| typed_arguments[&request.call.arguments[index].value].ty)
+                .collect::<Vec<_>>();
+            let mut replacements = candidate.preset_replacements.clone();
+            replacements.extend(
+                candidate
+                    .explicit_parameters
                     .iter()
-                    .map(|&index| typed_arguments[&request.call.arguments[index].value].ty)
-                    .collect::<Vec<_>>();
-                let mut replacements = candidate.preset_replacements.clone();
-                replacements.extend(
-                    candidate
-                        .explicit_parameters
+                    .cloned()
+                    .zip(explicit.iter().copied()),
+            );
+            if exact_parameter_match(
+                self.signatures.types_mut(),
+                &candidate.callable,
+                &actual,
+                &mut replacements,
+            )? {
+                if let Some(constraint) = &candidate.owner_constraint
+                    && candidate
+                        .callable
+                        .generic_parameters()
                         .iter()
-                        .cloned()
-                        .zip(explicit.iter().copied()),
-                );
-                if exact_parameter_match(
-                    self.signatures.types(),
-                    &candidate.callable,
-                    &actual,
-                    &mut replacements,
-                )? {
-                    applicable.push(candidate);
+                        .all(|parameter| replacements.contains_key(parameter))
+                    && !constraint.matches(self.signatures.types_mut(), &replacements)?
+                {
+                    continue;
                 }
+                applicable.push(candidate);
             }
         }
 
@@ -932,7 +1030,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     .collect()
             };
             if exact_parameter_match(
-                self.signatures.types(),
+                self.signatures.types_mut(),
                 callable,
                 &actual,
                 &mut replacements,
