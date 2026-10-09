@@ -642,6 +642,7 @@ fn write_declaration_kind(builder: &mut CanonicalFingerprintBuilder, kind: Decla
         DeclarationKind::StorageField => 14,
         DeclarationKind::Property => 15,
         DeclarationKind::GenericParameter => 16,
+        DeclarationKind::PrimitiveType => 17,
     });
 }
 

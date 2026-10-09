@@ -132,7 +132,7 @@ impl DiagnosticTypeNames {
                 }
                 if matches!(
                     lookup_external_module_type(
-                        external,
+                        Some(external),
                         declaration.module(),
                         declaration.name()
                     ),
@@ -148,7 +148,7 @@ impl DiagnosticTypeNames {
                     );
                 }
                 if matches!(
-                    lookup_prelude_type(external, declaration.name()),
+                    lookup_prelude_type(Some(external), declaration.name()),
                     TypeNameLookup::Unique(ref found) if found == &target
                 ) {
                     prelude_bindings
@@ -227,6 +227,25 @@ impl DiagnosticTypeNames {
         module: ModuleId,
         generic_names: &BTreeSet<Box<str>>,
     ) -> Option<String> {
+        if let CanonicalTarget::Primitive(primitive) = target {
+            let name =
+                NameKey::new(primitive.spelling(), false).expect("primitive type names are valid");
+            let same_binding = self
+                .source_bindings
+                .get(&(module, target.clone()))
+                .is_some_and(|names| names.contains(&name));
+            let prelude_visible = !self.prelude_blocked_modules.contains(&module)
+                && !self.source_occupied.contains(&(module, name));
+            return Some(
+                if !generic_names.contains(primitive.spelling())
+                    && (same_binding || prelude_visible)
+                {
+                    primitive.spelling().to_owned()
+                } else {
+                    format!("std::prelude::{}", primitive.spelling())
+                },
+            );
+        }
         let mut candidates = Vec::<(usize, String)>::new();
         if let Some(names) = self.source_bindings.get(&(module, target.clone())) {
             candidates.extend(

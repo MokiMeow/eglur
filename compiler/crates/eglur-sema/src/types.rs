@@ -28,6 +28,28 @@ pub enum PrimitiveType {
 }
 
 impl PrimitiveType {
+    pub const ALL: [Self; 19] = [
+        Self::Unit,
+        Self::Bool,
+        Self::Str,
+        Self::I8,
+        Self::I16,
+        Self::I32,
+        Self::I64,
+        Self::U8,
+        Self::U16,
+        Self::U32,
+        Self::U64,
+        Self::F16,
+        Self::Bf16,
+        Self::F32,
+        Self::F64,
+        Self::Complex64,
+        Self::Complex128,
+        Self::Nat,
+        Self::PositiveNat,
+    ];
+
     /// Selects the binary numeric dtype; this does not convert operand values.
     /// Domain scalars and nonnumeric types have no promotion. Bool + Bool selects u8.
     #[must_use]

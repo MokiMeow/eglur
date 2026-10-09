@@ -466,11 +466,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .module(module)
                 .expect("lookup module belongs to collection");
             match lookup_source_module_type(self.collection, self.imports, current, name, false)? {
-                TypeNameLookup::NotFound => self
-                    .external_names
-                    .map_or(TypeNameLookup::Unperformed, |external| {
-                        lookup_prelude_type(external, name)
-                    }),
+                TypeNameLookup::NotFound => lookup_prelude_type(self.external_names, name),
                 found => found,
             }
         } else if let Some(address) = self.qualified_module_address(module, &keys[..keys.len() - 1])
@@ -489,10 +485,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     source_module != module,
                 )?
             } else {
-                self.external_names
-                    .map_or(TypeNameLookup::Unperformed, |external| {
-                        lookup_external_module_type(external, &address, name)
-                    })
+                lookup_external_module_type(self.external_names, &address, name)
             }
         } else if self.external_names.is_none() {
             TypeNameLookup::Unperformed
@@ -573,6 +566,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             self.qualified_module_address(module, &keys[..prefix_len])
                 .is_some_and(|address| {
                     self.collection.module_for_address(&address).is_some()
+                        || address.as_str() == "std::prelude"
                         || self
                             .external_names
                             .is_some_and(|external| external.has_module(&address))
@@ -599,6 +593,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         }
         if let Some(address) = self.qualified_module_address(module, &keys[..keys.len() - 1])
             && (self.collection.module_for_address(&address).is_some()
+                || address.as_str() == "std::prelude"
                 || self
                     .external_names
                     .is_some_and(|external| external.has_module(&address)))
@@ -613,11 +608,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .module(module)
                 .expect("lookup module belongs to collection");
             match lookup_source_module_type(self.collection, self.imports, current, base, false)? {
-                TypeNameLookup::NotFound => self
-                    .external_names
-                    .map_or(TypeNameLookup::Unperformed, |external| {
-                        lookup_prelude_type(external, base)
-                    }),
+                TypeNameLookup::NotFound => lookup_prelude_type(self.external_names, base),
                 found => found,
             }
         } else if let Some(address) = self.qualified_module_address(module, &keys[..keys.len() - 2])
@@ -635,10 +626,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     source_module != module,
                 )?
             } else {
-                self.external_names
-                    .map_or(TypeNameLookup::Unperformed, |external| {
-                        lookup_external_module_type(external, &address, base)
-                    })
+                lookup_external_module_type(self.external_names, &address, base)
             }
         } else if self.external_names.is_none() {
             TypeNameLookup::Unperformed
@@ -666,6 +654,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 | DeclarationKind::OpaqueType
                 | DeclarationKind::TypeAlias
                 | DeclarationKind::Trait
+                | DeclarationKind::PrimitiveType
         )))
     }
 
@@ -674,6 +663,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         target: &CanonicalTarget,
     ) -> Result<DeclarationKind, SignatureResolutionError> {
         match target {
+            CanonicalTarget::Primitive(_) => Ok(DeclarationKind::PrimitiveType),
             CanonicalTarget::Source(id) => Ok(self
                 .collection
                 .declaration(*id)

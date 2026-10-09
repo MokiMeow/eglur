@@ -374,6 +374,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
     pub(super) fn target_label(&self, target: &CanonicalTarget) -> String {
         match target {
+            CanonicalTarget::Primitive(primitive) => primitive.spelling().to_owned(),
             CanonicalTarget::Source(declaration) => self
                 .collection
                 .declaration(*declaration)

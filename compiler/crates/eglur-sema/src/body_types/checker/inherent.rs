@@ -77,6 +77,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         name: &NameKey,
     ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyTypingError> {
         match owner {
+            CanonicalTarget::Primitive(owner) => {
+                self.recorder.refuse_input(
+                    crate::UnavailableCompileInput::PrimitiveInherentInventory { owner: *owner },
+                    SemanticLocation::origin(source.file(), origin),
+                );
+                Ok(Outcome::Unperformed)
+            }
             CanonicalTarget::Source(owner) => {
                 let targets =
                     self.collection

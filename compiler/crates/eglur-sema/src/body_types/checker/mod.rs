@@ -573,6 +573,7 @@ enum ResolvedTargetKind {
     Impl,
     Struct,
     NominalType,
+    PrimitiveType,
     Enum,
     Field,
     TypeAlias,
@@ -586,7 +587,12 @@ enum ResolvedTargetKind {
 impl ResolvedTargetKind {
     const fn is_type_namespace_target(self) -> bool {
         match self {
-            Self::Trait | Self::Struct | Self::NominalType | Self::Enum | Self::TypeAlias => true,
+            Self::Trait
+            | Self::Struct
+            | Self::NominalType
+            | Self::PrimitiveType
+            | Self::Enum
+            | Self::TypeAlias => true,
             Self::Function
             | Self::VariantConstructor
             | Self::Impl
@@ -609,6 +615,7 @@ impl ResolvedTargetKind {
             DeclarationKind::Impl => Self::Impl,
             DeclarationKind::Struct => Self::Struct,
             DeclarationKind::OpaqueType => Self::NominalType,
+            DeclarationKind::PrimitiveType => Self::PrimitiveType,
             DeclarationKind::Enum => Self::Enum,
             DeclarationKind::EnumVariantField | DeclarationKind::StorageField => Self::Field,
             DeclarationKind::TypeAlias => Self::TypeAlias,
@@ -649,6 +656,7 @@ impl ResolvedTargetKind {
             Self::Impl => "impl",
             Self::Struct => "struct",
             Self::NominalType => "nominal_type",
+            Self::PrimitiveType => "primitive_type",
             Self::Enum => "enum",
             Self::Field => "field",
             Self::TypeAlias => "type_alias",

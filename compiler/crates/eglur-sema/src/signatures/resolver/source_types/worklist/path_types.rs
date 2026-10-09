@@ -43,19 +43,6 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 };
                 return Ok(Self::position_type(result, None));
             }
-            if let Some(primitive) = crate::PrimitiveType::from_spelling(&path_text) {
-                let result = if arguments.is_empty() {
-                    Resolution::Known(self.types.primitive(primitive)?)
-                } else {
-                    Resolution::Poisoned(self.record_arity_error(
-                        source,
-                        origin,
-                        0,
-                        arguments.len(),
-                    )?)
-                };
-                return Ok(Self::position_type(result, None));
-            }
             if let Some(intrinsic) = IntrinsicNominal::from_spelling(&path_text) {
                 if arguments.len() != intrinsic.arity() {
                     return Ok(Self::position_type(
@@ -201,6 +188,14 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 return Ok(Self::position_type(Resolution::Unperformed, None));
             }
         };
+        if let CanonicalTarget::Primitive(primitive) = target {
+            let result = if arguments.is_empty() {
+                Resolution::Known(self.types.primitive(primitive)?)
+            } else {
+                Resolution::Poisoned(self.record_arity_error(source, origin, 0, arguments.len())?)
+            };
+            return Ok(Self::position_type(result, Some(target)));
+        }
         let kind = self.target_kind(&target)?;
         match self.source_head_state(&target)? {
             Resolution::Known(()) => {}
@@ -219,7 +214,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let head = NominalHead::Declaration(target.clone());
                 let Some(expected) = self.types.nominal_arity(&head) else {
                     return match target {
-                        CanonicalTarget::External(_) => {
+                        CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
                             Ok(Self::position_type(Resolution::Unperformed, Some(target)))
                         }
                         CanonicalTarget::Source(_) => {

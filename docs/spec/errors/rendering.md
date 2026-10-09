@@ -111,6 +111,9 @@ Rules:
    `T::Item`.
 3. Intrinsic and prelude types use their canonical names, including `Unit`,
    `Never`, `Bool`, `Str`, `i64`, `Nat`, `Opt`, and `Res`.
+   A shadowed primitive name uses `std::prelude::<name>` to distinguish the
+   canonical primitive from the visible binding. Import aliases do not replace
+   canonical primitive spellings.
 4. A named non-prelude declaration uses the shortest source-writable path that
    resolves to that declaration at the diagnostic site. Ties are resolved by
    the canonical lexical text order in `../language/invariants.md`. A

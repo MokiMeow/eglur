@@ -453,6 +453,13 @@ Bindings found in higher tiers shadow lower tiers. Within the local tier, a
 nearer active lexical scope shadows an outer scope. Local declarations are not
 hoisted and cannot affect lookup at an earlier source position.
 
+Primitive scalar names follow these type-namespace tiers and the generic
+parameter precedence defined below. Type annotations and type-owner qualifiers
+MUST resolve the same visible binding. Explicit `std::prelude::<name>` type
+paths preserve the canonical primitive identity even when its unqualified
+name is shadowed. Constructor dtype arguments use this same lookup and alias
+normalization, as specified in `../stdlib/tensor.md`.
+
 After context-specific classification, if no candidate exists in any applicable
 tier for an ordinary unqualified identifier lookup, compilation MUST fail with
 `NAME_NOT_FOUND`. A form with a more specific diagnostic keeps that diagnostic;

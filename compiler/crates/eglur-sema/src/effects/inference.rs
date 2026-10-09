@@ -184,6 +184,9 @@ fn infer_effects(
                     .callable(*signature_id)
                     .ok_or(EffectAnalysisError::UnknownCallableSignature(*signature_id))?;
                 match target.clone() {
+                    CanonicalTarget::Primitive(_) => {
+                        solved.insert(target, SolvedFact::Known(EffectSummary::Unknown));
+                    }
                     CanonicalTarget::External(declaration) => {
                         let summary = trusted
                             .and_then(|environment| environment.summary(&declaration))

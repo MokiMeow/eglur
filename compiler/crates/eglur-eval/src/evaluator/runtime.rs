@@ -564,6 +564,7 @@ impl<'a> Evaluator<'a> {
                 *argument = self.store.borrow_temporary(value);
             }
             return match callable.target {
+                CanonicalTarget::Primitive(_) => invalid_flow(),
                 CanonicalTarget::Source(declaration) => {
                     self.call_source(declaration, arguments, callable.witnesses)
                 }
@@ -629,6 +630,7 @@ impl<'a> Evaluator<'a> {
                     Err(_) => return invalid_flow(),
                 };
                 match &selected.target {
+                    CanonicalTarget::Primitive(_) => invalid_flow(),
                     CanonicalTarget::Source(declaration) => {
                         let witnesses = if selected.method.is_some() {
                             let Some(projected) = self.witness_store.method_frame(
@@ -689,6 +691,7 @@ impl<'a> Evaluator<'a> {
             values.push(value);
         }
         match declaration {
+            CanonicalTarget::Primitive(_) => invalid_flow(),
             CanonicalTarget::External(external) => self.eval_hook(
                 external,
                 declaration.clone(),

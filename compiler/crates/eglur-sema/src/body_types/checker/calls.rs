@@ -9,6 +9,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         written: &CanonicalTarget,
     ) -> Result<Outcome<QualifiedMethodOwner>, BodyTypingError> {
+        if let CanonicalTarget::Primitive(owner) = written {
+            self.recorder.refuse_input(
+                crate::UnavailableCompileInput::PrimitiveInherentInventory { owner: *owner },
+                SemanticLocation::origin(source.file(), origin),
+            );
+            return Ok(Outcome::Unperformed);
+        }
         match self.signatures.declaration(written) {
             FactState::Known(DeclarationSignature::TypeAlias {
                 generic_parameters,
@@ -33,6 +40,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .map(Outcome::Poisoned);
                 }
                 let value = *value;
+                if let TypeKind::Primitive(primitive) = self.signatures.types().kind(value)? {
+                    return self.qualified_method_owner(
+                        source,
+                        origin,
+                        &CanonicalTarget::Primitive(*primitive),
+                    );
+                }
                 let TypeKind::Nominal {
                     head: NominalHead::Declaration(target),
                     ..

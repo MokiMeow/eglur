@@ -26,7 +26,9 @@ impl DiagnosticTypeRenderer<'_> {
                         continue;
                     }
                     TypeKind::Primitive(primitive) => {
-                        rendered.push(primitive.spelling().to_owned());
+                        rendered.push(
+                            self.render_target_path(&CanonicalTarget::Primitive(*primitive))?,
+                        );
                         continue;
                     }
                     TypeKind::GenericParameter(parameter) => {

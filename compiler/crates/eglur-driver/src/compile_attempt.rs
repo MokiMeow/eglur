@@ -292,6 +292,12 @@ impl CompileAttempt {
                         let mut label = entry.capability().stable_key().to_owned();
                         for refusal in entry.input_refusals() {
                             match refusal.input() {
+                                UnavailableCompileInput::PrimitiveInherentInventory { owner } => {
+                                    label.push_str(&format!(
+                                        " (missing inherent inventory: std::prelude::{})",
+                                        owner.spelling()
+                                    ));
+                                }
                                 UnavailableCompileInput::TrustedInherentInventory { owner } => {
                                     label.push_str(&format!(
                                         " (missing inherent inventory: {})",
@@ -608,10 +614,18 @@ fn capability_trace_json(trace: &CapabilityTrace) -> Value {
 }
 
 fn compile_input_refusal_json(refusal: &CompileInputRefusal) -> Value {
-    let UnavailableCompileInput::TrustedInherentInventory { owner } = refusal.input();
+    let (kind, owner) = match refusal.input() {
+        UnavailableCompileInput::TrustedInherentInventory { owner } => {
+            ("trusted_inherent_inventory", owner.as_str().to_owned())
+        }
+        UnavailableCompileInput::PrimitiveInherentInventory { owner } => (
+            "primitive_inherent_inventory",
+            format!("std::prelude::{}", owner.spelling()),
+        ),
+    };
     json!({
-        "kind": "trusted_inherent_inventory",
-        "owner": owner.as_str(),
+        "kind": kind,
+        "owner": owner,
         "locations": refusal.locations().iter().map(|location| {
             json!({
                 "file": location.file().get(),

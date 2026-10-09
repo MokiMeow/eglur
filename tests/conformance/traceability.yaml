@@ -274,7 +274,7 @@ coverage:
         test_ids: [TYC-bare-integer-literal-does-not-gain-overloads-by-bounded-fit, TYC-call-argument-type-mismatch-is-rejected, TYC-expected-generic-owner-payload-mismatch-is-rejected, TYC-fixed-alias-owner-rejects-different-call-receiver, TYC-fixed-alias-owner-rejects-different-fn-receiver, TYC-fn-type-rejects-callable-arity-mismatch, TYC-fn-type-rejects-callable-result-mismatch, TYC-nested-block-type-mismatch-belongs-to-call-argument, TYC-nonliteral-constructor-constraint-contextualizes-integer-literal, TYC-raw-pointer-const-to-mut-argument-is-not-weakened, TYC-raw-pointer-pointee-mismatch-is-rejected-at-extern-sink, TYC-res-err-constructor-payload-mismatch-is-rejected, TYC-res-ok-constructor-payload-mismatch-is-rejected]
       - id: tensor-dtypes
         file: tensor/dtypes.yaml
-        test_ids: [DTP-fixed-dtype-constructor-rejects-other-supported-dtype, DTP-unsupported-normalized-constructor-dtype-is-rejected]
+        test_ids: [DTP-fixed-dtype-constructor-rejects-other-supported-dtype, DTP-shadowed-dtype-name-does-not-redefine-fixed-constructor-family, DTP-unsupported-normalized-constructor-dtype-is-rejected]
       - id: tensor-grad
         file: tensor/grad.yaml
         test_ids: [TGD-grad-rejects-tensorview-primal-result-family, TGD-value-and-grad-rejects-tensorview-primal-result-family]
@@ -401,6 +401,9 @@ coverage:
     policy: hard_required_asserted
     status: asserted
     asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-primitive-type-binding-is-not-a-struct-constructor]
       - id: core-typecheck
         file: core/typecheck.yaml
         test_ids: [TYC-struct-literal-rejects-enum-target-kind, TYC-transparent-alias-does-not-introduce-constructor-head, TYC-variant-constructor-rejects-function-target-kind]
@@ -1448,7 +1451,7 @@ coverage:
         test_ids: [CFL-bare-user-enum-variant-pattern-name-is-ambiguous]
       - id: core-modules
         file: core/modules.yaml
-        test_ids: [MOD-duplicate-imported-binding-name-is-ambiguous]
+        test_ids: [MOD-ambiguous-scalar-type-import-does-not-fall-back-to-prelude, MOD-duplicate-imported-binding-name-is-ambiguous]
       - id: core-traits
         file: core/traits.yaml
         test_ids: [TRT-trait-associated-type-names-must-be-unique]
@@ -2358,6 +2361,9 @@ coverage:
     policy: hard_required_asserted
     status: asserted
     asserted_in:
+      - id: core-modules
+        file: core/modules.yaml
+        test_ids: [MOD-shadowed-scalar-literal-keeps-canonical-primitive-type]
       - id: core-result
         file: core/result.yaml
         test_ids: [RES-question-mark-error-outside-declared-union-is-rejected, RES-result-block-final-yield-does-not-auto-wrap-payload, RES-result-block-final-yield-family-must-match-question-mark-kind]

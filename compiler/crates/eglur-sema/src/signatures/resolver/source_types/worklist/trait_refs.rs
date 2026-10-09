@@ -74,7 +74,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         }
         let Some(info) = self.trait_info.get(&target).cloned() else {
             return match &target {
-                CanonicalTarget::External(_) => {
+                CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
                     Ok(TraitPlan::complete(Resolution::Unperformed, Some(target)))
                 }
                 CanonicalTarget::Source(_) => {

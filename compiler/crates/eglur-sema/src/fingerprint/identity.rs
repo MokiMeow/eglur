@@ -75,6 +75,7 @@ impl StableDeclarationKey {
 pub enum StableTargetKey {
     Source(StableDeclarationKey),
     External(ExternalDefId),
+    Primitive(crate::PrimitiveType),
 }
 
 impl StableTargetKey {
@@ -87,6 +88,10 @@ impl StableTargetKey {
             Self::External(key) => {
                 builder.write_u8(1);
                 builder.write_str(key.as_str());
+            }
+            Self::Primitive(primitive) => {
+                builder.write_u8(2);
+                builder.write_str(primitive.spelling());
             }
         }
     }
@@ -113,6 +118,7 @@ impl StableDeclarationKeys {
     #[must_use]
     pub fn target(&self, target: &CanonicalTarget) -> Option<StableTargetKey> {
         match target {
+            CanonicalTarget::Primitive(primitive) => Some(StableTargetKey::Primitive(*primitive)),
             CanonicalTarget::Source(declaration) => self
                 .source(*declaration)
                 .cloned()
@@ -144,7 +150,9 @@ impl StableDeclarationKeys {
                     CanonicalTarget::Source(declaration) => {
                         StableDeclarationError::UnknownDeclaration(*declaration)
                     }
-                    CanonicalTarget::External(_) => unreachable!("external targets are stable"),
+                    CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
+                        unreachable!("non-source targets are stable")
+                    }
                 })?;
         let arguments = signatures
             .types()
@@ -405,6 +413,7 @@ impl<'a> KeyDeriver<'a> {
         target: &CanonicalTarget,
     ) -> Result<StableTargetKey, StableDeclarationError> {
         match target {
+            CanonicalTarget::Primitive(primitive) => Ok(StableTargetKey::Primitive(*primitive)),
             CanonicalTarget::Source(declaration) => {
                 self.derive_one(*declaration).map(StableTargetKey::Source)
             }
@@ -528,7 +537,9 @@ impl StableType {
                 CanonicalTarget::Source(declaration) => {
                     StableDeclarationError::UnknownDeclaration(*declaration)
                 }
-                CanonicalTarget::External(_) => unreachable!("external targets are stable"),
+                CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
+                    unreachable!("non-source targets are stable")
+                }
             })
         })
     }
@@ -819,6 +830,7 @@ pub(crate) fn write_declaration_kind(
         DeclarationKind::StorageField => 14,
         DeclarationKind::Property => 15,
         DeclarationKind::GenericParameter => 16,
+        DeclarationKind::PrimitiveType => 17,
     });
 }
 

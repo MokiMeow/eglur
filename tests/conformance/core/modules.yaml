@@ -1,4 +1,102 @@
 tests:
+- id: MOD-primitive-type-binding-is-not-a-struct-constructor
+  category: modules
+  title: primitive type binding is not a struct constructor
+  code: |
+    fn bad() -> Unit {
+      _ = std::prelude::i32{}
+      yield ()
+    }
+  expect:
+    compile_error:
+      code: CONSTRUCTOR_TARGET_KIND_MISMATCH
+      message_contains:
+      - constructor
+      - target
+      - kind
+      - mismatch
+      data_keys:
+      - target
+      - expected_kind
+      - actual_kind
+      data_equals:
+        target: i32
+        expected_kind: struct
+        actual_kind: primitive_type
+- id: MOD-source-scalar-name-shadows-primitive-type-binding
+  category: modules
+  title: source scalar name shadows the primitive type binding
+  code: |
+    struct i32 {
+      field flag: Bool
+      fn read(self: &Self) -> Bool = self.flag
+    }
+    fn read(value: i32) -> Bool = i32.read(&value)
+    fn main!() -> Res[Str, Str] {
+      let value = i32{flag: true}
+      yield Ok(to_str(read(value)))
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: MOD-generic-scalar-name-shadows-primitive-type-binding
+  category: modules
+  title: generic scalar name shadows the primitive type binding
+  code: |
+    fn identity[i32](value: i32) -> i32 = value
+    fn main!() -> Res[Str, Str] = Ok(to_str(identity::[Bool](true)))
+  expect:
+    value:
+      kind: Ok
+      repr: '"true"'
+- id: MOD-qualified-primitive-path-and-reexport-preserve-identity
+  category: modules
+  title: qualified primitive path and reexport preserve identity
+  files:
+    main.eglur: |
+      import facade::Count
+      struct i32 {}
+      fn identity(value: Count) -> std::prelude::i32 = value
+      fn main!() -> Res[Str, Str] = Ok(to_str(identity(7)))
+    facade.eglur: |
+      pub import std::prelude::i32 as Count
+  file_set_root: .
+  entry: main.eglur
+  expect:
+    value:
+      kind: Ok
+      repr: '"7"'
+- id: MOD-ambiguous-scalar-type-import-does-not-fall-back-to-prelude
+  category: modules
+  title: ambiguous scalar type import does not fall back to prelude
+  code: |
+    import std::prelude::i32
+    import std::prelude::Bool as i32
+    fn identity(value: i32) -> i32 = value
+  expect:
+    compile_error:
+      code: NAME_AMBIGUOUS
+      message_contains:
+      - ambiguous
+      - name
+      data_keys: []
+- id: MOD-shadowed-scalar-literal-keeps-canonical-primitive-type
+  category: modules
+  title: shadowed scalar literal keeps its canonical primitive type
+  code: |
+    struct Bool {}
+    fn bad() -> Bool = true
+  expect:
+    compile_error:
+      code: RETURN_TYPE_MISMATCH
+      message_contains:
+      - return
+      - type
+      - mismatch
+      data_keys:
+      - expected_type
+      - actual_type
 - id: MOD-module-declaration-and-bang-alias-import-parse-and-execute
   category: modules
   title: module declaration and bang alias import parse and execute

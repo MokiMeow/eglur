@@ -806,7 +806,7 @@ fn qualified_braced_forms_resolve_direct_structs_and_owned_variants() {
         })
         .filter_map(|target| match target {
             CanonicalTarget::Source(id) => analysis.declarations.declaration(*id),
-            CanonicalTarget::External(_) => None,
+            CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => None,
         })
         .map(|declaration| declaration.kind())
         .collect::<BTreeSet<_>>();
@@ -1053,6 +1053,63 @@ fn external_environment_represents_empty_modules_explicitly() {
     let environment = ExternalNameEnvironment::new([empty.clone()], [], []).unwrap();
 
     assert!(environment.has_module(&empty));
+}
+
+#[test]
+fn trusted_declarations_cannot_fabricate_primitive_binding_identity() {
+    let result = ExternalDeclaration::new(
+        ExternalDefId::new("fake.primitive").unwrap(),
+        module(&["fake"]),
+        NameKey::new("i32", false).unwrap(),
+        DeclarationKind::PrimitiveType,
+    );
+    assert!(matches!(
+        result,
+        Err(
+            eglur_sema::ExternalEnvironmentError::CompilerOwnedDeclarationKind(
+                DeclarationKind::PrimitiveType
+            )
+        )
+    ));
+}
+
+#[test]
+fn primitive_type_bindings_do_not_hide_same_named_trusted_values() {
+    let prelude = module(&["std", "prelude"]);
+    let value = ExternalDefId::new("std.prelude.i32.value").unwrap();
+    let declaration = ExternalDeclaration::new(
+        value.clone(),
+        prelude.clone(),
+        NameKey::new("i32", false).unwrap(),
+        DeclarationKind::Function,
+    )
+    .unwrap();
+    let external = ExternalNameEnvironment::new([prelude], [declaration], [value.clone()]).unwrap();
+    let analysis = analyze(
+        vec![(
+            "main.eglur",
+            "import std::prelude::i32 as Scalar\nfn f() -> i32 { _ = std::prelude::i32()\n_ = Scalar()\nyield 0 }\n",
+        )],
+        &[&[0]],
+        &CapabilitySet::resolver(true),
+        Some(&external),
+    );
+    assert!(codes(&analysis.diagnostics).is_empty());
+    assert_eq!(
+        analysis
+            .names
+            .facts()
+            .filter(|(_, fact)| {
+                matches!(fact, SemanticFact::Known(ResolvedName::Declarations(targets))
+            if targets.as_ref() == [CanonicalTarget::External(value.clone())])
+            })
+            .count(),
+        2
+    );
+    assert!(analysis.declarations.modules().flat_map(|module| module.imports()).any(|import| {
+        matches!(analysis.imports.fact(import.id()), FactState::Known(bindings) if bindings.iter().any(|binding|
+            binding.targets() == [CanonicalTarget::Primitive(eglur_sema::PrimitiveType::I32)]))
+    }));
 }
 
 #[test]

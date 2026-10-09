@@ -176,6 +176,9 @@ fn type_error_diagnostic(
 
 pub(crate) fn source_obligation_key(target: &crate::CanonicalTarget) -> SourceObligationKey {
     let key = match target {
+        crate::CanonicalTarget::Primitive(primitive) => {
+            format!("primitive:{}", primitive.spelling())
+        }
         crate::CanonicalTarget::Source(id) => {
             format!("source:{}:{}", id.module().get(), id.local())
         }

@@ -92,6 +92,9 @@ impl ExternalDeclaration {
         name: NameKey,
         kind: DeclarationKind,
     ) -> Result<Self, ExternalEnvironmentError> {
+        if kind == DeclarationKind::PrimitiveType {
+            return Err(ExternalEnvironmentError::CompilerOwnedDeclarationKind(kind));
+        }
         if kind.namespace().is_none() {
             return Err(ExternalEnvironmentError::UnnameableDeclarationKind(kind));
         }
@@ -328,6 +331,7 @@ fn freeze_multimap<K: Ord>(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExternalEnvironmentError {
+    CompilerOwnedDeclarationKind(DeclarationKind),
     UnnameableDeclarationKind(DeclarationKind),
     DuplicateModule(ModuleAddress),
     DuplicateIdentity(ExternalDefId),
@@ -341,6 +345,12 @@ pub enum ExternalEnvironmentError {
 impl fmt::Display for ExternalEnvironmentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CompilerOwnedDeclarationKind(kind) => {
+                write!(
+                    formatter,
+                    "external declarations cannot define compiler-owned kind {kind:?}"
+                )
+            }
             Self::UnnameableDeclarationKind(kind) => {
                 write!(
                     formatter,
