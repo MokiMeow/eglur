@@ -74,8 +74,14 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         }
         let Some(info) = self.trait_info.get(&target).cloned() else {
             return match &target {
-                CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
+                CanonicalTarget::External(_) => {
                     Ok(TraitPlan::complete(Resolution::Unperformed, Some(target)))
+                }
+                CanonicalTarget::Primitive(primitive) => {
+                    Err(SignatureResolutionError::UnexpectedPrimitiveTarget {
+                        primitive: *primitive,
+                        expected: "a trait declaration",
+                    })
                 }
                 CanonicalTarget::Source(_) => {
                     Err(SignatureResolutionError::MissingTrustedSignature(target))

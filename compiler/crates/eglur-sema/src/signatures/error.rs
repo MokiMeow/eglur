@@ -9,7 +9,7 @@ use crate::type_namespace::TypeNameLookupError;
 use crate::type_rendering::DiagnosticTypeRenderingError;
 use crate::{
     CanonicalTarget, DefId, DuplicateFact, ExternalDefId, InhabitanceError, LanguageItem,
-    TypeStoreError,
+    PrimitiveType, TypeStoreError,
 };
 
 use super::TrustedSignatureError;
@@ -33,6 +33,10 @@ pub enum SignatureResolutionError {
         declaration: ExternalDefId,
     },
     MissingTrustedSignature(CanonicalTarget),
+    UnexpectedPrimitiveTarget {
+        primitive: PrimitiveType,
+        expected: &'static str,
+    },
     InvalidSourceHeadState(DefId),
     MissingDeclarationItem(DefId),
     WrongDeclarationItem(DefId),
@@ -94,6 +98,14 @@ impl fmt::Display for SignatureResolutionError {
             Self::MissingTrustedSignature(target) => {
                 write!(formatter, "missing trusted signature for {target:?}")
             }
+            Self::UnexpectedPrimitiveTarget {
+                primitive,
+                expected,
+            } => write!(
+                formatter,
+                "signature resolution expected {expected}, found primitive {}",
+                primitive.spelling()
+            ),
             Self::InvalidSourceHeadState(declaration) => write!(
                 formatter,
                 "reserved source declaration {:?}:{} has an invalid signature fact state",

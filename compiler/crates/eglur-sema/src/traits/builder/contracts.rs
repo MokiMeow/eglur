@@ -666,8 +666,13 @@ fn normalize_contract_type(
         CanonicalTarget::Source(owner) => {
             environment.normalize_for_owner(*owner, signatures, ty)?
         }
-        CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
+        CanonicalTarget::External(_) => {
             environment.normalize_for_implementation(implementation, signatures, ty)?
+        }
+        CanonicalTarget::Primitive(_) => {
+            return Err(TraitEnvironmentError::UnexpectedImplSignature(
+                implementation.clone(),
+            ));
         }
     };
     Ok(match normalized {
@@ -820,7 +825,12 @@ fn render_trait_callable(
 ) -> Result<String, TraitEnvironmentError> {
     let owner = match method.declaration() {
         CanonicalTarget::Source(owner) => *owner,
-        CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => implementation,
+        CanonicalTarget::External(_) => implementation,
+        CanonicalTarget::Primitive(_) => {
+            return Err(TraitEnvironmentError::UnexpectedMethodSignature(
+                method.declaration().clone(),
+            ));
+        }
     };
     Ok(DiagnosticTypeRenderer::new(
         collection,

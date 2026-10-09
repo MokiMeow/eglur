@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn primitive_shadowing_changes_interface_and_body_semantic_identity() {
+    let files = |shadow: bool| {
+        vec![file(
+            "main.eglur",
+            &format!(
+                "{}pub fn identity(value: i32) -> i32 = value\n",
+                if shadow { "type i32 = Bool\n" } else { "" }
+            ),
+        )]
+    };
+    let primitive = resolve(files(false), "main.eglur", false);
+    let shadowed = resolve(files(true), "main.eglur", false);
+    let explicit = resolve(
+        [file(
+            "main.eglur",
+            "type i32 = Bool\npub fn identity(value: Bool) -> Bool = value\n",
+        )],
+        "main.eglur",
+        false,
+    );
+    assert_eq!(
+        outputs(&shadowed, "main").interface(),
+        outputs(&explicit, "main").interface()
+    );
+    assert_ne!(
+        outputs(&primitive, "main").interface(),
+        outputs(&shadowed, "main").interface()
+    );
+    assert_ne!(
+        outputs(&primitive, "main").body(),
+        outputs(&shadowed, "main").body()
+    );
+}
+
+#[test]
 fn primitive_reexports_fingerprint_identity_not_local_import_positions() {
     let files = |ty: &str, moved: bool| {
         vec![

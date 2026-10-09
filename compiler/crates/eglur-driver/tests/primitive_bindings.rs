@@ -104,6 +104,44 @@ fn explicit_prelude_paths_and_import_aliases_recover_primitive_identity() {
 }
 
 #[test]
+fn primitive_bindings_normalize_in_references_applications_callables_and_fields() {
+    accept(concat!(
+        "import std::prelude::i32 as Scalar\n",
+        "fn reference(value: &i32) -> &Scalar = value\n",
+        "fn option(value: Opt[i32]) -> Opt[Scalar] = value\n",
+        "fn callable(value: Fn(i32) -> i32) -> Fn(Scalar) -> Scalar = value\n",
+        "struct Holder { field value: Scalar }\n",
+        "fn read_field(value: &Holder) -> std::prelude::i32 = value.value\n",
+    ));
+    accept(concat!(
+        "type i32 = Bool\n",
+        "fn reference(value: &i32) -> &Bool = value\n",
+        "fn option(value: Opt[i32]) -> Opt[Bool] = value\n",
+        "fn callable(value: Fn(i32) -> i32) -> Fn(Bool) -> Bool = value\n",
+        "struct Holder { field value: i32 }\n",
+        "fn read_field(value: &Holder) -> Bool = value.value\n",
+    ));
+}
+
+#[test]
+fn primitive_trait_positions_are_source_errors_not_missing_inputs() {
+    for source in [
+        "fn bound[T: i32](value: T) -> T = value\n",
+        "fn bound[T: std::prelude::i32](value: T) -> T = value\n",
+        "import std::prelude::i32 as Scalar\nfn bound[T: Scalar](value: T) -> T = value\n",
+        "type Scalar = i32\nfn bound[T: Scalar](value: T) -> T = value\n",
+        "struct S {}\nimpl i32 for S {}\n",
+        "struct S {}\nimpl std::prelude::i32 for S {}\n",
+    ] {
+        reject(
+            source,
+            SupportProfile::semantic_core_v1(),
+            "TRAIT_BOUND_INVALID",
+        );
+    }
+}
+
+#[test]
 fn tensor_dtype_arguments_and_tensor_annotations_share_shadowing() {
     let source = concat!(
         "import std::tensor::{ones, Tensor}\n",
@@ -319,6 +357,29 @@ fn primitive_type_qualifiers_preserve_identity_without_inventing_method_inventor
                         owner: PrimitiveType::I32
                     }),
             "{source}"
+        );
+    }
+}
+
+#[test]
+fn absent_primitive_inventory_is_not_negative_evidence_for_unknown_methods() {
+    for owner in ["i32", "Number", "std::prelude::i32"] {
+        let source = format!("type Number = i32\nfn use() -> Unit = {owner}.no_such_method()\n");
+        let attempt = check(&source, SupportProfile::semantic_core_v1());
+        let CompileAttempt::Unsupported(attempt) = attempt else {
+            panic!("{source}\n{}", attempt.render_human());
+        };
+        assert!(attempt.diagnostics().diagnostics().is_empty());
+        assert!(
+            attempt
+                .trace()
+                .trace()
+                .unsupported()
+                .flat_map(|entry| entry.input_refusals())
+                .any(|refusal| refusal.input()
+                    == &UnavailableCompileInput::PrimitiveInherentInventory {
+                        owner: PrimitiveType::I32
+                    })
         );
     }
 }

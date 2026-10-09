@@ -3,53 +3,59 @@ use std::fmt;
 
 use crate::{CanonicalTarget, DefId, ExternalDefId, IdentityOverflow, SubstId, TypeId};
 
-/// Concrete language-intrinsic scalar and singleton types.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum PrimitiveType {
-    Unit,
-    Bool,
-    Str,
-    I8,
-    I16,
-    I32,
-    I64,
-    U8,
-    U16,
-    U32,
-    U64,
-    F16,
-    Bf16,
-    F32,
-    F64,
-    Complex64,
-    Complex128,
-    Nat,
-    PositiveNat,
+macro_rules! primitive_types {
+    ($($variant:ident => $spelling:literal),+ $(,)?) => {
+        /// Concrete language-intrinsic scalar and singleton types.
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub enum PrimitiveType {
+            $($variant),+
+        }
+
+        impl PrimitiveType {
+            pub const ALL: [Self; [$(stringify!($variant)),+].len()] = [$(Self::$variant),+];
+
+            /// Returns the canonical source spelling of this primitive.
+            #[must_use]
+            pub const fn spelling(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $spelling),+
+                }
+            }
+
+            #[must_use]
+            pub fn from_spelling(spelling: &str) -> Option<Self> {
+                match spelling {
+                    $($spelling => Some(Self::$variant)),+,
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+primitive_types! {
+    Unit => "Unit",
+    Bool => "Bool",
+    Str => "Str",
+    I8 => "i8",
+    I16 => "i16",
+    I32 => "i32",
+    I64 => "i64",
+    U8 => "u8",
+    U16 => "u16",
+    U32 => "u32",
+    U64 => "u64",
+    F16 => "f16",
+    Bf16 => "bf16",
+    F32 => "f32",
+    F64 => "f64",
+    Complex64 => "complex64",
+    Complex128 => "complex128",
+    Nat => "Nat",
+    PositiveNat => "PositiveNat",
 }
 
 impl PrimitiveType {
-    pub const ALL: [Self; 19] = [
-        Self::Unit,
-        Self::Bool,
-        Self::Str,
-        Self::I8,
-        Self::I16,
-        Self::I32,
-        Self::I64,
-        Self::U8,
-        Self::U16,
-        Self::U32,
-        Self::U64,
-        Self::F16,
-        Self::Bf16,
-        Self::F32,
-        Self::F64,
-        Self::Complex64,
-        Self::Complex128,
-        Self::Nat,
-        Self::PositiveNat,
-    ];
-
     /// Selects the binary numeric dtype; this does not convert operand values.
     /// Domain scalars and nonnumeric types have no promotion. Bool + Bool selects u8.
     #[must_use]
@@ -90,58 +96,6 @@ impl PrimitiveType {
             Self::Complex64 => Some(13),
             Self::Complex128 => Some(14),
             Self::Unit | Self::Str | Self::Nat | Self::PositiveNat => None,
-        }
-    }
-
-    /// Returns the canonical source spelling of this primitive.
-    #[must_use]
-    pub const fn spelling(self) -> &'static str {
-        match self {
-            Self::Unit => "Unit",
-            Self::Bool => "Bool",
-            Self::Str => "Str",
-            Self::I8 => "i8",
-            Self::I16 => "i16",
-            Self::I32 => "i32",
-            Self::I64 => "i64",
-            Self::U8 => "u8",
-            Self::U16 => "u16",
-            Self::U32 => "u32",
-            Self::U64 => "u64",
-            Self::F16 => "f16",
-            Self::Bf16 => "bf16",
-            Self::F32 => "f32",
-            Self::F64 => "f64",
-            Self::Complex64 => "complex64",
-            Self::Complex128 => "complex128",
-            Self::Nat => "Nat",
-            Self::PositiveNat => "PositiveNat",
-        }
-    }
-
-    #[must_use]
-    pub fn from_spelling(spelling: &str) -> Option<Self> {
-        match spelling {
-            "Unit" => Some(Self::Unit),
-            "Bool" => Some(Self::Bool),
-            "Str" => Some(Self::Str),
-            "i8" => Some(Self::I8),
-            "i16" => Some(Self::I16),
-            "i32" => Some(Self::I32),
-            "i64" => Some(Self::I64),
-            "u8" => Some(Self::U8),
-            "u16" => Some(Self::U16),
-            "u32" => Some(Self::U32),
-            "u64" => Some(Self::U64),
-            "f16" => Some(Self::F16),
-            "bf16" => Some(Self::Bf16),
-            "f32" => Some(Self::F32),
-            "f64" => Some(Self::F64),
-            "complex64" => Some(Self::Complex64),
-            "complex128" => Some(Self::Complex128),
-            "Nat" => Some(Self::Nat),
-            "PositiveNat" => Some(Self::PositiveNat),
-            _ => None,
         }
     }
 }
@@ -377,6 +331,9 @@ impl CanonicalTypeStore {
         head: NominalHead,
         arity: usize,
     ) -> Result<(), TypeStoreError> {
+        if let NominalHead::Declaration(CanonicalTarget::Primitive(primitive)) = head {
+            return Err(TypeStoreError::PrimitiveNominalHead(primitive));
+        }
         if let Some(&existing) = self.nominal_arities.get(&head) {
             if existing != arity {
                 return Err(TypeStoreError::ConflictingNominalArity {
@@ -893,6 +850,7 @@ pub enum TypeStoreError {
     UnknownType(TypeId),
     UnknownSubstitution(SubstId),
     UnregisteredNominalHead(NominalHead),
+    PrimitiveNominalHead(PrimitiveType),
     ConflictingNominalArity {
         head: NominalHead,
         existing: usize,
@@ -916,6 +874,13 @@ impl fmt::Display for TypeStoreError {
             }
             Self::UnregisteredNominalHead(head) => {
                 write!(formatter, "unregistered nominal type head {head:?}")
+            }
+            Self::PrimitiveNominalHead(primitive) => {
+                write!(
+                    formatter,
+                    "primitive {} is not a nominal type head",
+                    primitive.spelling()
+                )
             }
             Self::ConflictingNominalArity {
                 head,
@@ -971,6 +936,35 @@ mod tests {
 
     fn external(key: &str) -> CanonicalTarget {
         CanonicalTarget::External(ExternalDefId::new(key).unwrap())
+    }
+
+    #[test]
+    fn primitive_spellings_roundtrip_without_alias_or_case_normalization() {
+        let mut spellings = BTreeSet::new();
+        for primitive in PrimitiveType::ALL {
+            assert!(spellings.insert(primitive.spelling()));
+            assert_eq!(
+                PrimitiveType::from_spelling(primitive.spelling()),
+                Some(primitive)
+            );
+        }
+        for unknown in ["", "bool", "I32", "Int32", "std::prelude::i32"] {
+            assert_eq!(PrimitiveType::from_spelling(unknown), None);
+        }
+    }
+
+    #[test]
+    fn primitive_bindings_cannot_be_admitted_as_nominal_heads() {
+        let mut store = CanonicalTypeStore::new().unwrap();
+        for primitive in PrimitiveType::ALL {
+            let head = NominalHead::Declaration(CanonicalTarget::Primitive(primitive));
+            assert!(store.register_nominal_head(head.clone(), 0).is_err());
+            assert_eq!(store.nominal_arity(&head), None);
+            assert!(store.nominal(head, []).is_err());
+
+            let ty = store.primitive(primitive).unwrap();
+            assert_eq!(store.kind(ty).unwrap(), &TypeKind::Primitive(primitive));
+        }
     }
 
     #[test]

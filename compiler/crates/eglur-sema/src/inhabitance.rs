@@ -344,9 +344,9 @@ impl<'facts> InhabitanceGraph<'facts> {
         arguments: &[TypeId],
     ) -> Result<NodeFormula, InhabitanceError> {
         match head {
-            NominalHead::Declaration(CanonicalTarget::Primitive(_)) => {
-                Ok(NodeFormula::Constant(Inhabitance::Unknown))
-            }
+            NominalHead::Declaration(CanonicalTarget::Primitive(primitive)) => Err(
+                InhabitanceError::TypeStore(TypeStoreError::PrimitiveNominalHead(*primitive)),
+            ),
             NominalHead::Intrinsic(IntrinsicNominal::Opt) => {
                 Ok(NodeFormula::Constant(Inhabitance::Inhabited))
             }

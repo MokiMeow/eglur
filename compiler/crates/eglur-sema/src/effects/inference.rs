@@ -184,8 +184,14 @@ fn infer_effects(
                     .callable(*signature_id)
                     .ok_or(EffectAnalysisError::UnknownCallableSignature(*signature_id))?;
                 match target.clone() {
-                    CanonicalTarget::Primitive(_) => {
-                        solved.insert(target, SolvedFact::Known(EffectSummary::Unknown));
+                    CanonicalTarget::Primitive(primitive) => {
+                        return Err(EffectAnalysisError::GraphInvariant(
+                            format!(
+                                "primitive {} has a callable declaration signature",
+                                primitive.spelling()
+                            )
+                            .into_boxed_str(),
+                        ));
                     }
                     CanonicalTarget::External(declaration) => {
                         let summary = trusted

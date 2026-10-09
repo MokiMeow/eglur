@@ -214,8 +214,14 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let head = NominalHead::Declaration(target.clone());
                 let Some(expected) = self.types.nominal_arity(&head) else {
                     return match target {
-                        CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
+                        CanonicalTarget::External(_) => {
                             Ok(Self::position_type(Resolution::Unperformed, Some(target)))
+                        }
+                        CanonicalTarget::Primitive(primitive) => {
+                            Err(SignatureResolutionError::UnexpectedPrimitiveTarget {
+                                primitive,
+                                expected: "a nominal declaration",
+                            })
                         }
                         CanonicalTarget::Source(_) => {
                             Err(SignatureResolutionError::MissingTrustedSignature(target))
