@@ -285,6 +285,26 @@ Message contract summary:
 3. `forbidden`.
 
 
+### `MEMBER_NOT_FOUND`
+
+Severity: `error`
+
+Trigger: a value-member read or stored-field assignment selects a name that
+the receiver's static type does not expose as a stored field or property.
+This code does not apply to method calls or owner-qualified callable references.
+
+The primary span MUST identify the selected member-name token. Structured data
+MUST include `member` and `receiver_type`. The latter identifies the canonical
+type whose fields and properties are queried, with transparent aliases expanded.
+For a receiver of type `&T` or `&mut T`, it reports `T`.
+Missing compiler input is not proof that a member is absent.
+
+Message contract summary:
+
+1. `member`.
+2. `not found`.
+
+
 ### `METHOD_NOT_FOUND`
 
 Severity: `error`

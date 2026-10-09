@@ -292,6 +292,12 @@ impl CompileAttempt {
                         let mut label = entry.capability().stable_key().to_owned();
                         for refusal in entry.input_refusals() {
                             match refusal.input() {
+                                UnavailableCompileInput::TrustedValueMemberInventory { owner } => {
+                                    label.push_str(&format!(
+                                        " (missing field/property inventory: {})",
+                                        owner.as_str()
+                                    ));
+                                }
                                 UnavailableCompileInput::PrimitiveInherentInventory { owner } => {
                                     label.push_str(&format!(
                                         " (missing inherent inventory: std::prelude::{})",
@@ -615,6 +621,9 @@ fn capability_trace_json(trace: &CapabilityTrace) -> Value {
 
 fn compile_input_refusal_json(refusal: &CompileInputRefusal) -> Value {
     let (kind, owner) = match refusal.input() {
+        UnavailableCompileInput::TrustedValueMemberInventory { owner } => {
+            ("trusted_value_member_inventory", owner.as_str().to_owned())
+        }
         UnavailableCompileInput::TrustedInherentInventory { owner } => {
             ("trusted_inherent_inventory", owner.as_str().to_owned())
         }

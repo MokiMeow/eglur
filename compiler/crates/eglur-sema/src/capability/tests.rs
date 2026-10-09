@@ -42,6 +42,29 @@ fn implemented_operation_can_refuse_missing_input_without_a_missing_capability()
 }
 
 #[test]
+fn value_member_inventory_refusal_keeps_implemented_member_lookup_selected() {
+    let support = Support(true);
+    let mut recorder = DemandRecorder::new(&support);
+    let unavailable = UnavailableCompileInput::TrustedValueMemberInventory {
+        owner: ExternalDefId::new("catalog::Cell").unwrap(),
+    };
+    let capability = CompileCapability::Typecheck(TypecheckCapability::ResolveMembers);
+    assert!(recorder.require(capability, location(0)));
+    recorder.refuse_input(unavailable.clone(), location(1));
+    recorder.refuse_input(unavailable.clone(), location(1));
+    let (_, demands) = recorder
+        .finish(PhaseProduct::<()>::Unperformed)
+        .into_parts();
+    let trace = CapabilityTrace::from_demands(&support, demands).unwrap();
+
+    assert!(!trace.has_missing());
+    let entry = trace.unsupported().next().unwrap();
+    assert_eq!(entry.capability(), capability);
+    assert_eq!(entry.input_refusals()[0].input(), &unavailable);
+    assert_eq!(entry.input_refusals()[0].locations(), [location(1)]);
+}
+
+#[test]
 fn input_identity_and_locations_survive_duplicates_and_permutations() {
     let support = Support(true);
     let mut recorder = DemandRecorder::new(&support);

@@ -1,4 +1,83 @@
 tests:
+- id: TYC-missing-field-read-identifies-member-and-receiver
+  category: typecheck
+  title: missing field read reports the selected name and canonical receiver
+  code: |
+    struct Point { field x: i32 }
+    type Alias = Point
+    fn read(value: &Alias) -> i32 = value.missing // @primary missing-member
+  expect:
+    compile_error:
+      code: MEMBER_NOT_FOUND
+      message_contains: [member, not found]
+      data_keys: [member, receiver_type]
+      data_equals:
+        member: missing
+        receiver_type: Point
+      primary_span:
+        marker: missing-member
+
+- id: TYC-missing-property-read-is-not-a-method-call
+  category: typecheck
+  title: property inventory absence uses the value-member diagnostic
+  code: |
+    struct Cell {
+      prop count: i32 { fn get_count(self: &Self) -> i32 = 0 }
+    }
+    fn read(value: Cell) -> i32 = value.missing
+  expect:
+    compile_error:
+      code: MEMBER_NOT_FOUND
+      message_contains: [member, not found]
+      data_keys: [member, receiver_type]
+      data_equals:
+        member: missing
+        receiver_type: Cell
+
+- id: TYC-missing-field-assignment-precedes-value-mismatch
+  category: typecheck
+  title: absent assignment member is diagnosed before the assigned value
+  code: |
+    struct Point { field x: i32 }
+    fn write!(value: &mut Point) -> Unit { value.missing = true }
+  expect:
+    compile_error:
+      code: MEMBER_NOT_FOUND
+      message_contains: [member, not found]
+      data_keys: [member, receiver_type]
+      data_equals:
+        member: missing
+        receiver_type: Point
+
+- id: TYC-named-member-read-on-primitive-is-rejected
+  category: typecheck
+  title: primitive member read does not imply method-call lookup
+  code: |
+    fn read(value: &i32) -> Unit = value.missing
+  expect:
+    compile_error:
+      code: MEMBER_NOT_FOUND
+      message_contains: [member, not found]
+      data_keys: [member, receiver_type]
+      data_equals:
+        member: missing
+        receiver_type: i32
+
+- id: TYC-variant-fields-are-not-direct-enum-members
+  category: typecheck
+  title: enum payload fields require variant destructuring
+  code: |
+    enum Choice { Item { value: i32 } }
+    fn read(value: Choice) -> Unit = value.value
+  expect:
+    compile_error:
+      code: MEMBER_NOT_FOUND
+      message_contains: [member, not found]
+      data_keys: [member, receiver_type]
+      data_equals:
+        member: value
+        receiver_type: Choice
+
 - id: TYC-assignment-target-mutability-precedes-value-mismatch
   category: typecheck
   title: immutable field target takes precedence over incompatible value

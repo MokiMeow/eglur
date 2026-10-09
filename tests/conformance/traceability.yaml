@@ -24,13 +24,13 @@ policy:
     - code: EXTERN_LINKAGE_FAILED
       precondition: ffi_linkage_probe
 summary:
-  required_code_count: 273
-  baseline_scope_code_count: 268
-  asserted_code_count: 264
+  required_code_count: 274
+  baseline_scope_code_count: 269
+  asserted_code_count: 265
   mentioned_only_code_count: 0
   uncovered_code_count: 9
-  hard_required_code_count: 262
-  hard_required_asserted_count: 262
+  hard_required_code_count: 263
+  hard_required_asserted_count: 263
   hard_required_gap_count: 0
   conditional_required_code_count: 2
   conditional_required_asserted_count: 2
@@ -1344,6 +1344,15 @@ coverage:
       - id: core-conditionals
         file: core/conditionals.yaml
         test_ids: [CFL-duplicate-literal-match-arm-is-compile-error, CFL-explicit-impossible-payload-arm-is-unreachable, CFL-shadowed-variant-match-arm-is-compile-error, CFL-unreachable-match-arm-is-compile-error]
+    mentioned_only_in: []
+  - code: MEMBER_NOT_FOUND
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-typecheck
+        file: core/typecheck.yaml
+        test_ids: [TYC-missing-field-assignment-precedes-value-mismatch, TYC-missing-field-read-identifies-member-and-receiver, TYC-missing-property-read-is-not-a-method-call, TYC-named-member-read-on-primitive-is-rejected, TYC-variant-fields-are-not-direct-enum-members]
     mentioned_only_in: []
   - code: METHOD_NOT_FOUND
     severity: error

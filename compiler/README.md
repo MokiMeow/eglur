@@ -172,6 +172,12 @@ inventories with their canonical identities and demand locations. A missing
 capability or required input prevents a conclusive source-language result. The
 attempt reports `Unsupported` unless a tool-limit failure takes precedence.
 
+Value-member reads resolve stored fields and properties separately from method
+calls. Missing source members report `MEMBER_NOT_FOUND`. Trusted nominal
+signatures currently omit field/property inventories, so those reads record
+`trusted_value_member_inventory` under `typecheck.members` and remain
+`Unsupported` rather than treating absent metadata as proof of an absent member.
+
 Catalog-declared nominal inherent families support qualified calls, receiver
 calls, and pure named `Fn` values. Owner type parameters and explicit method
 type arguments remain separate. Associated members have no receiver; they

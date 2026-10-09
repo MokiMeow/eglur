@@ -2299,6 +2299,24 @@ codes:
       required_if_emitted: []
       conditional_required: []
       exact_value_keys: []
+  MEMBER_NOT_FOUND:
+    severity: error
+    message:
+      all_of:
+      - member
+      - not found
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - member
+      - receiver_type
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - member
+      - receiver_type
   METHOD_NOT_FOUND:
     severity: error
     message:

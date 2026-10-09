@@ -297,12 +297,16 @@ pub enum DemandDisposition {
 pub enum UnavailableCompileInput {
     TrustedInherentInventory { owner: ExternalDefId },
     PrimitiveInherentInventory { owner: crate::PrimitiveType },
+    TrustedValueMemberInventory { owner: ExternalDefId },
 }
 
 impl UnavailableCompileInput {
     #[must_use]
     pub const fn capability(&self) -> CompileCapability {
         match self {
+            Self::TrustedValueMemberInventory { .. } => {
+                CompileCapability::Typecheck(TypecheckCapability::ResolveMembers)
+            }
             Self::TrustedInherentInventory { .. } | Self::PrimitiveInherentInventory { .. } => {
                 CompileCapability::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods)
             }

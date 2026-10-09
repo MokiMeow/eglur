@@ -26971,6 +26971,60 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-missing-field-assignment-precedes-value-mismatch"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Point { field x: i32 }\nfn write!(value: &mut Point) -> Unit { value.missing = true }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-missing-field-read-identifies-member-and-receiver"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Point { field x: i32 }\ntype Alias = Point\nfn read(value: &Alias) -> i32 = value.missing // @primary missing-member\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-missing-property-read-is-not-a-method-call"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Cell {\n  prop count: i32 { fn get_count(self: &Self) -> i32 = 0 }\n}\nfn read(value: Cell) -> i32 = value.missing\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-mixed-struct-enum-layout-cycle-requires-indirection"
       },
       "public_examples": [],
@@ -27139,6 +27193,24 @@
       "source": {
         "kind": "utf8",
         "text": "fn inc(x: i64) = wrapping_add(x, 1)\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-named-member-read-on-primitive-is-rejected"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn read(value: &i32) -> Unit = value.missing\n"
       }
     },
     {
@@ -30397,6 +30469,24 @@
       "source": {
         "kind": "utf8",
         "text": "fn helper() -> i64 = 1\n\nfn invalid() -> i64 = main::helper // @primary function-variant-head\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-variant-fields-are-not-direct-enum-members"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "enum Choice { Item { value: i32 } }\nfn read(value: Choice) -> Unit = value.value\n"
       }
     },
     {
@@ -39497,6 +39587,6 @@
       }
     }
   ],
-  "input_digest": "sha256:89fcadbb242da75bf87f6fb399757cb386e3d7120054d9a3682a5259ea7c0745",
+  "input_digest": "sha256:3ebf85cb06b64382fe7f6a62f28925d8ba64a2ca0eeae9cec69b8d5d940befdb",
   "schema_version": "0.1"
 }
