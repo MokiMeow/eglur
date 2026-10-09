@@ -22,6 +22,7 @@ fn full_profile() -> SupportProfile {
             CompileCapability::Typecheck(TypecheckCapability::CheckBodies),
             CompileCapability::Typecheck(TypecheckCapability::ResolveMembers),
             CompileCapability::Typecheck(TypecheckCapability::ResolveMethods),
+            CompileCapability::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods),
             CompileCapability::Typecheck(TypecheckCapability::ResolveOverloads),
             CompileCapability::Typecheck(TypecheckCapability::AnalyzeInhabitance),
             CompileCapability::Typecheck(TypecheckCapability::CheckFailureFlow),

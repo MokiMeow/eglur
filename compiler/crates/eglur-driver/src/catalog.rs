@@ -16,6 +16,8 @@ use eglur_sema::{
     TrustedTraitMethod, TrustedTypeExpr,
 };
 
+mod primitive;
+
 const NUMERIC_ERROR: &str = "std::prelude::NumericError";
 const TEXT_ERROR: &str = "std::io::TextError";
 const IO_ERROR: &str = "std::io::IoError";
@@ -49,8 +51,9 @@ pub struct TrustedCatalog {
 }
 
 impl TrustedCatalog {
-    /// Builds the exact catalog required by the first executable compiler slice.
+    /// Builds the validated partial catalog for the semantic compiler slice.
     pub fn first_slice() -> Result<Self, TrustedCatalogError> {
+        let primitives = primitive::primitive_catalog()?;
         let prelude = module(["std", "prelude"]);
         let opt = module(["std", "opt"]);
         let res = module(["std", "res"]);
@@ -78,7 +81,7 @@ impl TrustedCatalog {
         let nan = external_id(TENSOR_NAN);
         let rand = external_id(TENSOR_RAND);
 
-        let declarations = vec![
+        let mut declarations = vec![
             declaration(
                 external_id(TENSOR),
                 tensor.clone(),
@@ -220,21 +223,28 @@ impl TrustedCatalog {
                 TensorSourceConstructor::Rand,
             )?,
         ];
+        declarations.extend(primitives.declarations);
+        let mut modules = vec![prelude, opt, res, io, test, tensor];
+        modules.extend(primitives.modules);
+        modules.sort();
+        modules.dedup();
+        let mut prelude_exports = vec![
+            numeric_error.clone(),
+            display.clone(),
+            some.clone(),
+            none.clone(),
+            ok.clone(),
+            err.clone(),
+            to_str.clone(),
+            wrapping_add.clone(),
+            wrapping_sub.clone(),
+            wrapping_mul.clone(),
+        ];
+        prelude_exports.extend(primitives.prelude);
         let names = ExternalNameEnvironment::partial_standard_library(
-            [prelude, opt, res, io, test, tensor],
+            modules,
             declarations,
-            [
-                numeric_error.clone(),
-                display.clone(),
-                some.clone(),
-                none.clone(),
-                ok.clone(),
-                err.clone(),
-                to_str.clone(),
-                wrapping_add.clone(),
-                wrapping_sub.clone(),
-                wrapping_mul.clone(),
-            ],
+            prelude_exports,
         )?;
 
         let mut signatures = vec![
@@ -442,15 +452,19 @@ impl TrustedCatalog {
                 }]),
             },
         ));
-        let signatures = TrustedSignatureEnvironment::new(signatures)?;
-        let inhabitance = TrustedInhabitanceEnvironment::new([
+        signatures.extend(primitives.signatures);
+        let signatures =
+            TrustedSignatureEnvironment::with_inherent_owners(signatures, primitives.owners)?;
+        let mut inhabitance = vec![
             TrustedInhabitanceFact::new(external_id(TENSOR), TrustedNominalInhabitance::Inhabited),
             TrustedInhabitanceFact::new(
                 external_id(NUMERIC_ERROR),
                 TrustedNominalInhabitance::Unknown,
             ),
             TrustedInhabitanceFact::new(external_id(IO_ERROR), TrustedNominalInhabitance::Unknown),
-        ])?;
+        ];
+        inhabitance.extend(primitives.inhabitance);
+        let inhabitance = TrustedInhabitanceEnvironment::new(inhabitance)?;
 
         let mut effects = vec![
             TrustedEffectSummary::new(external_id(TENSOR_ZEROS), EffectSummary::pure()),
@@ -485,6 +499,7 @@ impl TrustedCatalog {
             ),
         ];
         effects.extend(display_members.effects);
+        effects.extend(primitives.effects);
         let effects = TrustedEffectEnvironment::new(effects)?;
         let mut runtime_hooks = vec![
             (some.clone(), RuntimeHook::OptSome),
@@ -1169,6 +1184,9 @@ impl From<TrustedLanguageItemError> for TrustedCatalogError {
 
 #[cfg(test)]
 mod inherent_tests;
+
+#[cfg(test)]
+mod primitive_tests;
 
 #[cfg(test)]
 mod tests {

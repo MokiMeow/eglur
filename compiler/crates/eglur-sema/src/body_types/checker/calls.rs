@@ -2,6 +2,29 @@ use super::application::ApplicationPlan;
 use super::invocation::InvocationFrame;
 use super::*;
 
+impl QualifiedMethodOwner {
+    pub(super) fn matches_subject(
+        &self,
+        types: &crate::CanonicalTypeStore,
+        subject: TypeId,
+    ) -> Result<bool, crate::TypeStoreError> {
+        if self.fixed_subject.is_some_and(|fixed| fixed != subject) {
+            return Ok(false);
+        }
+        Ok(match (types.kind(subject)?, &self.target) {
+            (TypeKind::Primitive(found), CanonicalTarget::Primitive(owner)) => found == owner,
+            (
+                TypeKind::Nominal {
+                    head: NominalHead::Declaration(found),
+                    ..
+                },
+                owner,
+            ) => found == owner,
+            _ => false,
+        })
+    }
+}
+
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn qualified_method_owner(
         &mut self,
@@ -10,11 +33,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         written: &CanonicalTarget,
     ) -> Result<Outcome<QualifiedMethodOwner>, BodyTypingError> {
         if let CanonicalTarget::Primitive(owner) = written {
-            self.recorder.refuse_input(
-                crate::UnavailableCompileInput::PrimitiveInherentInventory { owner: *owner },
-                SemanticLocation::origin(source.file(), origin),
-            );
-            return Ok(Outcome::Unperformed);
+            return Ok(Outcome::Known(QualifiedMethodOwner {
+                target: written.clone(),
+                fixed_subject: Some(self.signatures.types_mut().primitive(*owner)?),
+            }));
         }
         match self.signatures.declaration(written) {
             FactState::Known(DeclarationSignature::TypeAlias {

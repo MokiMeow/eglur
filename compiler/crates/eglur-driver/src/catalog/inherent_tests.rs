@@ -94,7 +94,13 @@ fn complete_owner_metadata_changes_real_analysis_keys_without_changing_source_se
         } = TrustedCatalog::first_slice().unwrap();
         let signatures = TrustedSignatureEnvironment::with_inherent_owners(
             signatures.declarations().cloned(),
-            owners,
+            signatures
+                .inherent_owners()
+                .filter(|owner| {
+                    owner.head != TrustedInherentOwnerHead::Primitive(PrimitiveType::I64)
+                })
+                .cloned()
+                .chain(owners),
         )
         .unwrap();
         let catalog = TrustedCatalog::new_with_language_items(
@@ -133,7 +139,7 @@ fn complete_owner_metadata_changes_real_analysis_keys_without_changing_source_se
     };
     let absent = analyze(vec![]);
     let empty = analyze(vec![TrustedInherentOwner {
-        head: TrustedInherentOwnerHead::Primitive(PrimitiveType::Str),
+        head: TrustedInherentOwnerHead::Primitive(PrimitiveType::I64),
         members: Box::new([]),
     }]);
     assert_ne!(absent.0, empty.0);
@@ -155,10 +161,13 @@ fn complete_empty_inventory_does_not_claim_an_unavailable_input() {
         let owner = external_id(NUMERIC_ERROR);
         let signatures = TrustedSignatureEnvironment::with_inherent_owners(
             signatures.declarations().cloned(),
-            complete.then(|| TrustedInherentOwner {
-                head: TrustedInherentOwnerHead::Nominal(owner.clone()),
-                members: Box::new([]),
-            }),
+            signatures
+                .inherent_owners()
+                .cloned()
+                .chain(complete.then(|| TrustedInherentOwner {
+                    head: TrustedInherentOwnerHead::Nominal(owner.clone()),
+                    members: Box::new([]),
+                })),
         )
         .unwrap();
         let catalog = TrustedCatalog::new_with_language_items(

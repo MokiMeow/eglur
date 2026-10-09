@@ -74,6 +74,16 @@ fn member(
 }
 
 fn fixture_catalog() -> TrustedCatalog {
+    fixture_catalog_for_root(
+        TrustedInherentOwnerHead::Nominal(external_id(NUMERIC_ERROR)),
+        nominal(external_id(NUMERIC_ERROR), []),
+    )
+}
+
+fn fixture_catalog_for_root(
+    head: TrustedInherentOwnerHead,
+    root: TrustedTypeExpr,
+) -> TrustedCatalog {
     let TrustedCatalog {
         names,
         signatures,
@@ -82,7 +92,6 @@ fn fixture_catalog() -> TrustedCatalog {
         language_items,
         runtime_hooks,
     } = TrustedCatalog::first_slice().unwrap();
-    let root = nominal(external_id(NUMERIC_ERROR), []);
     let scalar = TrustedTypeExpr::Primitive(PrimitiveType::I64);
     let unit = TrustedTypeExpr::Primitive(PrimitiveType::Unit);
     let packet = nominal(external_id(PACKET), [TrustedTypeExpr::GenericParameter(0)]);
@@ -280,7 +289,7 @@ fn fixture_catalog() -> TrustedCatalog {
     members[8].1.overload = true;
     let owners = [
         TrustedInherentOwner {
-            head: TrustedInherentOwnerHead::Nominal(external_id(NUMERIC_ERROR)),
+            head: head.clone(),
             members: members[..9]
                 .iter()
                 .map(|(_, member)| member.clone())
@@ -345,7 +354,11 @@ fn fixture_catalog() -> TrustedCatalog {
             )])
             .chain(members.iter().map(|(callable, _)| callable.clone()))
             .chain([enum_callable]),
-        owners,
+        signatures
+            .inherent_owners()
+            .filter(|owner| owner.head != head)
+            .cloned()
+            .chain(owners),
     )
     .unwrap();
     let inhabitance = TrustedInhabitanceEnvironment::new(inhabitance.facts().cloned().chain([
@@ -738,31 +751,114 @@ fn effectful_members_keep_their_summary_and_cannot_become_pure_fn_values() {
 }
 
 #[test]
-fn associated_hook_executes_direct_grouped_and_named_fn_forms() {
-    let catalog = fixture_catalog();
-    let profile = SupportProfile::semantic_core_v1();
-    for body in [
-        "yield Ok(to_str(NumericError.add(2, 3)))",
-        "yield Ok(to_str(((NumericError.add))(2, 3)))",
-        "let f: Fn(i64, i64) -> i64 = NumericError.add\nyield Ok(to_str(f(2, 3)))",
+fn primitive_fixture_families_preserve_identity_overloads_visibility_and_effects() {
+    let catalog = fixture_catalog_for_root(
+        TrustedInherentOwnerHead::Primitive(PrimitiveType::I64),
+        TrustedTypeExpr::Primitive(PrimitiveType::I64),
+    );
+    for (source, identity) in [
+        ("fn pick() -> i64 = i64.pick(2)\n", "fixture::pick_int"),
+        ("fn pick() -> i64 = i64.pick(true)\n", "fixture::pick_bool"),
+        ("fn read(v: i64) -> i64 = v.read()\n", "fixture::read"),
+        (
+            "type Count = i64\nfn read(v: &Count) -> i64 = Count.read(v)\n",
+            "fixture::read",
+        ),
+        (
+            "fn keep() -> Unit { let f: Fn(Bool) -> i64 = i64.pick\n_ = f\nyield () }\n",
+            "fixture::pick_bool",
+        ),
+        (
+            "fn good!() -> Unit = i64.emit!(\"event\")\n",
+            "fixture::emit!",
+        ),
     ] {
-        let source = format!("fn main!() -> Res[Str, Str] {{ {body} }}\n");
-        let program = require_checked(analyze(
-            &[("main.eglur", &source)],
-            &catalog,
-            ProgramMode::Executable,
-            &profile,
-        ));
-        let ExecutionAttempt::Executed(ExecutionOutcome::Completed(result)) =
-            execute(&program, &profile, &catalog, EvaluationLimits::default())
-        else {
-            panic!("associated hook did not execute");
-        };
-        let Value::Variant { payload, .. } = result.value() else {
-            panic!("expected result");
-        };
-        assert_eq!(payload.as_ref(), &[Value::Str("5".into())]);
-        assert!(result.events().is_empty());
+        let program = require_checked(library(source, &catalog));
+        let resolution = program.resolution();
+        let bodies = resolution.body_types();
+        let targets = bodies
+            .invocations()
+            .filter_map(|(_, call)| match call.target() {
+                InvocationTarget::Callable(id) => Some(*id),
+                _ => None,
+            })
+            .chain(bodies.callable_values().map(|(_, id)| id))
+            .map(|instance| {
+                resolution
+                    .signatures()
+                    .callable(bodies.callable_instance(instance).unwrap().signature())
+                    .unwrap()
+                    .declaration()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            targets,
+            vec![&CanonicalTarget::External(external_id(identity))],
+            "{source}"
+        );
+    }
+    for (source, code) in [
+        ("fn bad() -> i64 = i64.private()\n", "VISIBILITY_VIOLATION"),
+        (
+            "fn bad(v: &i64) -> i64 = v.private()\n",
+            "VISIBILITY_VIOLATION",
+        ),
+        (
+            "fn bad() -> Unit = i64.emit!(\"event\")\n",
+            "EFFECT_VIOLATION",
+        ),
+    ] {
+        let compilation = library(source, &catalog);
+        assert!(!compilation.trace().has_unsupported(), "{source}");
+        assert!(compilation.checked_program().is_none());
+        assert!(
+            compilation
+                .diagnostics()
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code().as_str() == code),
+            "{source}\n{:?}",
+            compilation.diagnostics()
+        );
+    }
+}
+
+#[test]
+fn associated_hook_executes_direct_grouped_and_named_fn_forms() {
+    let profile = SupportProfile::semantic_core_v1();
+    for (catalog, owner) in [
+        (fixture_catalog(), "NumericError"),
+        (
+            fixture_catalog_for_root(
+                TrustedInherentOwnerHead::Primitive(PrimitiveType::I64),
+                TrustedTypeExpr::Primitive(PrimitiveType::I64),
+            ),
+            "i64",
+        ),
+    ] {
+        for body in [
+            format!("yield Ok(to_str({owner}.add(2, 3)))"),
+            format!("yield Ok(to_str((({owner}.add))(2, 3)))"),
+            format!("let f: Fn(i64, i64) -> i64 = {owner}.add\nyield Ok(to_str(f(2, 3)))"),
+        ] {
+            let source = format!("fn main!() -> Res[Str, Str] {{ {body} }}\n");
+            let program = require_checked(analyze(
+                &[("main.eglur", &source)],
+                &catalog,
+                ProgramMode::Executable,
+                &profile,
+            ));
+            let ExecutionAttempt::Executed(ExecutionOutcome::Completed(result)) =
+                execute(&program, &profile, &catalog, EvaluationLimits::default())
+            else {
+                panic!("associated hook did not execute for {owner}");
+            };
+            let Value::Variant { payload, .. } = result.value() else {
+                panic!("expected result");
+            };
+            assert_eq!(payload.as_ref(), &[Value::Str("5".into())]);
+            assert!(result.events().is_empty());
+        }
     }
 }
 

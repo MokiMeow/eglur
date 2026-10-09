@@ -120,21 +120,27 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Outcome::Known(owner) => owner,
                 outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
             };
-        let concrete = match self.signatures.declaration(&owner.target) {
-            FactState::Known(DeclarationSignature::Trait { .. }) => false,
-            FactState::Known(DeclarationSignature::Struct { .. }) => true,
-            FactState::Known(
-                DeclarationSignature::Nominal { .. } | DeclarationSignature::Enum { .. },
-            ) if matches!(&owner.target, CanonicalTarget::External(_)) => true,
-            FactState::Known(_) | FactState::NotApplicable => {
-                return self
-                    .method_not_found(source, request.member)
-                    .map(InvocationPlan::Complete);
+        let concrete = if matches!(owner.target, CanonicalTarget::Primitive(_)) {
+            true
+        } else {
+            match self.signatures.declaration(&owner.target) {
+                FactState::Known(DeclarationSignature::Trait { .. }) => false,
+                FactState::Known(DeclarationSignature::Struct { .. }) => true,
+                FactState::Known(
+                    DeclarationSignature::Nominal { .. } | DeclarationSignature::Enum { .. },
+                ) if matches!(&owner.target, CanonicalTarget::External(_)) => true,
+                FactState::Known(_) | FactState::NotApplicable => {
+                    return self
+                        .method_not_found(source, request.member)
+                        .map(InvocationPlan::Complete);
+                }
+                FactState::Poisoned(poison) => {
+                    return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
+                }
+                FactState::Unperformed => {
+                    return Ok(InvocationPlan::Complete(Outcome::Unperformed));
+                }
             }
-            FactState::Poisoned(poison) => {
-                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
-            }
-            FactState::Unperformed => return Ok(InvocationPlan::Complete(Outcome::Unperformed)),
         };
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::ResolveMethods),
@@ -817,7 +823,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let source = context.source;
-        let owner = &qualified_owner.target;
         let presented = candidates
             .iter()
             .map(|candidate| candidate.template.callable().clone())
@@ -850,18 +855,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 let subject = self.method_subject(
                     typed_arguments[&request.call.arguments[receiver_index].value].ty,
                 )?;
-                let TypeKind::Nominal {
-                    head: NominalHead::Declaration(found),
-                    ..
-                } = self.signatures.types().kind(subject)?
-                else {
-                    continue;
-                };
-                if found != owner
-                    || qualified_owner
-                        .fixed_subject
-                        .is_some_and(|fixed| fixed != subject)
-                {
+                if !qualified_owner.matches_subject(self.signatures.types(), subject)? {
                     continue;
                 }
                 Some(subject)

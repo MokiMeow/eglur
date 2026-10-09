@@ -77,13 +77,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         name: &NameKey,
     ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyTypingError> {
         match owner {
-            CanonicalTarget::Primitive(owner) => {
-                self.recorder.refuse_input(
-                    crate::UnavailableCompileInput::PrimitiveInherentInventory { owner: *owner },
-                    SemanticLocation::origin(source.file(), origin),
-                );
-                Ok(Outcome::Unperformed)
-            }
+            CanonicalTarget::Primitive(owner) => self.trusted_inherent_method_family(
+                source,
+                origin,
+                &ConcreteOwnerHead::Primitive(*owner),
+                crate::UnavailableCompileInput::PrimitiveInherentInventory { owner: *owner },
+                name,
+            ),
             CanonicalTarget::Source(owner) => {
                 let targets =
                     self.collection
@@ -94,34 +94,45 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             CanonicalTarget::External(external) => {
                 let head = ConcreteOwnerHead::Nominal(NominalHead::Declaration(owner.clone()));
-                let Some(inventory) = self.signatures.trusted_inherent_owner(&head) else {
-                    let location = SemanticLocation::origin(source.file(), origin);
-                    self.recorder.refuse_input(
-                        crate::UnavailableCompileInput::TrustedInherentInventory {
-                            owner: external.clone(),
-                        },
-                        location,
-                    );
-                    self.recorder.require(
-                        CompileCapability::Typecheck(
-                            TypecheckCapability::ResolveTrustedInherentMethods,
-                        ),
-                        location,
-                    );
-                    return Ok(Outcome::Unperformed);
-                };
-                let family = inventory.family(name).cloned();
-                if !self.recorder.require(
-                    CompileCapability::Typecheck(
-                        TypecheckCapability::ResolveTrustedInherentMethods,
-                    ),
-                    SemanticLocation::origin(source.file(), origin),
-                ) {
-                    return Ok(Outcome::Unperformed);
-                }
-                Ok(Outcome::Known(family.map(InherentMethodFamily::Trusted)))
+                self.trusted_inherent_method_family(
+                    source,
+                    origin,
+                    &head,
+                    crate::UnavailableCompileInput::TrustedInherentInventory {
+                        owner: external.clone(),
+                    },
+                    name,
+                )
             }
         }
+    }
+
+    fn trusted_inherent_method_family(
+        &mut self,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
+        head: &ConcreteOwnerHead,
+        missing: crate::UnavailableCompileInput,
+        name: &NameKey,
+    ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyTypingError> {
+        let location = SemanticLocation::origin(source.file(), origin);
+        let supported = self.recorder.require(
+            CompileCapability::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods),
+            location,
+        );
+        let Some(inventory) = self.signatures.trusted_inherent_owner(head) else {
+            self.recorder.refuse_input(missing, location);
+            return Ok(Outcome::Unperformed);
+        };
+        if !supported {
+            return Ok(Outcome::Unperformed);
+        }
+        Ok(Outcome::Known(
+            inventory
+                .family(name)
+                .cloned()
+                .map(InherentMethodFamily::Trusted),
+        ))
     }
 
     pub(super) fn receiver_inherent_family(
@@ -131,14 +142,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         subject: TypeId,
         name: &NameKey,
     ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyTypingError> {
-        let TypeKind::Nominal {
-            head: NominalHead::Declaration(owner),
-            ..
-        } = self.signatures.types().kind(subject)?
-        else {
-            return Ok(Outcome::Known(None));
+        let owner = match self.signatures.types().kind(subject)? {
+            TypeKind::Primitive(primitive) => CanonicalTarget::Primitive(*primitive),
+            TypeKind::Nominal {
+                head: NominalHead::Declaration(owner),
+                ..
+            } => owner.clone(),
+            _ => return Ok(Outcome::Known(None)),
         };
-        let owner = owner.clone();
         self.inherent_method_family(source, origin, &owner, name)
     }
 

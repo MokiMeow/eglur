@@ -178,14 +178,22 @@ signatures currently omit field/property inventories, so those reads record
 `trusted_value_member_inventory` under `typecheck.members` and remain
 `Unsupported` rather than treating absent metadata as proof of an absent member.
 
-Catalog-declared nominal inherent families support qualified calls, receiver
-calls, and pure named `Fn` values. Owner type parameters and explicit method
-type arguments remain separate. Associated members have no receiver; they
-use the owner's qualified name. Complete empty inventories allow a missing
-method diagnostic. Execution still requires a compatible runtime hook and
-supported argument values; resolving a method does not make opaque values
-executable. Primitive and intrinsic inherent families are not yet connected
-to these call paths.
+Catalog-declared nominal and primitive inherent families support qualified
+calls, receiver calls, and pure named `Fn` values. Owner type parameters and
+explicit method type arguments remain separate. Associated members have no
+receiver and use the owner's qualified name. Complete empty inventories allow
+a missing method diagnostic. Execution still requires a compatible runtime
+hook and supported argument values; resolving a method does not make opaque
+values executable.
+
+The built-in catalog supplies complete primitive inventories:
+`Bool`, `Str`, `Nat`, and `PositiveNat` have declared inherent methods; other
+primitive inventories are empty. Primitive methods have no execution hooks
+yet. Intrinsic inherent families are not yet connected to these call paths.
+
+The supporting `Tri`, `Seq`, and `DomainError` declarations are available for
+type checking. External enum variant paths and their execution remain
+unsupported.
 
 Run the frozen corpus and all five probe groups with:
 

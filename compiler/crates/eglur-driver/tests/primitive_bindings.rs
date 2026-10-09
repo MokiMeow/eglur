@@ -3,7 +3,7 @@ use eglur_driver::{
     CompileAttempt, CompileDisposition, CompilerSession, FileInput, FileSetRequest, SessionOptions,
     SupportProfile, TrustedCatalog,
 };
-use eglur_sema::{PrimitiveType, UnavailableCompileInput};
+use eglur_sema::PrimitiveType;
 
 fn check(source: &str, profile: SupportProfile) -> CompileAttempt {
     check_files(&[("main.eglur", source)], profile)
@@ -319,67 +319,27 @@ fn primitive_arity_and_reserved_intrinsic_policies_remain_separate() {
 }
 
 #[test]
-fn primitive_type_qualifiers_preserve_identity_without_inventing_method_inventory() {
+fn primitive_type_qualifiers_do_not_import_display_trait_methods() {
     for owner in ["i32", "std::prelude::i32", "Int32", "Number"] {
         let source = format!(
             "import std::prelude::i32 as Int32\ntype Number = i32\nfn use(value: i32) -> Str = {owner}.to_str(&value)\n"
         );
-        let attempt = check(&source, SupportProfile::semantic_core_v1());
-        let payload: serde_json::Value =
-            serde_json::from_str(&attempt.development_attempt().unwrap().to_json()).unwrap();
-        let inputs = payload["capability_trace"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|entry| entry["capability"] == "typecheck.trusted_inherent_methods")
-            .unwrap()["unavailable_inputs"]
-            .as_array()
-            .unwrap();
-        assert_eq!(inputs.len(), 1);
-        assert_eq!(inputs[0]["kind"], "primitive_inherent_inventory");
-        assert_eq!(inputs[0]["owner"], "std::prelude::i32");
-        let CompileAttempt::Unsupported(attempt) = attempt else {
-            panic!("{source}\n{}", attempt.render_human());
-        };
-        assert!(
-            attempt.diagnostics().diagnostics().is_empty(),
-            "{source}\n{:?}",
-            attempt.diagnostics()
-        );
-        assert!(
-            attempt
-                .trace()
-                .trace()
-                .unsupported()
-                .flat_map(|entry| entry.input_refusals())
-                .any(|refusal| refusal.input()
-                    == &UnavailableCompileInput::PrimitiveInherentInventory {
-                        owner: PrimitiveType::I32
-                    }),
-            "{source}"
+        reject(
+            &source,
+            SupportProfile::semantic_core_v1(),
+            "METHOD_NOT_FOUND",
         );
     }
 }
 
 #[test]
-fn absent_primitive_inventory_is_not_negative_evidence_for_unknown_methods() {
+fn complete_empty_primitive_inventory_rejects_unknown_methods() {
     for owner in ["i32", "Number", "std::prelude::i32"] {
         let source = format!("type Number = i32\nfn use() -> Unit = {owner}.no_such_method()\n");
-        let attempt = check(&source, SupportProfile::semantic_core_v1());
-        let CompileAttempt::Unsupported(attempt) = attempt else {
-            panic!("{source}\n{}", attempt.render_human());
-        };
-        assert!(attempt.diagnostics().diagnostics().is_empty());
-        assert!(
-            attempt
-                .trace()
-                .trace()
-                .unsupported()
-                .flat_map(|entry| entry.input_refusals())
-                .any(|refusal| refusal.input()
-                    == &UnavailableCompileInput::PrimitiveInherentInventory {
-                        owner: PrimitiveType::I32
-                    })
+        reject(
+            &source,
+            SupportProfile::semantic_core_v1(),
+            "METHOD_NOT_FOUND",
         );
     }
 }

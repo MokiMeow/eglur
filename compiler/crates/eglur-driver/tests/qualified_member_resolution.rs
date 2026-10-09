@@ -444,7 +444,7 @@ fn unapplied_generic_alias_is_not_a_method_owner() {
 }
 
 #[test]
-fn primitive_alias_keeps_its_owner_and_missing_inventory() {
+fn primitive_alias_keeps_its_owner_with_complete_empty_inventory() {
     let (fact, _, diagnostics, missing) = inspect(
         &[(
             "main.eglur",
@@ -453,7 +453,7 @@ fn primitive_alias_keeps_its_owner_and_missing_inventory() {
         "read",
     );
     assert!(matches!(fact, Some(ResolvedName::TypeMemberOwner(_))));
-    assert!(diagnostics.is_empty());
+    assert_eq!(diagnostics, ["METHOD_NOT_FOUND"]);
     assert!(missing.is_empty());
     let request = FileSetRequest::single(
         "main.eglur",
@@ -465,16 +465,7 @@ fn primitive_alias_keeps_its_owner_and_missing_inventory() {
     let analysis = session
         .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
         .unwrap();
-    assert!(
-        analysis
-            .trace()
-            .unsupported()
-            .flat_map(|entry| entry.input_refusals())
-            .any(|refusal| refusal.input()
-                == &eglur_sema::UnavailableCompileInput::PrimitiveInherentInventory {
-                    owner: eglur_sema::PrimitiveType::I64,
-                })
-    );
+    assert!(!analysis.trace().has_unsupported());
 }
 
 #[test]

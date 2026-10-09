@@ -33,6 +33,7 @@ fn trait_profile_with_evidence(include_evidence: bool) -> SupportProfile {
         CompileCapability::Typecheck(TypecheckCapability::CheckBodies),
         CompileCapability::Typecheck(TypecheckCapability::ResolveMembers),
         CompileCapability::Typecheck(TypecheckCapability::ResolveMethods),
+        CompileCapability::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods),
     ];
     if include_evidence {
         capabilities.push(CompileCapability::Typecheck(
