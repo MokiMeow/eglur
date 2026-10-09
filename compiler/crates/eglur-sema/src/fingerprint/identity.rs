@@ -50,7 +50,7 @@ impl StableDeclarationKey {
                     overload,
                 } => {
                     builder.write_u8(0);
-                    write_declaration_kind(builder, *kind);
+                    builder.write_declaration_kind(*kind);
                     write_name(builder, name);
                     builder.write_bool(overload.is_some());
                     if let Some(discriminator) = overload {
@@ -806,32 +806,6 @@ fn write_sequence<T>(
 pub(crate) fn write_name(builder: &mut CanonicalFingerprintBuilder, name: &NameKey) {
     builder.write_str(name.text());
     builder.write_bool(name.is_bang());
-}
-
-pub(crate) fn write_declaration_kind(
-    builder: &mut CanonicalFingerprintBuilder,
-    kind: DeclarationKind,
-) {
-    builder.write_u8(match kind {
-        DeclarationKind::Function => 0,
-        DeclarationKind::ExternFunction => 1,
-        DeclarationKind::IntrinsicConstructor => 2,
-        DeclarationKind::Trait => 3,
-        DeclarationKind::Impl => 4,
-        DeclarationKind::Struct => 5,
-        DeclarationKind::Enum => 6,
-        DeclarationKind::OpaqueType => 7,
-        DeclarationKind::EnumVariant => 8,
-        DeclarationKind::EnumVariantField => 9,
-        DeclarationKind::TypeAlias => 10,
-        DeclarationKind::Const => 11,
-        DeclarationKind::AssociatedType => 12,
-        DeclarationKind::AssociatedTypeBinding => 13,
-        DeclarationKind::StorageField => 14,
-        DeclarationKind::Property => 15,
-        DeclarationKind::GenericParameter => 16,
-        DeclarationKind::PrimitiveType => 17,
-    });
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

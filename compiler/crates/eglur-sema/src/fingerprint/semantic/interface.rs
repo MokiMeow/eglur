@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::fingerprint::identity::{
-    BinderContext, DeclarationBinderContexts, write_declaration_kind, write_name,
-};
+use crate::fingerprint::identity::{BinderContext, DeclarationBinderContexts, write_name};
 use crate::{
     AssociatedBindingSignature, CallableRequirement, CanonicalFingerprintBuilder, CanonicalTarget,
     ConstructorPayloadSignature, Declaration, DeclarationCollection, DeclarationKind,
@@ -313,7 +311,7 @@ impl InterfaceWriter<'_, '_> {
                 declaration.id(),
             ))?
             .write_to(builder);
-        write_declaration_kind(builder, declaration.kind());
+        builder.write_declaration_kind(declaration.kind());
         builder.write_bool(declaration.visibility().is_public());
         self.write_declaration_signature(builder, declaration)?;
         if declaration.kind() == DeclarationKind::Const {

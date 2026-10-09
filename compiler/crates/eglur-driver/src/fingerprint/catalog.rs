@@ -1,10 +1,10 @@
 use eglur_sema::{
-    CanonicalFingerprintBuilder, DeclarationKind, EffectCategory, EffectSummary,
-    ExternalNameCoverage, ExternalNameEnvironment, ExternalSemanticOwner, FingerprintDomain,
-    InherentMemberForm, IntrinsicNominal, LanguageItem, Namespace, PrimitiveType,
-    RawPointerMutability, ReferenceMutability, StateScope, TensorSourceConstructor,
-    TrustedCallableRequirement, TrustedConstructorPayload, TrustedDeclarationSignature,
-    TrustedEnumPayload, TrustedGenericParameter, TrustedInhabitanceProduct, TrustedInherentOwner,
+    CanonicalFingerprintBuilder, EffectCategory, EffectSummary, ExternalNameCoverage,
+    ExternalNameEnvironment, ExternalSemanticOwner, FingerprintDomain, InherentMemberForm,
+    IntrinsicNominal, LanguageItem, Namespace, PrimitiveType, RawPointerMutability,
+    ReferenceMutability, StateScope, TensorSourceConstructor, TrustedCallableRequirement,
+    TrustedConstructorPayload, TrustedDeclarationSignature, TrustedEnumPayload,
+    TrustedGenericParameter, TrustedInhabitanceProduct, TrustedInherentOwner,
     TrustedInherentOwnerHead, TrustedNominalInhabitance, TrustedSignatureKind, TrustedTraitExpr,
     TrustedTypeExpr,
 };
@@ -50,7 +50,7 @@ fn write_name_environment(
         builder.write_str(declaration.id().as_str());
         builder.write_str(declaration.module().as_str());
         write_name(builder, declaration.name());
-        write_declaration_kind(builder, declaration.kind());
+        builder.write_declaration_kind(declaration.kind());
         write_semantic_owner(builder, declaration.semantic_owner());
     }
 
@@ -620,29 +620,6 @@ fn write_namespace(builder: &mut CanonicalFingerprintBuilder, namespace: Namespa
     builder.write_u8(match namespace {
         Namespace::Value => 0,
         Namespace::Type => 1,
-    });
-}
-
-fn write_declaration_kind(builder: &mut CanonicalFingerprintBuilder, kind: DeclarationKind) {
-    builder.write_u8(match kind {
-        DeclarationKind::Function => 0,
-        DeclarationKind::ExternFunction => 1,
-        DeclarationKind::IntrinsicConstructor => 2,
-        DeclarationKind::Trait => 3,
-        DeclarationKind::Impl => 4,
-        DeclarationKind::Struct => 5,
-        DeclarationKind::Enum => 6,
-        DeclarationKind::OpaqueType => 7,
-        DeclarationKind::EnumVariant => 8,
-        DeclarationKind::EnumVariantField => 9,
-        DeclarationKind::TypeAlias => 10,
-        DeclarationKind::Const => 11,
-        DeclarationKind::AssociatedType => 12,
-        DeclarationKind::AssociatedTypeBinding => 13,
-        DeclarationKind::StorageField => 14,
-        DeclarationKind::Property => 15,
-        DeclarationKind::GenericParameter => 16,
-        DeclarationKind::PrimitiveType => 17,
     });
 }
 
