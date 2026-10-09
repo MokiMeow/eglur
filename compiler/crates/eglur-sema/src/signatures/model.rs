@@ -4,7 +4,7 @@ use eglur_diagnostics::Poison;
 use eglur_hir::{BodyId, OriginId, PatternId, TypeRefId};
 use eglur_source::FileId;
 
-use super::GenericParameterSignature;
+use super::{ConcreteOwnerHead, GenericParameterSignature, InherentMethodInventory};
 use crate::type_rendering::{DiagnosticTypeFacts, DiagnosticTypeNames};
 use crate::{
     CallableSignatureId, CanonicalTarget, CanonicalTypeStore, DefId, FactState, FactTable,
@@ -486,11 +486,21 @@ pub struct DeclarationSignatures {
     pub(super) trait_method_owners: BTreeMap<CanonicalTarget, CanonicalTarget>,
     pub(super) declared_impl_methods: BTreeMap<CanonicalTarget, Box<[DeclaredImplMethod]>>,
     pub(super) trait_adapters: BTreeMap<CanonicalTarget, TraitAdapterSignature>,
+    pub(super) trusted_inherent_owners: BTreeMap<ConcreteOwnerHead, InherentMethodInventory>,
     pub(super) prelude_traits: Box<[PreludeTraitSignature]>,
     pub(super) language_items: LanguageItems,
 }
 
 impl DeclarationSignatures {
+    /// None denotes unavailable membership; Some may be a complete empty inventory.
+    #[must_use]
+    pub fn trusted_inherent_owner(
+        &self,
+        head: &ConcreteOwnerHead,
+    ) -> Option<&InherentMethodInventory> {
+        self.trusted_inherent_owners.get(head)
+    }
+
     #[must_use]
     pub const fn types(&self) -> &CanonicalTypeStore {
         &self.types

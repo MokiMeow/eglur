@@ -55,6 +55,7 @@ mod impl_headers;
 mod source_types;
 #[cfg(test)]
 mod tests;
+mod trusted_inherent;
 mod trusted_resolution;
 
 /// Boundary inputs selected by the driver for declaration-signature resolution.
@@ -115,6 +116,7 @@ pub fn resolve_declaration_signatures(
         diagnostics,
     )?;
     resolver.resolve_trusted()?;
+    resolver.resolve_trusted_inherent_owners()?;
     resolver.validate_language_items()?;
     resolver.resolve_source_generics()?;
     resolver.prime_source_impl_headers()?;
@@ -280,6 +282,7 @@ struct SignatureResolver<'input, 'hir> {
     trait_method_owners: BTreeMap<CanonicalTarget, CanonicalTarget>,
     declared_impl_methods: BTreeMap<CanonicalTarget, Box<[DeclaredImplMethod]>>,
     trait_adapters: BTreeMap<CanonicalTarget, TraitAdapterSignature>,
+    trusted_inherent_owners: BTreeMap<ConcreteOwnerHead, InherentMethodInventory>,
     prelude_traits: BTreeSet<PreludeTraitSignature>,
     generic_types: BTreeMap<GenericParameterId, TypeId>,
     generic_bounds: BTreeMap<GenericParameterId, Box<[TraitRef]>>,

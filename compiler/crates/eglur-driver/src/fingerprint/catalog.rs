@@ -1,11 +1,12 @@
 use eglur_sema::{
     CanonicalFingerprintBuilder, DeclarationKind, EffectCategory, EffectSummary,
     ExternalNameCoverage, ExternalNameEnvironment, ExternalSemanticOwner, FingerprintDomain,
-    IntrinsicNominal, LanguageItem, Namespace, PrimitiveType, RawPointerMutability,
-    ReferenceMutability, StateScope, TensorSourceConstructor, TrustedCallableRequirement,
-    TrustedConstructorPayload, TrustedDeclarationSignature, TrustedEnumPayload,
-    TrustedGenericParameter, TrustedInhabitanceProduct, TrustedNominalInhabitance,
-    TrustedSignatureKind, TrustedTraitExpr, TrustedTypeExpr,
+    InherentMemberForm, IntrinsicNominal, LanguageItem, Namespace, PrimitiveType,
+    RawPointerMutability, ReferenceMutability, StateScope, TensorSourceConstructor,
+    TrustedCallableRequirement, TrustedConstructorPayload, TrustedDeclarationSignature,
+    TrustedEnumPayload, TrustedGenericParameter, TrustedInhabitanceProduct, TrustedInherentOwner,
+    TrustedInherentOwnerHead, TrustedNominalInhabitance, TrustedSignatureKind, TrustedTraitExpr,
+    TrustedTypeExpr,
 };
 
 use super::CatalogFingerprint;
@@ -81,6 +82,45 @@ fn write_semantic_owner(builder: &mut CanonicalFingerprintBuilder, owner: Extern
 
 fn write_signatures(builder: &mut CanonicalFingerprintBuilder, catalog: &TrustedCatalog) {
     write_signature_declarations(builder, catalog.signatures().declarations());
+    write_inherent_owners(builder, catalog.signatures().inherent_owners());
+}
+
+fn write_inherent_owners<'a>(
+    builder: &mut CanonicalFingerprintBuilder,
+    owners: impl ExactSizeIterator<Item = &'a TrustedInherentOwner>,
+) {
+    builder.write_len(owners.len());
+    for owner in owners {
+        match &owner.head {
+            TrustedInherentOwnerHead::Primitive(ty) => {
+                builder.write_u8(0);
+                builder.write_str(ty.spelling());
+            }
+            TrustedInherentOwnerHead::Intrinsic(head) => {
+                builder.write_u8(1);
+                builder.write_str(head.spelling());
+            }
+            TrustedInherentOwnerHead::Nominal(head) => {
+                builder.write_u8(2);
+                builder.write_str(head.as_str());
+            }
+        }
+        builder.write_len(owner.members.len());
+        for member in &owner.members {
+            builder.write_str(member.callable.as_str());
+            write_name(builder, &member.name);
+            CatalogType::from(&member.owner_pattern).write_to(builder);
+            builder.write_len(member.owner_parameter_count);
+            builder.write_u8(match member.form {
+                InherentMemberForm::Associated => 0,
+                InherentMemberForm::ValueReceiver => 1,
+                InherentMemberForm::SharedReceiver => 2,
+                InherentMemberForm::MutableReceiver => 3,
+            });
+            builder.write_bool(member.visibility == eglur_hir::Visibility::Public);
+            builder.write_bool(member.overload);
+        }
+    }
 }
 
 fn write_signature_declarations<'a>(
@@ -607,17 +647,19 @@ fn write_declaration_kind(builder: &mut CanonicalFingerprintBuilder, kind: Decla
 
 #[cfg(test)]
 mod tests {
+    use eglur_hir::Visibility;
     use eglur_sema::{
         DeclarationKind, ExternalDeclaration, ExternalDefId, ExternalNameEnvironment,
-        ModuleAddress, NameKey, TensorSourceConstructor, TrustedCallableParameter,
-        TrustedEnumField, TrustedEnumPayload, TrustedEnumVariant, TrustedImplMethod,
+        InherentMemberForm, ModuleAddress, NameKey, TensorSourceConstructor,
+        TrustedCallableParameter, TrustedEnumField, TrustedEnumPayload, TrustedEnumVariant,
+        TrustedImplMethod, TrustedInherentMember, TrustedInherentOwner, TrustedInherentOwnerHead,
         TrustedSignatureEnvironment, TrustedTraitAdapter, TrustedTraitMethod,
     };
 
     use super::{
         CanonicalFingerprintBuilder, CatalogFingerprint, FingerprintDomain, PrimitiveType,
         TrustedDeclarationSignature, TrustedSignatureKind, TrustedTraitExpr, TrustedTypeExpr,
-        write_name_environment, write_signature_declarations,
+        write_inherent_owners, write_name_environment, write_signature_declarations,
     };
 
     fn id(value: &str) -> ExternalDefId {
@@ -628,6 +670,95 @@ mod tests {
         let mut builder = CanonicalFingerprintBuilder::new(FingerprintDomain::Catalog);
         write_signature_declarations(&mut builder, declarations.iter());
         CatalogFingerprint(builder.finish())
+    }
+
+    fn inherent_fingerprint(owners: Vec<TrustedInherentOwner>) -> CatalogFingerprint {
+        let signatures = TrustedSignatureEnvironment::with_inherent_owners(
+            ["test::a", "test::b"].map(|id_value| {
+                TrustedDeclarationSignature::new(
+                    id(id_value),
+                    TrustedSignatureKind::Callable {
+                        bang: false,
+                        generic_parameters: Box::new([]),
+                        parameters: Box::new([]),
+                        result: TrustedTypeExpr::Primitive(PrimitiveType::Unit),
+                        requirements: Box::new([]),
+                    },
+                )
+            }),
+            owners,
+        )
+        .unwrap();
+        let mut builder = CanonicalFingerprintBuilder::new(FingerprintDomain::Catalog);
+        write_signature_declarations(&mut builder, signatures.declarations());
+        write_inherent_owners(&mut builder, signatures.inherent_owners());
+        CatalogFingerprint(builder.finish())
+    }
+
+    #[test]
+    fn ordinary_membership_fingerprint_observes_coverage_identity_and_contract_fields() {
+        let owner = TrustedInherentOwner {
+            head: TrustedInherentOwnerHead::Primitive(PrimitiveType::Str),
+            members: Box::new([TrustedInherentMember {
+                callable: id("test::a"),
+                name: NameKey::new("empty", false).unwrap(),
+                owner_pattern: TrustedTypeExpr::Primitive(PrimitiveType::Str),
+                owner_parameter_count: 0,
+                form: InherentMemberForm::Associated,
+                visibility: Visibility::Public,
+                overload: false,
+            }]),
+        };
+        let baseline = inherent_fingerprint(vec![owner.clone()]);
+        let mut empty = owner.clone();
+        empty.members = Box::new([]);
+        assert_ne!(
+            inherent_fingerprint(vec![]),
+            inherent_fingerprint(vec![empty.clone()])
+        );
+        assert_ne!(baseline, inherent_fingerprint(vec![empty]));
+        for field in 0..4 {
+            let mut changed = owner.clone();
+            match field {
+                0 => changed.members[0].callable = id("test::b"),
+                1 => changed.members[0].name = NameKey::new("different", false).unwrap(),
+                2 => changed.members[0].visibility = Visibility::Private,
+                3 => changed.members[0].overload = true,
+                _ => unreachable!(),
+            }
+            assert_ne!(baseline, inherent_fingerprint(vec![changed]));
+        }
+        let mut changed_head = owner;
+        changed_head.head = TrustedInherentOwnerHead::Primitive(PrimitiveType::I64);
+        changed_head.members[0].owner_pattern = TrustedTypeExpr::Primitive(PrimitiveType::I64);
+        assert_ne!(baseline, inherent_fingerprint(vec![changed_head]));
+    }
+
+    #[test]
+    fn ordinary_membership_fingerprint_is_independent_of_input_order() {
+        let mut members = ["test::a", "test::b"].map(|value| TrustedInherentMember {
+            callable: id(value),
+            name: NameKey::new("empty", false).unwrap(),
+            owner_pattern: TrustedTypeExpr::Primitive(PrimitiveType::Str),
+            owner_parameter_count: 0,
+            form: InherentMemberForm::Associated,
+            visibility: Visibility::Public,
+            overload: true,
+        });
+        let inventory = |members: Box<[TrustedInherentMember]>| TrustedInherentOwner {
+            head: TrustedInherentOwnerHead::Primitive(PrimitiveType::Str),
+            members,
+        };
+        let empty = TrustedInherentOwner {
+            head: TrustedInherentOwnerHead::Primitive(PrimitiveType::I64),
+            members: Box::new([]),
+        };
+        let first = inherent_fingerprint(vec![inventory(members.clone().into()), empty.clone()]);
+        members.reverse();
+        assert_eq!(
+            first,
+            inherent_fingerprint(vec![empty, inventory(members.into())])
+        );
     }
 
     fn name_fingerprint(declaration: ExternalDeclaration) -> CatalogFingerprint {

@@ -50,6 +50,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             trait_method_owners: BTreeMap::new(),
             declared_impl_methods: BTreeMap::new(),
             trait_adapters: BTreeMap::new(),
+            trusted_inherent_owners: BTreeMap::new(),
             prelude_traits: BTreeSet::new(),
             generic_types: BTreeMap::new(),
             generic_bounds: BTreeMap::new(),
@@ -103,6 +104,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             trait_method_owners: self.trait_method_owners,
             declared_impl_methods: self.declared_impl_methods,
             trait_adapters: self.trait_adapters,
+            trusted_inherent_owners: self.trusted_inherent_owners,
             prelude_traits: self
                 .prelude_traits
                 .into_iter()

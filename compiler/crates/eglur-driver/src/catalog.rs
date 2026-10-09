@@ -1168,6 +1168,9 @@ impl From<TrustedLanguageItemError> for TrustedCatalogError {
 }
 
 #[cfg(test)]
+mod inherent_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
         RuntimeHook, TrustedCatalog, TrustedCatalogError, declaration, external_id, module,
