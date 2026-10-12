@@ -13,6 +13,9 @@ mod match_control;
 
 #[path = "execution/import_control.rs"]
 mod import_control;
+
+#[path = "execution/name_sequence_control.rs"]
+mod name_sequence_control;
 #[path = "execution/receiver_adjustment.rs"]
 mod receiver_adjustment;
 #[path = "execution/witnesses.rs"]

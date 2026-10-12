@@ -1,4 +1,7 @@
 mod traversal;
+mod visit_outcome;
+
+use visit_outcome::{VisitFold, VisitOutcome};
 
 #[cfg(test)]
 mod tests;
@@ -2147,31 +2150,6 @@ impl Resolver<'_, '_> {
                 file: source.file(),
                 origin,
             })
-    }
-}
-
-#[derive(Clone)]
-enum VisitOutcome {
-    Known,
-    Resolved(ResolvedName),
-    Poisoned(Poison),
-    Unperformed,
-    NotApplicable,
-}
-
-impl VisitOutcome {
-    fn merge(self, other: Self) -> Result<Self, NameResolutionError> {
-        match (self, other) {
-            (Self::Poisoned(left), Self::Poisoned(right)) => {
-                Ok(Self::Poisoned(left.merge(&right)?))
-            }
-            (Self::Poisoned(poison), _) | (_, Self::Poisoned(poison)) => Ok(Self::Poisoned(poison)),
-            (Self::Unperformed, _) | (_, Self::Unperformed) => Ok(Self::Unperformed),
-            (Self::NotApplicable, value) | (value, Self::NotApplicable) => Ok(value),
-            (Self::Resolved(_), Self::Resolved(_)) => Ok(Self::Known),
-            (Self::Resolved(_), Self::Known) | (Self::Known, Self::Resolved(_)) => Ok(Self::Known),
-            (Self::Known, Self::Known) => Ok(Self::Known),
-        }
     }
 }
 
