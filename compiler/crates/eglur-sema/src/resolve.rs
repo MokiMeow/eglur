@@ -1222,7 +1222,7 @@ impl Resolver<'_, '_> {
             return Ok(None);
         }
         let mut candidates = Vec::new();
-        let mut poison: Option<Poison> = None;
+        let mut poison = eglur_diagnostics::PoisonAccumulator::new();
         let mut unperformed = false;
         let mut private = false;
         for &import in imported {
@@ -1240,10 +1240,10 @@ impl Resolver<'_, '_> {
                     }
                 }
                 FactState::Poisoned(next) => {
-                    poison = Some(match poison {
-                        Some(existing) => existing.merge(next)?,
-                        None => next.clone(),
-                    });
+                    #[cfg(test)]
+                    crate::imports::poison_tests::input(0);
+
+                    poison.include(next)?;
                 }
                 FactState::Unperformed => unperformed = true,
                 FactState::NotApplicable => {
@@ -1251,7 +1251,10 @@ impl Resolver<'_, '_> {
                 }
             }
         }
-        if let Some(poison) = poison {
+        if let Some(poison) = poison.finish() {
+            #[cfg(test)]
+            crate::imports::poison_tests::complete(0);
+
             return Ok(Some(NameLookupDecision::Poisoned(poison)));
         }
         if unperformed {

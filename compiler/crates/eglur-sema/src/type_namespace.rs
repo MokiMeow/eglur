@@ -77,7 +77,7 @@ fn lookup_imported_type(
     cross_module: bool,
 ) -> Result<TypeNameLookup, TypeNameLookupError> {
     let mut candidates = Vec::<&ImportedBinding>::new();
-    let mut poison = None;
+    let mut poison = eglur_diagnostics::PoisonAccumulator::new();
     let mut unperformed = false;
     let mut private = false;
 
@@ -94,7 +94,12 @@ fn lookup_imported_type(
                     }
                 }
             }
-            FactState::Poisoned(found) => merge_poison(&mut poison, found)?,
+            FactState::Poisoned(found) => {
+                #[cfg(test)]
+                crate::imports::poison_tests::input(1);
+
+                poison.include(found)?;
+            }
             FactState::Unperformed => unperformed = true,
             FactState::NotApplicable => {
                 return Err(TypeNameLookupError::InvalidImportFact(import));
@@ -102,7 +107,10 @@ fn lookup_imported_type(
         }
     }
 
-    if let Some(poison) = poison {
+    if let Some(poison) = poison.finish() {
+        #[cfg(test)]
+        crate::imports::poison_tests::complete(1);
+
         return Ok(TypeNameLookup::Poisoned(poison));
     }
     if unperformed {
@@ -196,15 +204,4 @@ fn external_lookup<T: Clone>(
                 .into_boxed_slice(),
         ),
     }
-}
-
-fn merge_poison(
-    retained: &mut Option<Poison>,
-    incoming: &Poison,
-) -> Result<(), DiagnosticStoreError> {
-    *retained = Some(match retained.take() {
-        Some(existing) => existing.merge(incoming)?,
-        None => incoming.clone(),
-    });
-    Ok(())
 }
