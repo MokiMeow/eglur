@@ -1,3 +1,4 @@
+mod item_children;
 mod traversal;
 mod visit_outcome;
 
@@ -524,12 +525,9 @@ impl Resolver<'_, '_> {
                 )?)?
             }
             ItemKind::Trait(declaration) => {
-                let mut nested =
+                let nested =
                     self.visit_generics(module, source, hir, &declaration.generic_parameters)?;
-                for &child in &declaration.items {
-                    nested = nested.merge(self.visit_item(module, source, hir, child)?)?;
-                }
-                nested
+                self.visit_item_children(module, source, hir, nested, &declaration.items)?
             }
             ItemKind::Impl(declaration) => {
                 let mut nested =
@@ -537,10 +535,7 @@ impl Resolver<'_, '_> {
                 nested = nested
                     .merge(self.visit_type(module, source, hir, declaration.trait_ref)?)?
                     .merge(self.visit_type(module, source, hir, declaration.target)?)?;
-                for &child in &declaration.items {
-                    nested = nested.merge(self.visit_item(module, source, hir, child)?)?;
-                }
-                nested
+                self.visit_item_children(module, source, hir, nested, &declaration.items)?
             }
             ItemKind::Struct(declaration) => {
                 let mut nested =
@@ -551,10 +546,7 @@ impl Resolver<'_, '_> {
                     hir,
                     declaration.base,
                 )?)?;
-                for &child in &declaration.items {
-                    nested = nested.merge(self.visit_item(module, source, hir, child)?)?;
-                }
-                nested
+                self.visit_item_children(module, source, hir, nested, &declaration.items)?
             }
             ItemKind::Enum(declaration) => {
                 let mut nested =
@@ -607,11 +599,8 @@ impl Resolver<'_, '_> {
                 }
             }
             ItemKind::Property(property) => {
-                let mut nested = self.visit_type(module, source, hir, property.ty)?;
-                for &accessor in &property.accessors {
-                    nested = nested.merge(self.visit_item(module, source, hir, accessor)?)?;
-                }
-                nested
+                let nested = self.visit_type(module, source, hir, property.ty)?;
+                self.visit_item_children(module, source, hir, nested, &property.accessors)?
             }
             ItemKind::Invalid => self.invalid_outcome(source, item.origin())?,
         })?;

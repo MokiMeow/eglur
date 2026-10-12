@@ -14,6 +14,8 @@ mod match_control;
 #[path = "execution/import_control.rs"]
 mod import_control;
 
+#[path = "execution/item_children_control.rs"]
+mod item_children_control;
 #[path = "execution/name_sequence_control.rs"]
 mod name_sequence_control;
 #[path = "execution/receiver_adjustment.rs"]
