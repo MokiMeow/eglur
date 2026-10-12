@@ -287,8 +287,10 @@ pub struct CanonicalTypeStore {
     never: TypeId,
     types: Vec<TypeKind>,
     may_need_generic_substitution: Vec<bool>,
+    ownership_presence: Vec<Option<bool>>,
     type_ids: BTreeMap<TypeKind, TypeId>,
     substitutions: Vec<Box<[TypeId]>>,
+    substitution_ownership_presence: Vec<Option<bool>>,
     substitution_ids: BTreeMap<Box<[TypeId]>, SubstId>,
     nominal_arities: BTreeMap<NominalHead, usize>,
 }
@@ -300,8 +302,10 @@ impl CanonicalTypeStore {
             never,
             types: Vec::new(),
             may_need_generic_substitution: Vec::new(),
+            ownership_presence: Vec::new(),
             type_ids: BTreeMap::new(),
             substitutions: Vec::new(),
+            substitution_ownership_presence: Vec::new(),
             substitution_ids: BTreeMap::new(),
             nominal_arities: BTreeMap::new(),
         };
@@ -491,12 +495,17 @@ impl CanonicalTypeStore {
             return Ok(id);
         }
         let id = SubstId::from_index(self.substitutions.len())?;
+        let ownership_presence = self.ownership_presence_for_types(arguments.iter().copied());
         self.substitution_ids.insert(arguments.clone(), id);
         self.substitutions.push(arguments);
+        self.substitution_ownership_presence
+            .push(ownership_presence);
         Ok(id)
     }
 
     pub fn kind(&self, id: TypeId) -> Result<&TypeKind, TypeStoreError> {
+        #[cfg(test)]
+        ownership_presence_tests::observe_kind_read();
         self.types
             .get(id.index())
             .ok_or(TypeStoreError::UnknownType(id))
@@ -560,6 +569,12 @@ impl CanonicalTypeStore {
     }
 
     pub fn contains_ownership(&self, root: TypeId) -> Result<bool, TypeStoreError> {
+        self.require_type(root)?;
+        if let Some(present) = self.ownership_presence[root.index()] {
+            return Ok(present);
+        }
+
+        // Incomplete private metadata retains the original fallible traversal.
         self.contains(root, |kind| {
             matches!(
                 kind,
@@ -785,13 +800,49 @@ impl CanonicalTypeStore {
         }
         let id = TypeId::from_index(self.types.len())?;
         let may_need_generic_substitution = self.kind_needs_generic_substitution(&kind);
+        let ownership_presence = self.kind_ownership_presence(&kind);
         self.type_ids.insert(kind.clone(), id);
         self.types.push(kind);
         self.may_need_generic_substitution
             .push(may_need_generic_substitution);
+        self.ownership_presence.push(ownership_presence);
         #[cfg(test)]
         substitution_tests::observe_admission();
         Ok(id)
+    }
+
+    fn kind_ownership_presence(&self, kind: &TypeKind) -> Option<bool> {
+        match kind {
+            TypeKind::Nominal {
+                head: NominalHead::Intrinsic(IntrinsicNominal::Own),
+                ..
+            } => Some(true),
+            TypeKind::Nominal { substitution, .. } => self
+                .substitution_ownership_presence
+                .get(substitution.index())
+                .copied()
+                .flatten(),
+            _ => self.ownership_presence_for_types(
+                self.payload_dependencies_for_kind(kind)
+                    .ok()?
+                    .filter_map(|dependency| match dependency {
+                        PayloadDependency::Type(child) => Some(child),
+                        PayloadDependency::Projection(_) => None,
+                    }),
+            ),
+        }
+    }
+
+    fn ownership_presence_for_types(&self, children: impl Iterator<Item = TypeId>) -> Option<bool> {
+        let mut present = false;
+        for child in children {
+            present |= self
+                .ownership_presence
+                .get(child.index())
+                .copied()
+                .flatten()?;
+        }
+        Some(present)
     }
 
     fn require_type(&self, id: TypeId) -> Result<(), TypeStoreError> {
@@ -911,6 +962,8 @@ impl From<IdentityOverflow> for TypeStoreError {
     }
 }
 
+#[cfg(test)]
+mod ownership_presence_tests;
 mod rewrite;
 
 #[cfg(test)]

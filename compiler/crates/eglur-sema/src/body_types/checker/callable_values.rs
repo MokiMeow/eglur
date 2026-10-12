@@ -565,6 +565,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(Outcome::Poisoned(poison));
         }
 
+        if self.signatures.types().contains_ownership(selected.ty)? {
+            return self
+                .type_error(
+                    source,
+                    origin,
+                    "OWNERSHIP_TYPE_POSITION_FORBIDDEN",
+                    "Own type position is forbidden in a callable value",
+                    BTreeMap::new(),
+                )
+                .map(Outcome::Poisoned);
+        }
+
         let key = ExpressionKey::new(module, expression);
         self.record_trait_obligations(
             key,

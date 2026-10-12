@@ -17,8 +17,10 @@ fn copy_store(store: &CanonicalTypeStore) -> CanonicalTypeStore {
         never: store.never,
         types: store.types.clone(),
         may_need_generic_substitution: store.may_need_generic_substitution.clone(),
+        ownership_presence: store.ownership_presence.clone(),
         type_ids: store.type_ids.clone(),
         substitutions: store.substitutions.clone(),
+        substitution_ownership_presence: store.substitution_ownership_presence.clone(),
         substitution_ids: store.substitution_ids.clone(),
         nominal_arities: store.nominal_arities.clone(),
     }
@@ -32,6 +34,11 @@ fn assert_store_parity(actual: &CanonicalTypeStore, expected: &CanonicalTypeStor
         expected.may_need_generic_substitution
     );
     assert_eq!(actual.type_ids, expected.type_ids);
+    assert_eq!(actual.ownership_presence, expected.ownership_presence);
+    assert_eq!(
+        actual.substitution_ownership_presence,
+        expected.substitution_ownership_presence
+    );
     assert_eq!(actual.substitutions, expected.substitutions);
     assert_eq!(actual.substitution_ids, expected.substitution_ids);
     assert_eq!(actual.nominal_arities, expected.nominal_arities);
