@@ -193,6 +193,15 @@ fn infer_effects(
                             .into_boxed_str(),
                         ));
                     }
+                    CanonicalTarget::Intrinsic(intrinsic) => {
+                        return Err(EffectAnalysisError::GraphInvariant(
+                            format!(
+                                "intrinsic {} has a callable declaration signature",
+                                intrinsic.spelling()
+                            )
+                            .into_boxed_str(),
+                        ));
+                    }
                     CanonicalTarget::External(declaration) => {
                         let summary = trusted
                             .and_then(|environment| environment.summary(&declaration))

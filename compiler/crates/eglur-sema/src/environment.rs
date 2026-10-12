@@ -92,11 +92,20 @@ impl ExternalDeclaration {
         name: NameKey,
         kind: DeclarationKind,
     ) -> Result<Self, ExternalEnvironmentError> {
-        if kind == DeclarationKind::PrimitiveType {
+        if matches!(
+            kind,
+            DeclarationKind::PrimitiveType | DeclarationKind::IntrinsicType
+        ) {
             return Err(ExternalEnvironmentError::CompilerOwnedDeclarationKind(kind));
         }
         if kind.namespace().is_none() {
             return Err(ExternalEnvironmentError::UnnameableDeclarationKind(kind));
+        }
+        if kind.namespace() == Some(Namespace::Type)
+            && module.as_str() == "std::prelude"
+            && crate::type_namespace::builtin_prelude_binding(&name).is_some()
+        {
+            return Err(ExternalEnvironmentError::CompilerOwnedTypeBinding { module, name });
         }
         Ok(Self {
             id,
@@ -332,6 +341,10 @@ fn freeze_multimap<K: Ord>(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExternalEnvironmentError {
     CompilerOwnedDeclarationKind(DeclarationKind),
+    CompilerOwnedTypeBinding {
+        module: ModuleAddress,
+        name: NameKey,
+    },
     UnnameableDeclarationKind(DeclarationKind),
     DuplicateModule(ModuleAddress),
     DuplicateIdentity(ExternalDefId),
@@ -349,6 +362,13 @@ impl fmt::Display for ExternalEnvironmentError {
                 write!(
                     formatter,
                     "external declarations cannot define compiler-owned kind {kind:?}"
+                )
+            }
+            Self::CompilerOwnedTypeBinding { module, name } => {
+                write!(
+                    formatter,
+                    "external declarations cannot redefine compiler-owned type {module}::{}",
+                    name.text()
                 )
             }
             Self::UnnameableDeclarationKind(kind) => {

@@ -664,6 +664,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     ) -> Result<DeclarationKind, SignatureResolutionError> {
         match target {
             CanonicalTarget::Primitive(_) => Ok(DeclarationKind::PrimitiveType),
+            CanonicalTarget::Intrinsic(_) => Ok(DeclarationKind::IntrinsicType),
             CanonicalTarget::Source(id) => Ok(self
                 .collection
                 .declaration(*id)

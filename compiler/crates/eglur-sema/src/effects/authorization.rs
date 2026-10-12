@@ -161,6 +161,7 @@ fn call_target_name(
     };
     match target {
         CanonicalTarget::Primitive(primitive) => Ok(primitive.spelling().to_owned()),
+        CanonicalTarget::Intrinsic(intrinsic) => Ok(intrinsic.spelling().to_owned()),
         CanonicalTarget::Source(declaration) => source_callable_name(collection, *declaration),
         CanonicalTarget::External(declaration) => Ok(declaration
             .as_str()
@@ -183,6 +184,10 @@ fn call_related_span(
         } => *declaration,
         EffectDispatch::Target(CanonicalTarget::External(_))
         | EffectDispatch::Target(CanonicalTarget::Primitive(_))
+        | EffectDispatch::Target(CanonicalTarget::Intrinsic(_))
+        | EffectDispatch::BoundRequirement {
+            method: CanonicalTarget::Intrinsic(_),
+        }
         | EffectDispatch::BoundRequirement {
             method: CanonicalTarget::Primitive(_),
         }

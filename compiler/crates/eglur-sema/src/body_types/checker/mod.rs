@@ -615,6 +615,7 @@ impl ResolvedTargetKind {
             DeclarationKind::Impl => Self::Impl,
             DeclarationKind::Struct => Self::Struct,
             DeclarationKind::OpaqueType => Self::NominalType,
+            DeclarationKind::IntrinsicType => Self::NominalType,
             DeclarationKind::PrimitiveType => Self::PrimitiveType,
             DeclarationKind::Enum => Self::Enum,
             DeclarationKind::EnumVariantField | DeclarationKind::StorageField => Self::Field,

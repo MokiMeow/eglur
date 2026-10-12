@@ -76,6 +76,7 @@ pub enum StableTargetKey {
     Source(StableDeclarationKey),
     External(ExternalDefId),
     Primitive(crate::PrimitiveType),
+    Intrinsic(IntrinsicNominal),
 }
 
 impl StableTargetKey {
@@ -92,6 +93,10 @@ impl StableTargetKey {
             Self::Primitive(primitive) => {
                 builder.write_u8(2);
                 builder.write_str(primitive.spelling());
+            }
+            Self::Intrinsic(intrinsic) => {
+                builder.write_u8(3);
+                builder.write_str(intrinsic.spelling());
             }
         }
     }
@@ -119,6 +124,7 @@ impl StableDeclarationKeys {
     pub fn target(&self, target: &CanonicalTarget) -> Option<StableTargetKey> {
         match target {
             CanonicalTarget::Primitive(primitive) => Some(StableTargetKey::Primitive(*primitive)),
+            CanonicalTarget::Intrinsic(intrinsic) => Some(StableTargetKey::Intrinsic(*intrinsic)),
             CanonicalTarget::Source(declaration) => self
                 .source(*declaration)
                 .cloned()
@@ -150,7 +156,9 @@ impl StableDeclarationKeys {
                     CanonicalTarget::Source(declaration) => {
                         StableDeclarationError::UnknownDeclaration(*declaration)
                     }
-                    CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
+                    CanonicalTarget::External(_)
+                    | CanonicalTarget::Primitive(_)
+                    | CanonicalTarget::Intrinsic(_) => {
                         unreachable!("non-source targets are stable")
                     }
                 })?;
@@ -414,6 +422,7 @@ impl<'a> KeyDeriver<'a> {
     ) -> Result<StableTargetKey, StableDeclarationError> {
         match target {
             CanonicalTarget::Primitive(primitive) => Ok(StableTargetKey::Primitive(*primitive)),
+            CanonicalTarget::Intrinsic(intrinsic) => Ok(StableTargetKey::Intrinsic(*intrinsic)),
             CanonicalTarget::Source(declaration) => {
                 self.derive_one(*declaration).map(StableTargetKey::Source)
             }
@@ -537,7 +546,9 @@ impl StableType {
                 CanonicalTarget::Source(declaration) => {
                     StableDeclarationError::UnknownDeclaration(*declaration)
                 }
-                CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
+                CanonicalTarget::External(_)
+                | CanonicalTarget::Primitive(_)
+                | CanonicalTarget::Intrinsic(_) => {
                     unreachable!("non-source targets are stable")
                 }
             })

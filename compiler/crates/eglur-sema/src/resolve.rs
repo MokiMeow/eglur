@@ -1130,11 +1130,9 @@ impl Resolver<'_, '_> {
             {
                 decision
             } else if namespace == Namespace::Type
-                && let Some(primitive) = crate::type_namespace::primitive_prelude_binding(name)
+                && let Some(builtin) = crate::type_namespace::builtin_prelude_binding(name)
             {
-                NameLookupDecision::Resolved(ResolvedName::Declarations(Box::new([
-                    CanonicalTarget::Primitive(primitive),
-                ])))
+                NameLookupDecision::Resolved(ResolvedName::Declarations(Box::new([builtin])))
             } else {
                 requirements.push(CompileCapability::Resolve(
                     ResolveCapability::ResolveTrustedExternalNames,
@@ -1349,6 +1347,7 @@ impl Resolver<'_, '_> {
                 targets.iter().all(|target| {
                     let kind = match target {
                         CanonicalTarget::Primitive(_) => Some(DeclarationKind::PrimitiveType),
+                        CanonicalTarget::Intrinsic(_) => Some(DeclarationKind::IntrinsicType),
                         CanonicalTarget::Source(id) => self
                             .collection
                             .declaration(*id)
@@ -1422,11 +1421,11 @@ impl Resolver<'_, '_> {
             && !root.is_bang()
             && module.text() == "prelude"
             && !module.is_bang()
-            && let Some(primitive) = crate::type_namespace::primitive_prelude_binding(name)
+            && let Some(builtin) = crate::type_namespace::builtin_prelude_binding(name)
         {
             if lookup.direct_namespace() == Namespace::Type {
                 return Ok(ExternalModuleLookup::Matched(VisitOutcome::Resolved(
-                    ResolvedName::Declarations(Box::new([CanonicalTarget::Primitive(primitive)])),
+                    ResolvedName::Declarations(Box::new([builtin])),
                 )));
             }
             let prelude =

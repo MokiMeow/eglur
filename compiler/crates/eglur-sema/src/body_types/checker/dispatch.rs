@@ -120,7 +120,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Outcome::Known(owner) => owner,
                 outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
             };
-        let concrete = if matches!(owner.target, CanonicalTarget::Primitive(_)) {
+        let concrete = if matches!(
+            owner.target,
+            CanonicalTarget::Primitive(_) | CanonicalTarget::Intrinsic(_)
+        ) {
             true
         } else {
             match self.signatures.declaration(&owner.target) {

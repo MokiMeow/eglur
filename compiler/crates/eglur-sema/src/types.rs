@@ -338,6 +338,9 @@ impl CanonicalTypeStore {
         if let NominalHead::Declaration(CanonicalTarget::Primitive(primitive)) = head {
             return Err(TypeStoreError::PrimitiveNominalHead(primitive));
         }
+        if let NominalHead::Declaration(CanonicalTarget::Intrinsic(intrinsic)) = head {
+            return Err(TypeStoreError::IntrinsicDeclarationHead(intrinsic));
+        }
         if let Some(&existing) = self.nominal_arities.get(&head) {
             if existing != arity {
                 return Err(TypeStoreError::ConflictingNominalArity {
@@ -902,6 +905,7 @@ pub enum TypeStoreError {
     UnknownSubstitution(SubstId),
     UnregisteredNominalHead(NominalHead),
     PrimitiveNominalHead(PrimitiveType),
+    IntrinsicDeclarationHead(IntrinsicNominal),
     ConflictingNominalArity {
         head: NominalHead,
         existing: usize,
@@ -933,6 +937,11 @@ impl fmt::Display for TypeStoreError {
                     primitive.spelling()
                 )
             }
+            Self::IntrinsicDeclarationHead(intrinsic) => write!(
+                formatter,
+                "intrinsic {} must use its canonical nominal head",
+                intrinsic.spelling()
+            ),
             Self::ConflictingNominalArity {
                 head,
                 existing,
@@ -1017,6 +1026,33 @@ mod tests {
 
             let ty = store.primitive(primitive).unwrap();
             assert_eq!(store.kind(ty).unwrap(), &TypeKind::Primitive(primitive));
+        }
+    }
+
+    #[test]
+    fn intrinsic_bindings_cannot_be_wrapped_in_declaration_nominal_heads() {
+        let mut store = CanonicalTypeStore::new().unwrap();
+        let scalar = store.primitive(PrimitiveType::I64).unwrap();
+        for intrinsic in [
+            IntrinsicNominal::Own,
+            IntrinsicNominal::Box,
+            IntrinsicNominal::Opt,
+            IntrinsicNominal::Res,
+        ] {
+            let duplicate = NominalHead::Declaration(CanonicalTarget::Intrinsic(intrinsic));
+            assert_eq!(
+                store.register_nominal_head(duplicate.clone(), intrinsic.arity()),
+                Err(TypeStoreError::IntrinsicDeclarationHead(intrinsic))
+            );
+            assert_eq!(store.nominal_arity(&duplicate), None);
+            let arguments = vec![scalar; intrinsic.arity()];
+            assert!(store.nominal(duplicate, arguments.iter().copied()).is_err());
+            let ty = store
+                .nominal(NominalHead::Intrinsic(intrinsic), arguments)
+                .unwrap();
+            assert!(
+                matches!(store.kind(ty).unwrap(), TypeKind::Nominal { head: NominalHead::Intrinsic(found), .. } if *found == intrinsic)
+            );
         }
     }
 

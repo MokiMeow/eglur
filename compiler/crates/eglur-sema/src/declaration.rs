@@ -40,6 +40,7 @@ pub enum DeclarationKind {
     Property,
     GenericParameter,
     PrimitiveType,
+    IntrinsicType,
 }
 
 impl DeclarationKind {
@@ -58,7 +59,8 @@ impl DeclarationKind {
             | Self::Enum
             | Self::OpaqueType
             | Self::TypeAlias
-            | Self::PrimitiveType => Some(Namespace::Type),
+            | Self::PrimitiveType
+            | Self::IntrinsicType => Some(Namespace::Type),
             Self::Impl
             | Self::EnumVariant
             | Self::EnumVariantField
@@ -404,6 +406,7 @@ impl DeclarationCollection {
                 }),
             DeclarationKind::Impl
             | DeclarationKind::PrimitiveType
+            | DeclarationKind::IntrinsicType
             | DeclarationKind::OpaqueType
             | DeclarationKind::IntrinsicConstructor
             | DeclarationKind::AssociatedType

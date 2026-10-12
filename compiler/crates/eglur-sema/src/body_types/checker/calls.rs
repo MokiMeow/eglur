@@ -15,6 +15,13 @@ impl QualifiedMethodOwner {
             (TypeKind::Primitive(found), CanonicalTarget::Primitive(owner)) => found == owner,
             (
                 TypeKind::Nominal {
+                    head: NominalHead::Intrinsic(found),
+                    ..
+                },
+                CanonicalTarget::Intrinsic(owner),
+            ) => found == owner,
+            (
+                TypeKind::Nominal {
                     head: NominalHead::Declaration(found),
                     ..
                 },
@@ -36,6 +43,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(Outcome::Known(QualifiedMethodOwner {
                 target: written.clone(),
                 fixed_subject: Some(self.signatures.types_mut().primitive(*owner)?),
+            }));
+        }
+        if matches!(written, CanonicalTarget::Intrinsic(_)) {
+            return Ok(Outcome::Known(QualifiedMethodOwner {
+                target: written.clone(),
+                fixed_subject: None,
             }));
         }
         match self.signatures.declaration(written) {
@@ -69,18 +82,24 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         &CanonicalTarget::Primitive(*primitive),
                     );
                 }
-                let TypeKind::Nominal {
-                    head: NominalHead::Declaration(target),
-                    ..
-                } = self.signatures.types().kind(value)?
-                else {
-                    return Ok(Outcome::Known(QualifiedMethodOwner {
-                        target: written.clone(),
-                        fixed_subject: None,
-                    }));
+                let target = match self.signatures.types().kind(value)? {
+                    TypeKind::Nominal {
+                        head: NominalHead::Declaration(target),
+                        ..
+                    } => target.clone(),
+                    TypeKind::Nominal {
+                        head: NominalHead::Intrinsic(intrinsic),
+                        ..
+                    } => CanonicalTarget::Intrinsic(*intrinsic),
+                    _ => {
+                        return Ok(Outcome::Known(QualifiedMethodOwner {
+                            target: written.clone(),
+                            fixed_subject: None,
+                        }));
+                    }
                 };
                 Ok(Outcome::Known(QualifiedMethodOwner {
-                    target: target.clone(),
+                    target,
                     fixed_subject: Some(value),
                 }))
             }

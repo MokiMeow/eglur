@@ -870,6 +870,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     ) -> Option<&'target str> {
         match target {
             CanonicalTarget::Primitive(primitive) => Some(primitive.spelling()),
+            CanonicalTarget::Intrinsic(intrinsic) => Some(intrinsic.spelling()),
             CanonicalTarget::Source(declaration) => self
                 .collection
                 .declaration(*declaration)

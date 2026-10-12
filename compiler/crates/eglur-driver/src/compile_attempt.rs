@@ -304,6 +304,12 @@ impl CompileAttempt {
                                         owner.spelling()
                                     ));
                                 }
+                                UnavailableCompileInput::IntrinsicInherentInventory { owner } => {
+                                    label.push_str(&format!(
+                                        " (missing inherent inventory: std::prelude::{})",
+                                        owner.spelling()
+                                    ));
+                                }
                                 UnavailableCompileInput::TrustedInherentInventory { owner } => {
                                     label.push_str(&format!(
                                         " (missing inherent inventory: {})",
@@ -629,6 +635,10 @@ fn compile_input_refusal_json(refusal: &CompileInputRefusal) -> Value {
         }
         UnavailableCompileInput::PrimitiveInherentInventory { owner } => (
             "primitive_inherent_inventory",
+            format!("std::prelude::{}", owner.spelling()),
+        ),
+        UnavailableCompileInput::IntrinsicInherentInventory { owner } => (
+            "intrinsic_inherent_inventory",
             format!("std::prelude::{}", owner.spelling()),
         ),
     };

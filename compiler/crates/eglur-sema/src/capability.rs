@@ -297,6 +297,7 @@ pub enum DemandDisposition {
 pub enum UnavailableCompileInput {
     TrustedInherentInventory { owner: ExternalDefId },
     PrimitiveInherentInventory { owner: crate::PrimitiveType },
+    IntrinsicInherentInventory { owner: crate::IntrinsicNominal },
     TrustedValueMemberInventory { owner: ExternalDefId },
 }
 
@@ -307,7 +308,9 @@ impl UnavailableCompileInput {
             Self::TrustedValueMemberInventory { .. } => {
                 CompileCapability::Typecheck(TypecheckCapability::ResolveMembers)
             }
-            Self::TrustedInherentInventory { .. } | Self::PrimitiveInherentInventory { .. } => {
+            Self::TrustedInherentInventory { .. }
+            | Self::PrimitiveInherentInventory { .. }
+            | Self::IntrinsicInherentInventory { .. } => {
                 CompileCapability::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods)
             }
         }

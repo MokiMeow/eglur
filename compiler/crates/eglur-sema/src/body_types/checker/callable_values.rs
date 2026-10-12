@@ -29,7 +29,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Known(owner) => owner,
             outcome => return Ok(outcome.map(|_| unreachable!())),
         };
-        if matches!(owner.target, CanonicalTarget::Primitive(_)) {
+        if matches!(
+            owner.target,
+            CanonicalTarget::Primitive(_) | CanonicalTarget::Intrinsic(_)
+        ) {
             return self.type_qualified_concrete_method_value(
                 module, source, expression, member, &owner, request,
             );

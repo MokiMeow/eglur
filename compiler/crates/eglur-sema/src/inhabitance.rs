@@ -347,6 +347,9 @@ impl<'facts> InhabitanceGraph<'facts> {
             NominalHead::Declaration(CanonicalTarget::Primitive(primitive)) => Err(
                 InhabitanceError::TypeStore(TypeStoreError::PrimitiveNominalHead(*primitive)),
             ),
+            NominalHead::Declaration(CanonicalTarget::Intrinsic(intrinsic)) => Err(
+                InhabitanceError::TypeStore(TypeStoreError::IntrinsicDeclarationHead(*intrinsic)),
+            ),
             NominalHead::Intrinsic(IntrinsicNominal::Opt) => {
                 Ok(NodeFormula::Constant(Inhabitance::Inhabited))
             }

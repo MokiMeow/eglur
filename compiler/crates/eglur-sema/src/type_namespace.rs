@@ -136,9 +136,9 @@ pub(crate) fn lookup_external_module_type(
     name: &NameKey,
 ) -> TypeNameLookup {
     if module.as_str() == "std::prelude"
-        && let Some(primitive) = primitive_prelude_binding(name)
+        && let Some(builtin) = builtin_prelude_binding(name)
     {
-        return TypeNameLookup::Unique(CanonicalTarget::Primitive(primitive));
+        return TypeNameLookup::Unique(builtin);
     }
     external.map_or(TypeNameLookup::Unperformed, |external| {
         external_lookup(
@@ -152,8 +152,8 @@ pub(crate) fn lookup_prelude_type(
     external: Option<&ExternalNameEnvironment>,
     name: &NameKey,
 ) -> TypeNameLookup {
-    if let Some(primitive) = primitive_prelude_binding(name) {
-        return TypeNameLookup::Unique(CanonicalTarget::Primitive(primitive));
+    if let Some(builtin) = builtin_prelude_binding(name) {
+        return TypeNameLookup::Unique(builtin);
     }
     external.map_or(TypeNameLookup::Unperformed, |external| {
         external_lookup(
@@ -167,6 +167,17 @@ pub(crate) fn primitive_prelude_binding(name: &NameKey) -> Option<crate::Primiti
     (!name.is_bang())
         .then(|| crate::PrimitiveType::from_spelling(name.text()))
         .flatten()
+}
+
+pub(crate) fn builtin_prelude_binding(name: &NameKey) -> Option<CanonicalTarget> {
+    if name.is_bang() {
+        return None;
+    }
+    primitive_prelude_binding(name)
+        .map(CanonicalTarget::Primitive)
+        .or_else(|| {
+            crate::IntrinsicNominal::from_spelling(name.text()).map(CanonicalTarget::Intrinsic)
+        })
 }
 
 fn external_lookup<T: Clone>(

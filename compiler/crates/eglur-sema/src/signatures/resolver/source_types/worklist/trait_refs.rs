@@ -83,6 +83,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         expected: "a trait declaration",
                     })
                 }
+                CanonicalTarget::Intrinsic(intrinsic) => {
+                    Err(SignatureResolutionError::UnexpectedIntrinsicTarget {
+                        intrinsic: *intrinsic,
+                        expected: "a trait declaration",
+                    })
+                }
                 CanonicalTarget::Source(_) => {
                     Err(SignatureResolutionError::MissingTrustedSignature(target))
                 }

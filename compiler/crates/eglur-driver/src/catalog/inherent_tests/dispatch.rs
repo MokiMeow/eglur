@@ -3,7 +3,9 @@ use crate::{
     EvaluationLimits, ExecutionAttempt, ExecutionOutcome, ProgramMode, SealedCompilation,
     SupportReason, Value, execute,
 };
-use eglur_sema::{CanonicalTarget, CompileCapability, InvocationTarget, TypecheckCapability};
+use eglur_sema::{
+    CanonicalTarget, CompileCapability, IntrinsicNominal, InvocationTarget, TypecheckCapability,
+};
 
 const PACKET: &str = "std::fixture::Packet";
 
@@ -84,6 +86,40 @@ fn fixture_catalog_for_root(
     head: TrustedInherentOwnerHead,
     root: TrustedTypeExpr,
 ) -> TrustedCatalog {
+    fixture_catalog_for_heads(
+        head,
+        root,
+        TrustedInherentOwnerHead::Nominal(external_id(PACKET)),
+    )
+}
+
+fn fixture_application(
+    head: &TrustedInherentOwnerHead,
+    argument: TrustedTypeExpr,
+) -> TrustedTypeExpr {
+    match head {
+        TrustedInherentOwnerHead::Nominal(id) => nominal(id.clone(), [argument]),
+        TrustedInherentOwnerHead::Intrinsic(intrinsic_head) => {
+            if *intrinsic_head == IntrinsicNominal::Res {
+                intrinsic(
+                    *intrinsic_head,
+                    [argument, nominal(external_id(NUMERIC_ERROR), [])],
+                )
+            } else {
+                intrinsic(*intrinsic_head, [argument])
+            }
+        }
+        TrustedInherentOwnerHead::Primitive(_) => {
+            panic!("fixture generic owner has no primitive form")
+        }
+    }
+}
+
+fn fixture_catalog_for_heads(
+    head: TrustedInherentOwnerHead,
+    root: TrustedTypeExpr,
+    generic_head: TrustedInherentOwnerHead,
+) -> TrustedCatalog {
     let TrustedCatalog {
         names,
         signatures,
@@ -94,7 +130,7 @@ fn fixture_catalog_for_root(
     } = TrustedCatalog::first_slice().unwrap();
     let scalar = TrustedTypeExpr::Primitive(PrimitiveType::I64);
     let unit = TrustedTypeExpr::Primitive(PrimitiveType::Unit);
-    let packet = nominal(external_id(PACKET), [TrustedTypeExpr::GenericParameter(0)]);
+    let packet = fixture_application(&generic_head, TrustedTypeExpr::GenericParameter(0));
     let mut members = vec![
         member(
             "fixture::add",
@@ -222,12 +258,12 @@ fn fixture_catalog_for_root(
         member(
             "fixture::diagonal",
             "diagonal",
-            nominal(
-                external_id(PACKET),
-                [TrustedTypeExpr::Tuple(Box::new([
+            fixture_application(
+                &generic_head,
+                TrustedTypeExpr::Tuple(Box::new([
                     TrustedTypeExpr::GenericParameter(0),
                     TrustedTypeExpr::GenericParameter(0),
-                ]))],
+                ])),
             ),
             InherentMemberForm::SharedReceiver,
             MemberBinders {
@@ -238,9 +274,9 @@ fn fixture_catalog_for_root(
             scalar,
         ),
     ];
-    let union_owner = nominal(
-        external_id(PACKET),
-        [TrustedTypeExpr::Intrinsic {
+    let union_owner = fixture_application(
+        &generic_head,
+        TrustedTypeExpr::Intrinsic {
             head: eglur_sema::IntrinsicNominal::Res,
             arguments: Box::new([
                 TrustedTypeExpr::Primitive(PrimitiveType::I64),
@@ -249,7 +285,7 @@ fn fixture_catalog_for_root(
                     nominal(external_id(NUMERIC_ERROR), []),
                 ])),
             ]),
-        }],
+        },
     );
     for (id, method_name, form, arguments) in [
         (
@@ -296,7 +332,7 @@ fn fixture_catalog_for_root(
                 .collect(),
         },
         TrustedInherentOwner {
-            head: TrustedInherentOwnerHead::Nominal(external_id(PACKET)),
+            head: generic_head.clone(),
             members: members[9..]
                 .iter()
                 .map(|(_, member)| member.clone())
@@ -356,7 +392,7 @@ fn fixture_catalog_for_root(
             .chain([enum_callable]),
         signatures
             .inherent_owners()
-            .filter(|owner| owner.head != head)
+            .filter(|owner| owner.head != head && owner.head != generic_head)
             .cloned()
             .chain(owners),
     )
@@ -863,6 +899,203 @@ fn associated_hook_executes_direct_grouped_and_named_fn_forms() {
 }
 
 #[test]
+fn intrinsic_inventories_select_real_callable_identities_without_payload_forwarding() {
+    for (head, payload) in [
+        (IntrinsicNominal::Own, "NumericError"),
+        (IntrinsicNominal::Box, "i64"),
+        (IntrinsicNominal::Opt, "i64"),
+        (IntrinsicNominal::Res, "i64, NumericError"),
+    ] {
+        let root = match head {
+            IntrinsicNominal::Own => intrinsic(head, [nominal(external_id(NUMERIC_ERROR), [])]),
+            IntrinsicNominal::Box | IntrinsicNominal::Opt => {
+                intrinsic(head, [TrustedTypeExpr::Primitive(PrimitiveType::I64)])
+            }
+            IntrinsicNominal::Res => intrinsic(
+                head,
+                [
+                    TrustedTypeExpr::Primitive(PrimitiveType::I64),
+                    nominal(external_id(NUMERIC_ERROR), []),
+                ],
+            ),
+        };
+        let catalog = fixture_catalog_for_root(TrustedInherentOwnerHead::Intrinsic(head), root);
+        let owner = head.spelling();
+        let applied = format!("{owner}[{payload}]");
+        let mut sources = vec![
+            (
+                format!("fn use(v: &{applied}) -> i64 = {owner}.read(v)\n"),
+                "fixture::read",
+            ),
+            (
+                format!("fn use(v: &{applied}) -> i64 = (({owner}.read))(v)\n"),
+                "fixture::read",
+            ),
+            (
+                format!("fn use(v: &{applied}) -> i64 = v.read()\n"),
+                "fixture::read",
+            ),
+            (
+                format!(
+                    "fn use() -> i64 {{ let f: Fn(i64, i64) -> i64 = {owner}.add\nyield f(2, 3) }}\n"
+                ),
+                "fixture::add",
+            ),
+            (
+                format!("fn use({owner}: &{applied}) -> i64 = {owner}.read()\n"),
+                "fixture::read",
+            ),
+            (
+                format!(
+                    "import std::prelude::{owner} as Imported\nfn use(v: &Imported[{payload}]) -> i64 = Imported.read(v)\n"
+                ),
+                "fixture::read",
+            ),
+            (
+                format!("fn use() -> i64 = {owner}.pick(true)\n"),
+                "fixture::pick_bool",
+            ),
+            (
+                format!("fn use!() -> Unit = {owner}.emit!(\"event\")\n"),
+                "fixture::emit!",
+            ),
+        ];
+        if head != IntrinsicNominal::Own {
+            sources.push((
+                format!("type Fixed = {applied}\nfn use(v: &Fixed) -> i64 = Fixed.read(v)\n"),
+                "fixture::read",
+            ));
+        }
+        for (source, expected) in sources {
+            let program = require_checked(library(&source, &catalog));
+            let resolution = program.resolution();
+            let bodies = resolution.body_types();
+            let targets = bodies
+                .invocations()
+                .filter_map(|(_, call)| match call.target() {
+                    InvocationTarget::Callable(id) => Some(*id),
+                    _ => None,
+                })
+                .chain(bodies.callable_values().map(|(_, id)| id))
+                .map(|id| {
+                    resolution
+                        .signatures()
+                        .callable(bodies.callable_instance(id).unwrap().signature())
+                        .unwrap()
+                        .declaration()
+                })
+                .collect::<Vec<_>>();
+            assert!(
+                targets.contains(&&CanonicalTarget::External(external_id(expected))),
+                "{source}\n{targets:?}"
+            );
+        }
+        for (source, code) in [
+            (
+                format!("fn use() -> i64 = {owner}.private()\n"),
+                "VISIBILITY_VIOLATION",
+            ),
+            (
+                format!("fn use() -> Unit = {owner}.emit!(\"event\")\n"),
+                "EFFECT_VIOLATION",
+            ),
+            (
+                format!("fn use(v: &{applied}) -> i64 = v.private()\n"),
+                "VISIBILITY_VIOLATION",
+            ),
+        ] {
+            let compilation = library(&source, &catalog);
+            assert!(!compilation.trace().has_unsupported(), "{source}");
+            assert!(compilation.checked_program().is_none());
+            assert!(
+                compilation
+                    .diagnostics()
+                    .diagnostics()
+                    .iter()
+                    .any(|d| d.code().as_str() == code),
+                "{source}\n{:?}",
+                compilation.diagnostics()
+            );
+        }
+        if matches!(head, IntrinsicNominal::Own | IntrinsicNominal::Box) {
+            let source = format!(
+                "struct Payload {{ fn read(self: &Self) -> i64 = 7 }}\nfn use(v: &{owner}[Payload]) -> i64 = v.read()\n"
+            );
+            let compilation = library(&source, &catalog);
+            assert!(!compilation.trace().has_unsupported());
+            assert!(
+                compilation
+                    .diagnostics()
+                    .diagnostics()
+                    .iter()
+                    .any(|d| d.code().as_str() == "METHOD_NOT_FOUND")
+            );
+        }
+    }
+}
+
+#[test]
+fn applied_intrinsic_aliases_keep_fixed_subjects_and_method_tail_arguments() {
+    for (head, applied, other) in [
+        (IntrinsicNominal::Box, "Box[i64]", "Box[Bool]"),
+        (IntrinsicNominal::Opt, "Opt[i64]", "Opt[Bool]"),
+        (
+            IntrinsicNominal::Res,
+            "Res[i64, NumericError]",
+            "Res[Bool, NumericError]",
+        ),
+    ] {
+        let catalog = fixture_catalog_for_heads(
+            TrustedInherentOwnerHead::Nominal(external_id(NUMERIC_ERROR)),
+            nominal(external_id(NUMERIC_ERROR), []),
+            TrustedInherentOwnerHead::Intrinsic(head),
+        );
+        let owner = head.spelling();
+        for source in [
+            format!(
+                "type Fixed = {applied}\nfn use(v: &Fixed) -> Bool = Fixed.map::[Bool](v, true)\n"
+            ),
+            format!("type Fixed = {applied}\nfn use(v: &Fixed) -> Bool = v.map::[Bool](true)\n"),
+            format!(
+                "type Fixed = {applied}\nfn use(v: &Fixed) -> Bool {{ let f: Fn(&Fixed, Bool) -> Bool = {owner}.map\nyield f(v, true) }}\n"
+            ),
+            format!(
+                "type Fixed = {applied}\nfn use(v: &Fixed) -> Bool {{ let f: Fn(&Fixed, Bool) -> Bool = Fixed.map\nyield f(v, true) }}\n"
+            ),
+            format!("type Fixed = {applied}\nfn use() -> Fixed = {owner}.create()\n"),
+            format!("type Fixed = {applied}\nfn use() -> Fixed = Fixed.create()\n"),
+        ] {
+            require_checked(library(&source, &catalog));
+        }
+        for source in [
+            format!("type Fixed = {applied}\nfn use(v: &{other}) -> Bool = Fixed.map(v, true)\n"),
+            format!(
+                "type Fixed = {applied}\nfn use(v: &{other}) -> Bool {{ let f: Fn(&{other}, Bool) -> Bool = Fixed.map\nyield f(v, true) }}\n"
+            ),
+            format!(
+                "type Fixed = {applied}\nfn use(v: &Fixed) -> Bool = {owner}.map::[i64, Bool](v, true)\n"
+            ),
+            format!(
+                "struct Bad {{}}\nfn use(v: &{owner}[Bad{}]) -> Unit = v.bounded()\n",
+                if head == IntrinsicNominal::Res {
+                    ", NumericError"
+                } else {
+                    ""
+                }
+            ),
+        ] {
+            let compilation = library(&source, &catalog);
+            assert!(!compilation.trace().has_unsupported(), "{source}");
+            assert!(compilation.checked_program().is_none(), "{source}");
+            assert!(
+                !compilation.diagnostics().diagnostics().is_empty(),
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
 fn missing_hooks_refuse_before_effects_even_for_unused_named_values() {
     let catalog = fixture_catalog();
     let profile = SupportProfile::semantic_core_v1();
@@ -1027,4 +1260,261 @@ fn inventory_coverage_and_profile_selection_refuse_independently() {
     assert!(compilation.trace().missing().next().is_none());
     assert!(compilation.diagnostics().diagnostics().is_empty());
     assert!(compilation.checked_program().is_none());
+}
+
+#[test]
+fn intrinsic_member_values_cannot_publish_owned_callable_components() {
+    let catalog = fixture_catalog_for_root(
+        TrustedInherentOwnerHead::Intrinsic(IntrinsicNominal::Own),
+        intrinsic(
+            IntrinsicNominal::Own,
+            [nominal(external_id(NUMERIC_ERROR), [])],
+        ),
+    );
+    let request = FileSetRequest::single(
+        "main.eglur",
+        b"fn use() -> Unit { let f = Own.read\n_ = f\nyield () }\n".to_vec(),
+    )
+    .unwrap();
+    let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
+    let analysis = session
+        .resolve_for(
+            ProgramMode::Library,
+            &SupportProfile::semantic_core_v1(),
+            Some(&catalog),
+        )
+        .unwrap();
+    let bodies = analysis.resolution().unwrap().body_types();
+    assert_eq!(bodies.callable_values().len(), 0);
+    assert!(bodies.method_dispatches().is_empty());
+    let compilation = session.seal(None).unwrap();
+    assert!(!compilation.trace().has_unsupported());
+    assert_eq!(
+        compilation
+            .diagnostics()
+            .diagnostics()
+            .iter()
+            .map(|d| d.code().as_str())
+            .collect::<Vec<_>>(),
+        ["OWNERSHIP_TYPE_POSITION_FORBIDDEN"]
+    );
+    require_checked(library(
+        "fn use(v: &Own[NumericError]) -> i64 = Own.read(v)\n",
+        &catalog,
+    ));
+}
+
+#[test]
+fn intrinsic_inventory_profile_and_runtime_hook_absence_are_independent() {
+    let core = SupportProfile::semantic_core_v1();
+    let reduced = SupportProfile::new(
+        core.schema(),
+        crate::SupportProfileId::new("without-intrinsic-inherent").unwrap(),
+        core.compile_capabilities().filter(|capability| {
+            *capability
+                != CompileCapability::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods)
+        }),
+        core.execution_capabilities(),
+    )
+    .unwrap();
+    for head in [
+        IntrinsicNominal::Own,
+        IntrinsicNominal::Box,
+        IntrinsicNominal::Opt,
+        IntrinsicNominal::Res,
+    ] {
+        let argument = nominal(external_id(NUMERIC_ERROR), []);
+        let root = if head == IntrinsicNominal::Res {
+            intrinsic(head, [argument.clone(), argument])
+        } else {
+            intrinsic(head, [argument])
+        };
+        let catalog = fixture_catalog_for_root(TrustedInherentOwnerHead::Intrinsic(head), root);
+        let owner = head.spelling();
+        for source in [
+            format!("fn use() -> i64 = {owner}.add(1, 2)\n"),
+            format!(
+                "fn use() -> Unit {{ let f: Fn(i64, i64) -> i64 = {owner}.add\n_ = f\nyield () }}\n"
+            ),
+        ] {
+            let compilation = analyze(
+                &[("main.eglur", &source)],
+                &catalog,
+                ProgramMode::Library,
+                &reduced,
+            );
+            assert!(compilation.checked_program().is_none());
+            assert!(compilation.diagnostics().diagnostics().is_empty());
+            let entry = compilation.trace().unsupported().next().unwrap();
+            assert_eq!(
+                entry.capability(),
+                CompileCapability::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods)
+            );
+            assert!(entry.input_refusals().is_empty());
+        }
+        let good = format!(
+            "fn main!() -> Res[Str, Str] {{ let f: Fn(i64, i64) -> i64 = {owner}.add\nyield Ok(to_str(f(1, 2))) }}\n"
+        );
+        let program = require_checked(analyze(
+            &[("main.eglur", &good)],
+            &catalog,
+            ProgramMode::Executable,
+            &core,
+        ));
+        let ExecutionAttempt::Executed(ExecutionOutcome::Completed(result)) =
+            execute(&program, &core, &catalog, EvaluationLimits::default())
+        else {
+            panic!("intrinsic associated hook did not execute for {owner}")
+        };
+        let Value::Variant { payload, .. } = result.value() else {
+            panic!("expected result")
+        };
+        assert_eq!(payload.as_ref(), &[Value::Str("3".into())]);
+        assert!(result.events().is_empty());
+        for expression in [
+            format!("_ = {owner}.zero()"),
+            format!("let f: Fn() -> i64 = {owner}.zero\n_ = f"),
+        ] {
+            let source = format!(
+                "fn main!() -> Unit {{ {owner}.emit!(\"must not execute\")\n{expression}\nyield () }}\n"
+            );
+            let program = require_checked(analyze(
+                &[("main.eglur", &source)],
+                &catalog,
+                ProgramMode::Executable,
+                &core,
+            ));
+            assert_eq!(
+                execute(&program, &core, &catalog, EvaluationLimits::default()),
+                ExecutionAttempt::Unsupported(SupportReason::MissingRuntimeHook(external_id(
+                    "fixture::zero"
+                )))
+            );
+        }
+    }
+}
+
+#[test]
+fn intrinsic_complete_empty_inventory_is_negative_evidence_and_enables_receiver_traits() {
+    for (head, applied) in [
+        (IntrinsicNominal::Box, "Box[i64]"),
+        (IntrinsicNominal::Opt, "Opt[i64]"),
+        (IntrinsicNominal::Res, "Res[i64, NumericError]"),
+    ] {
+        let TrustedCatalog {
+            names,
+            signatures,
+            inhabitance,
+            effects,
+            language_items,
+            runtime_hooks,
+        } = TrustedCatalog::first_slice().unwrap();
+        let signatures = TrustedSignatureEnvironment::with_inherent_owners(
+            signatures.declarations().cloned(),
+            signatures
+                .inherent_owners()
+                .cloned()
+                .chain([TrustedInherentOwner {
+                    head: TrustedInherentOwnerHead::Intrinsic(head),
+                    members: Box::new([]),
+                }]),
+        )
+        .unwrap();
+        let catalog = TrustedCatalog::new_with_language_items(
+            names,
+            signatures,
+            inhabitance,
+            effects,
+            language_items,
+            runtime_hooks,
+        )
+        .unwrap();
+        let prefix = format!(
+            "trait Rank {{ fn rank(self: &Self) -> i64 }}\nimpl Rank for {applied} {{ fn rank(self: &Self) -> i64 = 9 }}\n"
+        );
+        require_checked(library(
+            &format!("{prefix}fn use(v: &{applied}) -> i64 = v.rank()\n"),
+            &catalog,
+        ));
+        for source in [
+            format!(
+                "{prefix}fn use(v: &{applied}) -> i64 = {}.rank(v)\n",
+                head.spelling()
+            ),
+            format!("fn use(v: &{applied}) -> i64 = v.missing()\n"),
+        ] {
+            let compilation = library(&source, &catalog);
+            assert!(!compilation.trace().has_unsupported(), "{source}");
+            assert!(compilation.checked_program().is_none());
+            assert_eq!(
+                compilation
+                    .diagnostics()
+                    .diagnostics()
+                    .iter()
+                    .map(|d| d.code().as_str())
+                    .collect::<Vec<_>>(),
+                ["METHOD_NOT_FOUND"],
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn intrinsic_nested_repeated_and_union_patterns_preserve_existing_inference_limits() {
+    for head in [
+        IntrinsicNominal::Box,
+        IntrinsicNominal::Opt,
+        IntrinsicNominal::Res,
+    ] {
+        let catalog = fixture_catalog_for_heads(
+            TrustedInherentOwnerHead::Nominal(external_id(NUMERIC_ERROR)),
+            nominal(external_id(NUMERIC_ERROR), []),
+            TrustedInherentOwnerHead::Intrinsic(head),
+        );
+        let owner = head.spelling();
+        let apply = |argument: &str| {
+            if head == IntrinsicNominal::Res {
+                format!("Res[{argument}, NumericError]")
+            } else {
+                format!("{owner}[{argument}]")
+            }
+        };
+        let diagonal = apply("(Bool, Bool)");
+        require_checked(library(
+            &format!("fn use(v: &{diagonal}) -> i64 = v.diagonal()\n"),
+            &catalog,
+        ));
+        let different = apply("(Bool, i64)");
+        let compilation = library(
+            &format!("fn use(v: &{different}) -> i64 = v.diagonal()\n"),
+            &catalog,
+        );
+        assert!(!compilation.trace().has_unsupported());
+        assert_eq!(
+            compilation.diagnostics().diagnostics()[0].code().as_str(),
+            "METHOD_NOT_FOUND"
+        );
+        for union in ["Union[Bool, NumericError]", "Union[NumericError, Bool]"] {
+            let nested = apply(&format!("Res[i64, {union}]"));
+            let prefix = format!("type Fixed = {nested}\n");
+            for source in [
+                "fn use(v: &Fixed) -> Unit = v.union_owner(true)\n",
+                "fn use(v: &Fixed) -> Unit = Fixed.union_owner(v, true)\n",
+                "fn use() -> Unit = Fixed.union_create(true)\n",
+                "fn use() -> Unit { let f: Fn(&Fixed, Bool) -> Unit = Fixed.union_owner\n_ = f\nyield () }\n",
+            ] {
+                require_checked(library(&format!("{prefix}{source}"), &catalog));
+            }
+            let compilation = library(
+                &format!("{prefix}fn use(v: &Fixed) -> Unit = v.union_only()\n"),
+                &catalog,
+            );
+            assert!(!compilation.trace().has_unsupported());
+            assert_eq!(
+                compilation.diagnostics().diagnostics()[0].code().as_str(),
+                "TYPE_ARG_INFERENCE_FAILED"
+            );
+        }
+    }
 }

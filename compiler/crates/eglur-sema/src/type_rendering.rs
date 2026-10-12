@@ -227,6 +227,9 @@ impl DiagnosticTypeNames {
         module: ModuleId,
         generic_names: &BTreeSet<Box<str>>,
     ) -> Option<String> {
+        if let CanonicalTarget::Intrinsic(intrinsic) = target {
+            return Some(intrinsic.spelling().to_owned());
+        }
         if let CanonicalTarget::Primitive(primitive) = target {
             let name =
                 NameKey::new(primitive.spelling(), false).expect("primitive type names are valid");

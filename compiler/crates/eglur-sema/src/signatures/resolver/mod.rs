@@ -644,6 +644,7 @@ fn introduces_reserved_name(kind: DeclarationKind, name: &str) -> bool {
 fn target_label(target: &CanonicalTarget) -> String {
     match target {
         CanonicalTarget::Primitive(primitive) => format!("std::prelude::{}", primitive.spelling()),
+        CanonicalTarget::Intrinsic(intrinsic) => format!("std::prelude::{}", intrinsic.spelling()),
         CanonicalTarget::Source(id) => format!("source:{:?}:{}", id.module(), id.local()),
         CanonicalTarget::External(id) => id.as_str().to_string(),
     }

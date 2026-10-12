@@ -204,7 +204,7 @@ fn locate_import_module(
         && root.text() == "std"
         && !prelude.is_bang()
         && prelude.text() == "prelude"
-        && crate::type_namespace::primitive_prelude_binding(name).is_some()
+        && crate::type_namespace::builtin_prelude_binding(name).is_some()
     {
         return Ok(ModuleLookup::Found(PlannedImport {
             module: ImportModuleTarget::External(
@@ -332,12 +332,13 @@ impl ImportAnalysisUnit {
     }
 }
 
-/// Canonical source, trusted declaration, or primitive binding identity.
+/// Canonical source, trusted declaration, or built-in type binding identity.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CanonicalTarget {
     Source(DefId),
     External(ExternalDefId),
     Primitive(crate::PrimitiveType),
+    Intrinsic(crate::IntrinsicNominal),
 }
 
 /// One namespace binding introduced by a resolved import entry.
@@ -647,12 +648,12 @@ fn attempt_import(
     match planned.module() {
         ImportModuleTarget::External(module) => {
             if module.as_str() == "std::prelude"
-                && let Some(primitive) = crate::type_namespace::primitive_prelude_binding(symbol)
+                && let Some(builtin) = crate::type_namespace::builtin_prelude_binding(symbol)
             {
                 bindings.push(ImportedBinding {
                     local_name: local_name.clone(),
                     namespace: Namespace::Type,
-                    targets: Box::new([CanonicalTarget::Primitive(primitive)]),
+                    targets: Box::new([builtin]),
                     public: import.visibility().is_public(),
                 });
             }
@@ -818,7 +819,9 @@ fn target_is_public(collection: &DeclarationCollection, target: &CanonicalTarget
         CanonicalTarget::Source(id) => collection
             .declaration(*id)
             .is_some_and(|declaration| declaration.visibility().is_public()),
-        CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => true,
+        CanonicalTarget::External(_)
+        | CanonicalTarget::Primitive(_)
+        | CanonicalTarget::Intrinsic(_) => true,
     }
 }
 
@@ -863,6 +866,7 @@ fn validate_import_bang(
         .flat_map(ImportedBinding::targets)
         .any(|target| match target {
             CanonicalTarget::Primitive(_) => false,
+            CanonicalTarget::Intrinsic(_) => false,
             CanonicalTarget::Source(id) => collection
                 .declaration(*id)
                 .and_then(|declaration| declaration.name())

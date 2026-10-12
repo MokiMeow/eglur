@@ -179,6 +179,9 @@ pub(crate) fn source_obligation_key(target: &crate::CanonicalTarget) -> SourceOb
         crate::CanonicalTarget::Primitive(primitive) => {
             format!("primitive:{}", primitive.spelling())
         }
+        crate::CanonicalTarget::Intrinsic(intrinsic) => {
+            format!("intrinsic:{}", intrinsic.spelling())
+        }
         crate::CanonicalTarget::Source(id) => {
             format!("source:{}:{}", id.module().get(), id.local())
         }

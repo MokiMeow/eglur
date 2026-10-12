@@ -669,7 +669,7 @@ fn normalize_contract_type(
         CanonicalTarget::External(_) => {
             environment.normalize_for_implementation(implementation, signatures, ty)?
         }
-        CanonicalTarget::Primitive(_) => {
+        CanonicalTarget::Primitive(_) | CanonicalTarget::Intrinsic(_) => {
             return Err(TraitEnvironmentError::UnexpectedImplSignature(
                 implementation.clone(),
             ));
@@ -826,7 +826,7 @@ fn render_trait_callable(
     let owner = match method.declaration() {
         CanonicalTarget::Source(owner) => *owner,
         CanonicalTarget::External(_) => implementation,
-        CanonicalTarget::Primitive(_) => {
+        CanonicalTarget::Primitive(_) | CanonicalTarget::Intrinsic(_) => {
             return Err(TraitEnvironmentError::UnexpectedMethodSignature(
                 method.declaration().clone(),
             ));

@@ -84,6 +84,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 crate::UnavailableCompileInput::PrimitiveInherentInventory { owner: *owner },
                 name,
             ),
+            CanonicalTarget::Intrinsic(owner) => self.trusted_inherent_method_family(
+                source,
+                origin,
+                &ConcreteOwnerHead::Nominal(NominalHead::Intrinsic(*owner)),
+                crate::UnavailableCompileInput::IntrinsicInherentInventory { owner: *owner },
+                name,
+            ),
             CanonicalTarget::Source(owner) => {
                 let targets =
                     self.collection
@@ -144,6 +151,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyTypingError> {
         let owner = match self.signatures.types().kind(subject)? {
             TypeKind::Primitive(primitive) => CanonicalTarget::Primitive(*primitive),
+            TypeKind::Nominal {
+                head: NominalHead::Intrinsic(intrinsic),
+                ..
+            } => CanonicalTarget::Intrinsic(*intrinsic),
             TypeKind::Nominal {
                 head: NominalHead::Declaration(owner),
                 ..

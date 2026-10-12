@@ -114,6 +114,7 @@ pub(super) fn child_is_externally_reachable(
         | DeclarationKind::TypeAlias => declaration.kind() == DeclarationKind::GenericParameter,
         DeclarationKind::Const
         | DeclarationKind::PrimitiveType
+        | DeclarationKind::IntrinsicType
         | DeclarationKind::AssociatedType
         | DeclarationKind::AssociatedTypeBinding
         | DeclarationKind::EnumVariantField
@@ -282,7 +283,9 @@ pub(super) fn target_error(target: &CanonicalTarget) -> SemanticFingerprintError
         CanonicalTarget::Source(declaration) => {
             SemanticFingerprintError::UnknownStableDeclaration(*declaration)
         }
-        CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => {
+        CanonicalTarget::External(_)
+        | CanonicalTarget::Primitive(_)
+        | CanonicalTarget::Intrinsic(_) => {
             unreachable!("non-source targets are stable")
         }
     }
@@ -345,7 +348,9 @@ impl InterfaceWriter<'_, '_> {
                         target: keys.target(target).ok_or_else(|| target_error(target))?,
                         source: match target {
                             CanonicalTarget::Source(declaration) => Some(*declaration),
-                            CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => None,
+                            CanonicalTarget::External(_)
+                            | CanonicalTarget::Primitive(_)
+                            | CanonicalTarget::Intrinsic(_) => None,
                         },
                     });
                 }

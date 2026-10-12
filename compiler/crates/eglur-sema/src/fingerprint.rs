@@ -121,6 +121,7 @@ impl CanonicalFingerprintBuilder {
             DeclarationKind::Property => 15,
             DeclarationKind::GenericParameter => 16,
             DeclarationKind::PrimitiveType => 17,
+            DeclarationKind::IntrinsicType => 18,
         });
     }
 
@@ -213,6 +214,7 @@ mod tests {
             (DeclarationKind::Property, 15),
             (DeclarationKind::GenericParameter, 16),
             (DeclarationKind::PrimitiveType, 17),
+            (DeclarationKind::IntrinsicType, 18),
         ];
         for domain in [
             FingerprintDomain::DeclarationDiscriminator,

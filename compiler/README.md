@@ -178,8 +178,9 @@ signatures currently omit field/property inventories, so those reads record
 `trusted_value_member_inventory` under `typecheck.members` and remain
 `Unsupported` rather than treating absent metadata as proof of an absent member.
 
-Catalog-declared nominal and primitive inherent families support qualified
-calls, receiver calls, and pure named `Fn` values. Owner type parameters and
+Catalog-declared nominal, primitive, and intrinsic inherent families support
+qualified calls, receiver calls, and pure ownership-free named `Fn` values.
+Owner type parameters and
 explicit method type arguments remain separate. Associated members have no
 receiver and use the owner's qualified name. Complete empty inventories allow
 a missing method diagnostic. Execution still requires a compatible runtime
@@ -189,7 +190,11 @@ values executable.
 The built-in catalog supplies complete primitive inventories:
 `Bool`, `Str`, `Nat`, and `PositiveNat` have declared inherent methods; other
 primitive inventories are empty. Primitive methods have no execution hooks
-yet. Intrinsic inherent families are not yet connected to these call paths.
+yet. `Own`, `Box`, `Opt`, and `Res` preserve their intrinsic identity through
+prelude imports and re-exports. Their inherent inventories are not supplied by
+the built-in catalog, so inherent lookup reports missing compile input rather
+than a missing method. An embedding can supply admitted intrinsic inventories;
+this does not add runtime carriers or forward methods from their payload types.
 
 The supporting `Tri`, `Seq`, and `DomainError` declarations are available for
 type checking. External enum variant paths and their execution remain

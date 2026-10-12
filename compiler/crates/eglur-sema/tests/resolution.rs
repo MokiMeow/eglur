@@ -806,7 +806,9 @@ fn qualified_braced_forms_resolve_direct_structs_and_owned_variants() {
         })
         .filter_map(|target| match target {
             CanonicalTarget::Source(id) => analysis.declarations.declaration(*id),
-            CanonicalTarget::External(_) | CanonicalTarget::Primitive(_) => None,
+            CanonicalTarget::External(_)
+            | CanonicalTarget::Primitive(_)
+            | CanonicalTarget::Intrinsic(_) => None,
         })
         .map(|declaration| declaration.kind())
         .collect::<BTreeSet<_>>();
@@ -1056,21 +1058,59 @@ fn external_environment_represents_empty_modules_explicitly() {
 }
 
 #[test]
-fn trusted_declarations_cannot_fabricate_primitive_binding_identity() {
-    let result = ExternalDeclaration::new(
-        ExternalDefId::new("fake.primitive").unwrap(),
-        module(&["fake"]),
-        NameKey::new("i32", false).unwrap(),
-        DeclarationKind::PrimitiveType,
-    );
-    assert!(matches!(
-        result,
-        Err(
-            eglur_sema::ExternalEnvironmentError::CompilerOwnedDeclarationKind(
-                DeclarationKind::PrimitiveType
+fn trusted_declarations_cannot_fabricate_builtin_binding_identity() {
+    for (kind, spelling) in [
+        (DeclarationKind::PrimitiveType, "i32"),
+        (DeclarationKind::IntrinsicType, "Own"),
+    ] {
+        let result = ExternalDeclaration::new(
+            ExternalDefId::new("fake.builtin").unwrap(),
+            module(&["fake"]),
+            NameKey::new(spelling, false).unwrap(),
+            kind,
+        );
+        assert!(matches!(
+            result,
+            Err(eglur_sema::ExternalEnvironmentError::CompilerOwnedDeclarationKind(found))
+                if found == kind
+        ));
+    }
+}
+
+#[test]
+fn trusted_prelude_types_cannot_create_a_second_builtin_identity() {
+    for spelling in ["i32", "Own", "Box", "Opt", "Res"] {
+        let prelude = module(&["std", "prelude"]);
+        let name = NameKey::new(spelling, false).unwrap();
+        let result = ExternalDeclaration::new(
+            ExternalDefId::new("fixture::unrelated_key").unwrap(),
+            prelude.clone(),
+            name.clone(),
+            DeclarationKind::OpaqueType,
+        );
+        assert!(
+            result.is_err(),
+            "{spelling}: duplicate builtin nominal admitted"
+        );
+        assert!(
+            ExternalDeclaration::new(
+                ExternalDefId::new("fixture::value").unwrap(),
+                prelude,
+                name.clone(),
+                DeclarationKind::Function,
             )
-        )
-    ));
+            .is_ok()
+        );
+        assert!(
+            ExternalDeclaration::new(
+                ExternalDefId::new(format!("std::prelude::{spelling}")).unwrap(),
+                module(&["fixture"]),
+                name,
+                DeclarationKind::OpaqueType,
+            )
+            .is_ok()
+        );
+    }
 }
 
 #[test]

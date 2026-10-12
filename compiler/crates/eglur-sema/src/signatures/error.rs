@@ -37,6 +37,10 @@ pub enum SignatureResolutionError {
         primitive: PrimitiveType,
         expected: &'static str,
     },
+    UnexpectedIntrinsicTarget {
+        intrinsic: crate::IntrinsicNominal,
+        expected: &'static str,
+    },
     InvalidSourceHeadState(DefId),
     MissingDeclarationItem(DefId),
     WrongDeclarationItem(DefId),
@@ -105,6 +109,14 @@ impl fmt::Display for SignatureResolutionError {
                 formatter,
                 "signature resolution expected {expected}, found primitive {}",
                 primitive.spelling()
+            ),
+            Self::UnexpectedIntrinsicTarget {
+                intrinsic,
+                expected,
+            } => write!(
+                formatter,
+                "signature resolution expected {expected}, found intrinsic {}",
+                intrinsic.spelling()
             ),
             Self::InvalidSourceHeadState(declaration) => write!(
                 formatter,
