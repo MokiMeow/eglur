@@ -579,7 +579,14 @@ impl<'source> Parser<'source> {
             || self.at_eof()
             || self.diagnostics.len() >= self.limits.syntax_diagnostics
         {
-            self.bind_latest_diagnostic_to_region(region_start, self.position);
+            // Diagnostic-cap truncation leaves the unparsed suffix in this failed region.
+            let region_end =
+                if !self.terminal && self.diagnostics.len() >= self.limits.syntax_diagnostics {
+                    self.significant.len()
+                } else {
+                    self.position
+                };
+            self.bind_latest_diagnostic_to_region(region_start, region_end);
             return false;
         }
 
