@@ -117,11 +117,23 @@ fn empty_pending_poison_reads_remain_reusable_between_inference_passes() {
     let mut pending = PendingPoison::default();
     reset();
     for _ in 0..128 {
+        assert!(!pending.has_poison());
         assert!(pending.take().is_none());
     }
     assert_eq!(work(), Work::default());
     pending.include(&root).unwrap();
+    for _ in 0..128 {
+        assert!(pending.has_poison());
+    }
+    assert_eq!(
+        work(),
+        Work {
+            inputs: 1,
+            completed: 0
+        }
+    );
     let poison = pending.take().unwrap();
+    assert!(!pending.has_poison());
     assert_eq!(
         work(),
         Work {
@@ -155,12 +167,14 @@ fn foreign_pending_poison_refusal_clears_the_slot_in_both_pool_orders() {
         reset();
         let mut pending = PendingPoison::default();
         pending.include(first).unwrap();
+        assert!(pending.has_poison());
         assert!(matches!(
             pending.include(second),
             Err(BodyTypingError::DiagnosticStore(
                 DiagnosticStoreError::ForeignPoison
             ))
         ));
+        assert!(!pending.has_poison());
         assert!(pending.take().is_none());
         assert_eq!(
             work(),

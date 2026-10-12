@@ -8,6 +8,8 @@ use eglur_sema::{CompileCapability, ResolveCapability, TypecheckCapability};
 
 #[path = "execution/grouped_calls.rs"]
 mod grouped_calls;
+#[path = "execution/match_control.rs"]
+mod match_control;
 #[path = "execution/receiver_adjustment.rs"]
 mod receiver_adjustment;
 #[path = "execution/witnesses.rs"]
