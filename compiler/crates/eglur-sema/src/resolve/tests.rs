@@ -7,6 +7,11 @@ use eglur_hir::lower;
 use eglur_source::{LineIndex, SourceFile};
 use eglur_syntax::parse_validated;
 
+mod callable_patterns;
+mod fixture;
+
+pub(super) use fixture::with_resolver;
+
 thread_local! {
     static ORIGIN_VISITS: Cell<usize> = const { Cell::new(0) };
 }

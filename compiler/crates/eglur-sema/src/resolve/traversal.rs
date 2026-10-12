@@ -416,22 +416,9 @@ impl Resolver<'_, '_> {
             ExprKind::Lambda(lambda) => {
                 let body = hir.body(lambda.body);
                 self.push_scope(module, body.id(), ScopeKind::LambdaParameters)?;
-                let mut outcome = VisitOutcome::Known;
-                for parameter in &lambda.parameters {
-                    let group = self.pattern_bindings(source, body, parameter.pattern)?;
-                    outcome =
-                        outcome.merge(if let Some(collision) = self.first_collision(&group) {
-                            self.record_binding_collision(source, collision)?
-                        } else {
-                            self.bind_group(source, group, None)?
-                        })?;
-                    outcome = outcome.merge(self.visit_optional_type(
-                        module,
-                        source,
-                        hir,
-                        parameter.ty,
-                    )?)?;
-                }
+                let outcome = self
+                    .visit_parameters(module, source, hir, body, &lambda.parameters)?
+                    .finish();
                 self.push_scope(module, body.id(), ScopeKind::LambdaBody)?;
                 traversal.pending.push(VisitStep::ExitScope);
                 traversal.pending.push(VisitStep::ExitScope);
