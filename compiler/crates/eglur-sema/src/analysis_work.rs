@@ -3,6 +3,7 @@ use std::num::NonZeroU64;
 
 mod accounting;
 mod call_inputs;
+mod source_inputs;
 
 pub use accounting::{
     AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity, AnalysisRootScope,
@@ -14,6 +15,7 @@ pub use call_inputs::{
     AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
     AnalysisCallRegistryFailure,
 };
+pub use source_inputs::{AnalysisSourceInputFailure, AnalysisSourceInputRegistry};
 
 /// Unpriced quantities for a planned analysis operation.
 ///
