@@ -46,6 +46,23 @@ fn checked_length_doubling_and_layout_limits_fail_without_allocating() {
 }
 
 #[test]
+fn fallible_plans_distinguish_nonrepresentability_without_panicking() {
+    assert!(RecordReservation::<()>::try_from_dimensions(usize::MAX, usize::MAX).is_none());
+    let capacity = usize::MAX / 2 + 1;
+    assert!(RecordReservation::<u8>::try_from_dimensions(capacity, capacity).is_none());
+    let capacity = isize::MAX as usize / size_of::<u64>();
+    assert!(RecordReservation::<u64>::try_from_dimensions(capacity, capacity).is_none());
+
+    for capacity in [0, 1, 3, 17, 1024] {
+        for len in 0..=capacity {
+            let checked = RecordReservation::<u64>::try_from_dimensions(len, capacity).unwrap();
+            let original = RecordReservation::<u64>::from_dimensions(len, capacity);
+            assert_eq!(checked.requested_capacity, original.requested_capacity);
+        }
+    }
+}
+
+#[test]
 fn all_member_plans_can_be_checked_before_any_reservation() {
     let mut records = vec![1_u64].into_boxed_slice().into_vec();
     let before = (records.clone(), records.capacity());

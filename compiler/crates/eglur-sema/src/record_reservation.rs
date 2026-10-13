@@ -22,9 +22,17 @@ impl<T> RecordReservation<T> {
         Self::from_dimensions(records.len(), records.capacity())
     }
 
+    pub(crate) fn try_for_append(records: &Vec<T>) -> Option<Self> {
+        Self::try_from_dimensions(records.len(), records.capacity())
+    }
+
     fn from_dimensions(len: usize, capacity: usize) -> Self {
+        Self::try_from_dimensions(len, capacity).expect("unrepresentable record reservation")
+    }
+
+    fn try_from_dimensions(len: usize, capacity: usize) -> Option<Self> {
         assert!(len <= capacity, "record length exceeds capacity");
-        len.checked_add(1).expect("record length overflow");
+        len.checked_add(1)?;
 
         let requested_capacity = if len < capacity {
             None
@@ -32,18 +40,18 @@ impl<T> RecordReservation<T> {
             let requested = if capacity == 0 {
                 1
             } else {
-                capacity.checked_mul(2).expect("record capacity overflow")
+                capacity.checked_mul(2)?
             };
-            Layout::array::<T>(requested).expect("record allocation layout overflow");
+            Layout::array::<T>(requested).ok()?;
             Some(requested)
         };
 
-        Self {
+        Some(Self {
             len,
             capacity,
             requested_capacity,
             record: PhantomData,
-        }
+        })
     }
 
     pub(crate) fn reserve(self, records: &mut Vec<T>) {

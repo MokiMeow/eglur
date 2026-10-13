@@ -34,10 +34,11 @@ mod type_rendering;
 mod types;
 
 pub use analysis_work::{
-    AnalysisCallInputFailure, AnalysisCallInputs, AnalysisRootBalance, AnalysisRootClaimError,
-    AnalysisRootIdentity, AnalysisRootScope, AnalysisRootStopReason, AnalysisRootTicket,
-    AnalysisWork, AnalysisWorkAccounting, AnalysisWorkCategory, AnalysisWorkFailure,
-    AnalysisWorkIncomplete, AnalysisWorkOverflow, AnalysisWorkPricing, AnalysisWorkUnits,
+    AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
+    AnalysisCallRegistryFailure, AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity,
+    AnalysisRootScope, AnalysisRootStopReason, AnalysisRootTicket, AnalysisWork,
+    AnalysisWorkAccounting, AnalysisWorkCategory, AnalysisWorkFailure, AnalysisWorkIncomplete,
+    AnalysisWorkOverflow, AnalysisWorkPricing, AnalysisWorkUnits,
 };
 pub use body_types::*;
 pub use capability::*;

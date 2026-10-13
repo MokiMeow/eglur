@@ -15,14 +15,7 @@ pub(super) enum ExpectationCustody {
 
 impl ExpectationCustody {
     pub(super) fn call_argument(call: ExpressionKey, syntax: &CallExpr, index: usize) -> Self {
-        if !syntax.partial_application
-            && matches!(
-                syntax.syntax,
-                eglur_hir::CallSyntax::Direct
-                    | eglur_hir::CallSyntax::ExplicitTypeArguments
-                    | eglur_hir::CallSyntax::TrailingArgument
-            )
-        {
+        if crate::analysis_work::is_original_call(syntax) {
             Self::CallArgument { call, index }
         } else {
             Self::Caller

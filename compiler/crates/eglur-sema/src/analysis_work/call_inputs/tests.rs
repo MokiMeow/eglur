@@ -23,7 +23,7 @@ pub(super) fn record_slot_install() {
     SLOT_INSTALLS.set(SLOT_INSTALLS.get() + 1);
 }
 
-fn pricing() -> AnalysisWorkPricing {
+pub(super) fn pricing() -> AnalysisWorkPricing {
     AnalysisWorkPricing {
         ticks_per_step: NonZeroU64::new(7).unwrap(),
         ticks_per_processed_byte: NonZeroU64::new(2).unwrap(),
@@ -35,7 +35,7 @@ fn accounting() -> AnalysisWorkAccounting {
     AnalysisWorkAccounting::new(pricing(), 2).unwrap()
 }
 
-fn parse(text: &str) -> HirFile {
+pub(super) fn parse(text: &str) -> HirFile {
     let raw = SourceFile::new(FileId::new(0), text.as_bytes().to_vec());
     let parsed = eglur_syntax::parse_validated(raw.validate().unwrap());
     assert!(
@@ -48,7 +48,7 @@ fn parse(text: &str) -> HirFile {
     hir
 }
 
-fn inspect_body(hir: &HirFile) -> &Body {
+pub(super) fn inspect_body(hir: &HirFile) -> &Body {
     let function = hir
         .items()
         .find_map(|(_, item)| match item.kind() {
@@ -61,7 +61,7 @@ fn inspect_body(hir: &HirFile) -> &Body {
     hir.body(function.body)
 }
 
-fn sites(body: &Body) -> Vec<ExpressionKey> {
+pub(super) fn sites(body: &Body) -> Vec<ExpressionKey> {
     body.expressions()
         .filter(|(_, expression)| matches!(expression.kind(), ExprKind::Call(_)))
         .map(|(id, _)| ExpressionKey::new(ModuleId::from_index(0).unwrap(), id))

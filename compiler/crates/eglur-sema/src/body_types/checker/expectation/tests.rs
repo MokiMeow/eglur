@@ -644,3 +644,120 @@ fn question_operand_does_not_gain_a_new_contextual_expectation() {
         },
     );
 }
+
+#[test]
+fn actual_candidate_slots_and_normalized_requests_retrieve_original_tickets() {
+    with_events(
+        "type Int = i32\noverload fn pick(left: Int, right: Bool) -> Unit = ()\noverload fn pick(left: Bool, right: Int) -> Unit = ()\nfn inspect(x: Int, y: Bool) -> Unit = pick(right = y, left = x)",
+        |checker, events| {
+            let owner = declaration(checker, "inspect");
+            let (module, source, hir, item) = checker.source_item(owner).unwrap();
+            let ItemKind::Function(function) = item.kind() else {
+                panic!("function expected")
+            };
+            let body = hir.body(function.body);
+            let (site, call) = calls(checker).into_iter().next().unwrap();
+            let candidates = checker
+                .collection
+                .modules()
+                .flat_map(|module| module.declarations())
+                .filter(|declaration| declaration.name().is_some_and(|name| name.text() == "pick"))
+                .map(|declaration| {
+                    let FactState::Known(DeclarationSignature::Callable(id)) =
+                        checker.signatures.source_declaration(declaration.id())
+                    else {
+                        panic!("callable expected")
+                    };
+                    checker.signatures.callable(*id).unwrap().clone()
+                })
+                .collect::<Vec<_>>();
+            let profile = crate::AnalysisWorkPricing::for_test(7, 2, 3).unwrap();
+            let mut accounting = crate::AnalysisWorkAccounting::new(profile, 2).unwrap();
+            let upstream = accounting.admit(1, 1_000_000).unwrap();
+            let mut inputs =
+                crate::AnalysisCallInputRegistry::new(&accounting, 0, module, body).unwrap();
+            let selection = inputs
+                .selection_ticket(&mut accounting, site, 1_000_000)
+                .unwrap();
+            let arguments = (0..call.arguments.len())
+                .map(|index| {
+                    inputs
+                        .argument_ticket(&mut accounting, site, index, 1_000_000)
+                        .unwrap()
+                })
+                .collect::<Vec<_>>();
+            let origin = body.expression(site.expression()).unwrap().origin();
+
+            for _ in 0..3 {
+                for candidate in &candidates {
+                    let Outcome::Known(slots) = checker
+                        .bind_call_slots(source, origin, site, candidate, &call)
+                        .unwrap()
+                    else {
+                        panic!("bound slots expected")
+                    };
+                    for slot in slots {
+                        let ExpectationCustody::CallArgument { call: found, index } = slot.custody
+                        else {
+                            panic!("written slot expected")
+                        };
+                        assert_eq!(found, site);
+                        assert_eq!(slot.value, call.arguments[index].value);
+                        assert_eq!(
+                            inputs
+                                .argument_ticket(&mut accounting, found, index, 0)
+                                .unwrap(),
+                            arguments[index]
+                        );
+                    }
+                }
+                for expected in normalized(events) {
+                    match expected.custody() {
+                        ExpectationCustody::CallArgument { call: found, index }
+                            if found == site =>
+                        {
+                            assert_eq!(
+                                inputs
+                                    .argument_ticket(&mut accounting, found, index, 0)
+                                    .unwrap(),
+                                arguments[index]
+                            );
+                        }
+                        ExpectationCustody::Selection(found) if found == site => {
+                            assert_eq!(
+                                inputs.selection_ticket(&mut accounting, found, 0).unwrap(),
+                                selection
+                            );
+                        }
+                        custody if custody == return_custody(checker, "inspect") => {
+                            assert_eq!(
+                                inputs
+                                    .contextual_ticket(&mut accounting, &upstream)
+                                    .unwrap(),
+                                upstream
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            assert_eq!(
+                accounting
+                    .admit(0, 1_000_000)
+                    .unwrap()
+                    .identity()
+                    .requirement(),
+                call.arguments.len() + 1
+            );
+            assert_eq!(
+                accounting
+                    .admit(1, 1_000_000)
+                    .unwrap()
+                    .identity()
+                    .requirement(),
+                1
+            );
+            assert!(matches!(checker.bodies.state(&owner), FactState::Known(_)));
+        },
+    );
+}

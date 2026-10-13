@@ -200,7 +200,16 @@ impl AnalysisWorkAccounting {
         };
         self.ensure_active()?;
 
+        let reservation = RecordReservation::try_for_append(&roots.roots);
         let price = additional_work
+            .and_then(|work| {
+                reservation
+                    .as_ref()
+                    .map(|_| work)
+                    .ok_or(AnalysisWorkOverflow::Quantity(
+                        AnalysisWorkCategory::ReservedBytes,
+                    ))
+            })
             .and_then(|additional| Self::admission_work()?.checked_add(additional))
             .and_then(|work| self.pricing.price(work));
         let remaining_ticks = match price {
@@ -220,7 +229,9 @@ impl AnalysisWorkAccounting {
         };
 
         let roots = &mut self.consumers[consumer].roots;
-        RecordReservation::for_append(roots).reserve(roots);
+        reservation
+            .expect("admission checked the reservation")
+            .reserve(roots);
         roots.push(AnalysisRootBalance {
             allowance_ticks,
             remaining_ticks,
@@ -259,6 +270,32 @@ impl AnalysisWorkAccounting {
     #[must_use]
     pub const fn incomplete(&self) -> Option<AnalysisWorkIncomplete> {
         self.incomplete
+    }
+
+    pub(super) fn bind_input_consumer(
+        &self,
+        consumer: usize,
+    ) -> Result<Arc<()>, AnalysisWorkFailure> {
+        self.validate_input_binding(consumer, &self.attempt)?;
+        Ok(Arc::clone(&self.attempt))
+    }
+
+    pub(super) fn validate_input_binding(
+        &self,
+        consumer: usize,
+        attempt: &Arc<()>,
+    ) -> Result<(), AnalysisWorkFailure> {
+        if !Arc::ptr_eq(&self.attempt, attempt) {
+            return Err(AnalysisWorkFailure::Claim(
+                AnalysisRootClaimError::ForeignAttempt,
+            ));
+        }
+        if consumer >= self.consumers.len() {
+            return Err(AnalysisWorkFailure::Claim(
+                AnalysisRootClaimError::UnknownConsumer,
+            ));
+        }
+        self.ensure_active()
     }
 
     fn validate_ticket(&self, ticket: &AnalysisRootTicket) -> Result<(), AnalysisRootClaimError> {

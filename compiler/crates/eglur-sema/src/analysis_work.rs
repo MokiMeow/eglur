@@ -9,7 +9,11 @@ pub use accounting::{
     AnalysisRootStopReason, AnalysisRootTicket, AnalysisWorkAccounting, AnalysisWorkFailure,
     AnalysisWorkIncomplete,
 };
-pub use call_inputs::{AnalysisCallInputFailure, AnalysisCallInputs};
+pub(crate) use call_inputs::is_original_call;
+pub use call_inputs::{
+    AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
+    AnalysisCallRegistryFailure,
+};
 
 /// Unpriced quantities for a planned analysis operation.
 ///
@@ -109,6 +113,15 @@ pub struct AnalysisWorkPricing {
 }
 
 impl AnalysisWorkPricing {
+    #[cfg(test)]
+    pub(crate) fn for_test(steps: u64, processed: u64, reserved: u64) -> Option<Self> {
+        Some(Self {
+            ticks_per_step: NonZeroU64::new(steps)?,
+            ticks_per_processed_byte: NonZeroU64::new(processed)?,
+            ticks_per_reserved_byte: NonZeroU64::new(reserved)?,
+        })
+    }
+
     /// Computes the precharge for the declared quantities.
     pub fn price(self, work: AnalysisWork) -> Result<AnalysisWorkUnits, AnalysisWorkOverflow> {
         let quantities = [

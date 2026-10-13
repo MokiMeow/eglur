@@ -1,7 +1,7 @@
 use std::alloc::Layout;
 use std::fmt;
 
-use eglur_hir::{Body, CallSyntax, ExprKind};
+use eglur_hir::{Body, CallExpr, CallSyntax, ExprKind};
 
 use crate::ExpressionKey;
 
@@ -9,6 +9,29 @@ use super::{
     AnalysisRootTicket, AnalysisWork, AnalysisWorkAccounting, AnalysisWorkCategory,
     AnalysisWorkFailure, AnalysisWorkOverflow,
 };
+
+mod registry;
+pub use registry::{AnalysisCallInputRegistry, AnalysisCallRegistryFailure};
+
+pub(crate) fn is_original_call(call: &CallExpr) -> bool {
+    !call.partial_application
+        && matches!(
+            call.syntax,
+            CallSyntax::Direct | CallSyntax::ExplicitTypeArguments | CallSyntax::TrailingArgument
+        )
+}
+
+fn original_call(body: &Body, site: ExpressionKey) -> Result<&CallExpr, AnalysisCallInputFailure> {
+    if site.expression().body() == body.id()
+        && (site.expression().local() as usize) < body.expressions().len()
+        && let Some(ExprKind::Call(call)) =
+            body.expression(site.expression()).map(|value| value.kind())
+        && is_original_call(call)
+    {
+        return Ok(call);
+    }
+    Err(AnalysisCallInputFailure::NotOriginalCall(site))
+}
 
 /// Invalid source-call custody or an interrupted accounting operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,20 +91,32 @@ impl AnalysisCallInputs {
         selection_allowance_ticks: u64,
         contextual_result: Option<&AnalysisRootTicket>,
     ) -> Result<Self, AnalysisCallInputFailure> {
-        let call = match body.expression(site.expression()).map(|value| value.kind()) {
-            Some(ExprKind::Call(call))
-                if !call.partial_application
-                    && matches!(
-                        call.syntax,
-                        CallSyntax::Direct
-                            | CallSyntax::ExplicitTypeArguments
-                            | CallSyntax::TrailingArgument
-                    ) =>
-            {
-                call
-            }
-            _ => return Err(AnalysisCallInputFailure::NotOriginalCall(site)),
-        };
+        Self::admit_with_work(
+            accounting,
+            consumer,
+            site,
+            body,
+            selection_allowance_ticks,
+            contextual_result,
+            Ok(AnalysisWork {
+                steps: 0,
+                inspected_bytes: 0,
+                transferred_bytes: 0,
+                reserved_bytes: 0,
+            }),
+        )
+    }
+
+    fn admit_with_work(
+        accounting: &mut AnalysisWorkAccounting,
+        consumer: usize,
+        site: ExpressionKey,
+        body: &Body,
+        selection_allowance_ticks: u64,
+        contextual_result: Option<&AnalysisRootTicket>,
+        additional_work: Result<AnalysisWork, AnalysisWorkOverflow>,
+    ) -> Result<Self, AnalysisCallInputFailure> {
+        let call = original_call(body, site)?;
         if let Some(ticket) = contextual_result {
             accounting.balance(ticket).map_err(|error| {
                 AnalysisCallInputFailure::Work(AnalysisWorkFailure::Claim(error))
@@ -91,7 +126,8 @@ impl AnalysisCallInputs {
         let selection = accounting.admit_with_work(
             consumer,
             selection_allowance_ticks,
-            Self::header_work(call.arguments.len()),
+            additional_work
+                .and_then(|work| Self::header_work(call.arguments.len())?.checked_add(work)),
         )?;
         let mut arguments = Vec::with_capacity(call.arguments.len());
         arguments.resize_with(call.arguments.len(), || {
@@ -143,6 +179,16 @@ impl AnalysisCallInputs {
         index: usize,
         allowance_ticks: u64,
     ) -> Result<&AnalysisRootTicket, AnalysisCallInputFailure> {
+        self.argument_ticket_with_work(accounting, index, allowance_ticks, None)
+    }
+
+    fn argument_ticket_with_work(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        index: usize,
+        allowance_ticks: u64,
+        additional_work: Option<AnalysisWork>,
+    ) -> Result<&AnalysisRootTicket, AnalysisCallInputFailure> {
         let slot =
             self.arguments
                 .get_mut(index)
@@ -155,12 +201,17 @@ impl AnalysisCallInputs {
             .map_err(|error| AnalysisCallInputFailure::Work(AnalysisWorkFailure::Claim(error)))?;
 
         if let Some(ticket) = slot {
-            accounting.claim(ticket)?;
+            let mut scope = accounting.claim(ticket)?;
+            if let Some(work) = additional_work {
+                scope.precharge(work)?;
+            }
         } else {
             let ticket = accounting.admit_with_work(
                 self.selection.identity().consumer(),
                 allowance_ticks,
-                Ok(Self::slot_install_work()),
+                additional_work.map_or(Ok(Self::slot_install_work()), |work| {
+                    Self::slot_install_work().checked_add(work)
+                }),
             )?;
             *slot = Some(ticket);
 
