@@ -487,9 +487,19 @@ impl CanonicalTypeStore {
         self.intern_type(TypeKind::AssociatedProjection(projection))
     }
 
+    /// Unknown-length streams must be collected before entering the interner.
+    ///
+    /// ```compile_fail,E0277
+    /// use eglur_sema::{CanonicalTypeStore, PrimitiveType};
+    ///
+    /// let mut types = CanonicalTypeStore::new().unwrap();
+    /// let integer = types.primitive(PrimitiveType::I32).unwrap();
+    /// let arguments = [integer].into_iter().filter(|_| true);
+    /// types.intern_substitution(arguments).unwrap();
+    /// ```
     pub fn intern_substitution(
         &mut self,
-        arguments: impl IntoIterator<Item = TypeId>,
+        arguments: impl IntoIterator<Item = TypeId, IntoIter: ExactSizeIterator>,
     ) -> Result<SubstId, TypeStoreError> {
         let arguments = arguments.into_iter().collect::<Vec<_>>();
         self.require_types(&arguments)?;
@@ -977,6 +987,9 @@ mod rewrite;
 
 #[cfg(test)]
 mod rewrite_tests;
+
+#[cfg(test)]
+mod substitution_inputs_tests;
 
 #[cfg(test)]
 mod substitution_tests;
