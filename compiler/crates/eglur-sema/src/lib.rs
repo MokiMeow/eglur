@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod analysis_work;
 mod body_types;
 mod capability;
 mod declaration;
@@ -32,6 +33,10 @@ mod type_patterns;
 mod type_rendering;
 mod types;
 
+pub use analysis_work::{
+    AnalysisWork, AnalysisWorkCategory, AnalysisWorkOverflow, AnalysisWorkPricing,
+    AnalysisWorkUnits,
+};
 pub use body_types::*;
 pub use capability::*;
 pub use declaration::*;
