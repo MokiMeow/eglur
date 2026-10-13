@@ -169,7 +169,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }),
             PatternKind::Literal(literal) => {
                 let actual =
-                    self.type_literal(source, literal, TypeRequest::definitive(Some(expected)))?;
+                    self.type_literal(source, literal, TypeRequest::local(Some(expected)))?;
                 match actual {
                     Outcome::Known(actual)
                         if self.signatures.types().is_assignable(actual.ty, expected)? =>

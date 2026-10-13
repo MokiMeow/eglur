@@ -919,6 +919,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
+                custody: request.custody(),
                 generic_parameters: constructor.generic_parameters(),
                 slots: &[],
                 result_template: constructor.result(),
@@ -951,9 +952,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         call_origin: OriginId,
+        call_site: ExpressionKey,
         callable: &CallableSignature,
-        arguments: &[CallArgument],
+        call: &CallExpr,
     ) -> Result<Outcome<Vec<ApplicationSlot>>, BodyTypingError> {
+        let arguments = &call.arguments;
         let parameters = callable.parameters();
         let bindings = match Self::bind_call_argument_indices(callable, arguments) {
             Ok(bindings) => bindings,
@@ -1065,6 +1068,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: self.parameter_span(callable, parameter)?,
                 evaluation_order: argument_index,
+                custody: ExpectationCustody::call_argument(call_site, call, argument_index),
                 passing: ArgumentPassing::Value,
             });
         }

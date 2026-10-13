@@ -87,6 +87,7 @@ fn checking_frames_preserve_early_abandonment_and_borrowed_foreign_refusal() {
                                     origin: body.expression(a.value).unwrap().origin(),
                                     related: None,
                                     evaluation_order: i,
+                                    custody: ExpectationCustody::Caller,
                                     passing: ArgumentPassing::Value,
                                 },
                                 typed: None,

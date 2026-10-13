@@ -108,7 +108,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
 
         let expected = match request.expected {
-            Some(ty) if matches!(self.signatures.types().kind(ty)?, TypeKind::Callable { .. }) => {
+            Some(ty)
+                if matches!(
+                    self.signatures.types().kind(ty.ty())?,
+                    TypeKind::Callable { .. }
+                ) =>
+            {
                 Some(ty)
             }
             _ => None,
@@ -137,7 +142,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     .nominal(NominalHead::Declaration(owner.clone()), [])?
             } else if let Some(expected) = expected {
                 let TypeKind::Callable { parameters, .. } =
-                    self.signatures.types().kind(expected)?
+                    self.signatures.types().kind(expected.ty())?
                 else {
                     unreachable!("expected callable type was checked above");
                 };
@@ -199,9 +204,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         first_ready = Some(value.clone());
                     }
                     let compatible = match expected {
-                        Some(expected) => {
-                            self.signatures.types().is_assignable(value.ty, expected)?
-                        }
+                        Some(expected) => self
+                            .signatures
+                            .types()
+                            .is_assignable(value.ty, expected.ty())?,
                         None => true,
                     };
                     if compatible {
@@ -260,7 +266,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let Some(expected) = request.expected else {
             return self.missing_callable_value_context(source, origin, request);
         };
-        let TypeKind::Callable { parameters, .. } = self.signatures.types().kind(expected)? else {
+        let TypeKind::Callable { parameters, .. } = self.signatures.types().kind(expected.ty())?
+        else {
             return self.missing_callable_value_context(source, origin, request);
         };
         let Some(&receiver_type) = parameters.first() else {
@@ -365,7 +372,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     BTreeMap::new(),
                 )? {
                     CandidateOutcome::Ready(mut value)
-                        if self.signatures.types().is_assignable(value.ty, expected)? =>
+                        if self
+                            .signatures
+                            .types()
+                            .is_assignable(value.ty, expected.ty())? =>
                     {
                         value
                             .replacements
@@ -446,7 +456,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
         let origin = self.expression_origin(source, expression)?;
         let expected = match request.expected {
-            Some(ty) if matches!(self.signatures.types().kind(ty)?, TypeKind::Callable { .. }) => {
+            Some(ty)
+                if matches!(
+                    self.signatures.types().kind(ty.ty())?,
+                    TypeKind::Callable { .. }
+                ) =>
+            {
                 Some(ty)
             }
             _ => None,
@@ -485,7 +500,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         Some(expected) => self
                             .signatures
                             .types()
-                            .is_assignable(candidate.ty, expected)?,
+                            .is_assignable(candidate.ty, expected.ty())?,
                         None => true,
                     };
                     if compatible {
@@ -604,13 +619,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     fn candidate_callable_value(
         &mut self,
         callable: CallableSignature,
-        expected: Option<TypeId>,
+        expected: Option<ExpectedType>,
         filter_parameters: bool,
         mut replacements: BTreeMap<GenericParameterId, TypeId>,
     ) -> Result<CandidateOutcome, BodyTypingError> {
         let expected_parameters = if filter_parameters {
             match expected {
-                Some(expected) => match self.signatures.types().kind(expected)? {
+                Some(expected) => match self.signatures.types().kind(expected.ty())? {
                     TypeKind::Callable { parameters, .. } => Some(parameters.to_vec()),
                     _ => None,
                 },
@@ -637,8 +652,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     callable.parameters().iter().map(CallableParameter::ty),
                     callable.result(),
                 )?;
-                if self.infer_constraints(template, expected, &parameters, &mut replacements)?
-                    == ConstraintOutcome::Conflict
+                if self.infer_constraints(
+                    template,
+                    expected.ty(),
+                    &parameters,
+                    &mut replacements,
+                )? == ConstraintOutcome::Conflict
                 {
                     return Ok(CandidateOutcome::Mismatch);
                 }
@@ -651,13 +670,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
         }
 
+        let custody = expected.map_or(ExpectationCustody::Caller, ExpectedType::custody);
         let mut specialized = Vec::with_capacity(callable.parameters().len());
         for (index, parameter) in callable.parameters().iter().enumerate() {
             let ty = self
                 .signatures
                 .types_mut()
                 .substitute(parameter.ty(), &replacements)?;
-            let ty = match self.normalize_callable_candidate_type(ty)? {
+            let ty = match self.normalize_callable_candidate_type(ExpectedType::new(ty, custody))? {
                 Ok(ty) => ty,
                 Err(failure) => return Ok(CandidateOutcome::NormalizationFailed(failure)),
             };
@@ -674,10 +694,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .signatures
             .types_mut()
             .substitute(callable.result(), &replacements)?;
-        let result = match self.normalize_callable_candidate_type(result)? {
-            Ok(ty) => ty,
-            Err(failure) => return Ok(CandidateOutcome::NormalizationFailed(failure)),
-        };
+        let result =
+            match self.normalize_callable_candidate_type(ExpectedType::new(result, custody))? {
+                Ok(ty) => ty,
+                Err(failure) => return Ok(CandidateOutcome::NormalizationFailed(failure)),
+            };
         let ty = self.signatures.types_mut().callable(specialized, result)?;
         Ok(CandidateOutcome::Ready(CallableValueCandidate {
             callable,
@@ -688,16 +709,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
     fn normalize_callable_candidate_type(
         &mut self,
-        ty: TypeId,
+        expected: ExpectedType,
     ) -> Result<Result<TypeId, TraitNormalization>, BodyTypingError> {
+        #[cfg(test)]
+        expectation::observe_candidate(expected);
+
         let owner = self
             .current_owner
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
         Ok(
-            match self
-                .trait_environment
-                .normalize_for_owner(owner, self.signatures, ty)?
-            {
+            match self.trait_environment.normalize_for_owner(
+                owner,
+                self.signatures,
+                expected.ty(),
+            )? {
                 TraitNormalization::Normalized(ty) | TraitNormalization::Symbolic(ty) => Ok(ty),
                 failure => Err(failure),
             },
@@ -721,7 +746,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         origin: OriginId,
-        expected: Option<TypeId>,
+        expected: Option<ExpectedType>,
         candidates: &[CallableSignature],
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
         let expected = expected.expect("an overload value requires expected Fn context");
@@ -736,7 +761,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             BTreeMap::from([
                 (
                     Box::<str>::from("expected_type"),
-                    DiagnosticDataValue::from(self.format_type(expected)?),
+                    DiagnosticDataValue::from(self.format_type(expected.ty())?),
                 ),
                 (
                     Box::<str>::from("candidates"),

@@ -43,6 +43,7 @@ mod constants;
 mod construction;
 mod control;
 mod dispatch;
+mod expectation;
 mod expression;
 mod failure;
 mod inherent;
@@ -58,6 +59,8 @@ mod support;
 mod tensor;
 mod traversal;
 mod values;
+
+use expectation::{ExpectationCustody, ExpectedType};
 
 #[cfg(test)]
 mod test_support;
@@ -177,7 +180,7 @@ struct BodyChecker<'input, 'hir, 'support> {
     question_floors: Vec<usize>,
     checked_contexts: Vec<CheckedContext>,
     control_path_barriers: Vec<usize>,
-    current_return: Option<TypeId>,
+    current_return: Option<ExpectedType>,
     current_owner: Option<DefId>,
 }
 
@@ -316,7 +319,7 @@ impl BlockStep {
 
 #[derive(Clone, Copy)]
 struct TypeRequest {
-    expected: Option<TypeId>,
+    expected: Option<ExpectedType>,
     allow_deferred: bool,
     default_integer: bool,
     value_required: bool,
@@ -380,6 +383,7 @@ struct MethodCallRequest<'a> {
 #[derive(Clone, Copy)]
 struct ApplicationRequest<'a> {
     origin: OriginId,
+    custody: ExpectationCustody,
     generic_parameters: &'a [GenericParameterId],
     slots: &'a [ApplicationSlot],
     result_template: TypeId,
@@ -500,6 +504,7 @@ struct ApplicationSlot {
     origin: OriginId,
     related: Option<SourceSpan>,
     evaluation_order: usize,
+    custody: ExpectationCustody,
     passing: ArgumentPassing,
 }
 
@@ -714,7 +719,7 @@ impl ConstructorPayloadForm {
 }
 
 impl TypeRequest {
-    const fn definitive(expected: Option<TypeId>) -> Self {
+    const fn definitive(expected: Option<ExpectedType>) -> Self {
         Self {
             expected,
             allow_deferred: false,

@@ -159,7 +159,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .expression(current)
                         .ok_or(BodyTypingError::WrongBodyExpression(current))?
                         .kind();
-                    let expected = match request.expected {
+                    let expected = match request.expected_type() {
                         Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
                         _ => None,
                     };
@@ -188,7 +188,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             ));
                             frame.pending.push(NumericTypeStep::Enter(
                                 *operand,
-                                TypeRequest::definitive(expected),
+                                TypeRequest::definitive(request.retarget(expected)),
                                 continuation,
                             ));
                             continue;
@@ -223,7 +223,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             });
                             frame.pending.push(NumericTypeStep::Enter(
                                 *left,
-                                TypeRequest::definitive(expected),
+                                TypeRequest::definitive(request.retarget(expected)),
                                 continuation,
                             ));
                             continue;
@@ -254,7 +254,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     });
                     frame.pending.push(NumericTypeStep::Enter(
                         left,
-                        TypeRequest::definitive(expected),
+                        TypeRequest::definitive(request.retarget(expected)),
                         continuation,
                     ));
                     continue;
@@ -271,7 +271,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         FactState::Known(left) if self.is_fixed_width_integer(left.ty)? => {
                             Some(left.ty)
                         }
-                        _ => match request.expected {
+                        _ => match request.expected_type() {
                             Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
                             _ => None,
                         },
@@ -285,7 +285,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .push(NumericTypeStep::Finish(expression, request, continuation));
                     frame.pending.push(NumericTypeStep::Enter(
                         right,
-                        TypeRequest::definitive(expected),
+                        TypeRequest::definitive(request.retarget(expected)),
                         right_path,
                     ));
                     continue;

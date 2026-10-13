@@ -56,7 +56,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
 
         let expected = request
-            .expected
+            .expected_type()
             .map(|ty| self.failure_carrier(ty))
             .transpose()?
             .flatten();
@@ -70,7 +70,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let region = ControlRegionKey::Result(ExpressionKey::new(module, expression));
         Ok(FailurePlan::ResultBlock {
             block,
-            request: TypeRequest::definitive(expected.map(|carrier| carrier.ty)),
+            request: TypeRequest::definitive(request.retarget(expected.map(|carrier| carrier.ty))),
             context: ResultContext {
                 region,
                 expected,
@@ -306,7 +306,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(FailurePlan::Complete(Outcome::Unperformed));
         };
         let expected_carrier = request
-            .expected
+            .expected_type()
             .map(|ty| self.failure_carrier(ty))
             .transpose()?
             .flatten();
@@ -329,7 +329,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let region = ControlRegionKey::Checked(ExpressionKey::new(module, expression));
         Ok(FailurePlan::CheckedBlock {
             block,
-            request: TypeRequest::definitive(expected_success),
+            request: TypeRequest::definitive(request.retarget(expected_success)),
             context: CheckedContext {
                 region: region.clone(),
             },

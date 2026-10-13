@@ -300,7 +300,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         callable: CallableSignature,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let source = context.source;
-        let slots = match self.bind_call_slots(source, origin, &callable, &call.arguments)? {
+        let call_site = ExpressionKey::new(context.module, expression);
+        let slots = match self.bind_call_slots(source, origin, call_site, &callable, call)? {
             Outcome::Known(slots) => slots,
             outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
         };
@@ -309,6 +310,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
+                custody: ExpectationCustody::Selection(call_site),
                 generic_parameters: callable.generic_parameters(),
                 slots: &slots,
                 result_template: callable.result(),
@@ -420,6 +422,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: index,
+                custody: ExpectationCustody::call_argument(
+                    ExpressionKey::new(context.module, expression),
+                    call,
+                    index,
+                ),
                 passing: ArgumentPassing::Value,
             })
             .collect::<Vec<_>>();
@@ -427,6 +434,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
+                custody: ExpectationCustody::Selection(ExpressionKey::new(
+                    context.module,
+                    expression,
+                )),
                 generic_parameters: &[],
                 slots: &slots,
                 result_template: result,
@@ -554,6 +565,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: index,
+                custody: ExpectationCustody::call_argument(
+                    ExpressionKey::new(context.module, expression),
+                    call,
+                    index,
+                ),
                 passing: ArgumentPassing::Value,
             })
             .collect::<Vec<_>>();
@@ -569,6 +585,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
+                custody: ExpectationCustody::Selection(ExpressionKey::new(
+                    context.module,
+                    expression,
+                )),
                 generic_parameters: constructor.generic_parameters(),
                 slots: &slots,
                 result_template: constructor.result(),
@@ -618,6 +638,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             origin: self.expression_origin(source, request.receiver)?,
             related: self.parameter_span(&candidate.callable, receiver_parameter)?,
             evaluation_order: 0,
+            custody: ExpectationCustody::Caller,
             passing,
         });
         for (parameter_index, parameter) in candidate.callable.parameters()[1..].iter().enumerate()
@@ -634,6 +655,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: self.parameter_span(&candidate.callable, parameter)?,
                 evaluation_order: argument_index + 1,
+                custody: ExpectationCustody::call_argument(
+                    ExpressionKey::new(context.module, request.expression),
+                    request.call,
+                    argument_index,
+                ),
                 passing: ArgumentPassing::Value,
             });
         }
@@ -641,6 +667,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin: request.origin,
+                custody: ExpectationCustody::Selection(ExpressionKey::new(
+                    context.module,
+                    request.expression,
+                )),
                 generic_parameters: candidate.callable.generic_parameters(),
                 slots: &slots,
                 result_template: candidate.callable.result(),

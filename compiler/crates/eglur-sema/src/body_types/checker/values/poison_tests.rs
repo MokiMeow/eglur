@@ -78,7 +78,7 @@ fn drive(
         .types_mut()
         .tuple(vec![integer; outcomes.len()])
         .unwrap();
-    let request = TypeRequest::definitive(Some(expected));
+    let request = TypeRequest::local(Some(expected));
     let mut plan = checker.prepare_tuple(values.clone(), request).unwrap();
     let mut paths = Vec::new();
     WORK.set(Work::default());
@@ -94,7 +94,7 @@ fn drive(
             panic!("every tuple element must be visited")
         };
         assert_eq!(expression, values[index]);
-        assert_eq!(actual.expected, Some(integer));
+        assert_eq!(actual.expected_type(), Some(integer));
         assert_eq!(actual.allow_deferred, request.allow_deferred);
         assert_eq!(actual.default_integer, request.default_integer);
         assert_eq!(actual.value_required, request.value_required);

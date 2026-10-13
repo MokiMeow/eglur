@@ -15,7 +15,7 @@ pub(super) enum ExpressionPlan {
     Block {
         key: ExpressionKey,
         statements: Box<[StmtId]>,
-        expected: Option<TypeId>,
+        expected: Option<ExpectedType>,
     },
     Forward {
         key: ExpressionKey,
@@ -83,6 +83,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ..
         } = context;
         let key = ExpressionKey::new(module, expression_id);
+        #[cfg(test)]
+        expectation::observe_request(key, request);
+
         match self.expressions.state(&key) {
             FactState::Known(expression) => {
                 return Ok(ExpressionPlan::Complete(Outcome::Known(expression.clone())));
@@ -100,7 +103,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .ok_or(BodyTypingError::WrongBodyExpression(expression_id))?;
         let origin = expression.origin();
         let request = if let Some(expected) = request.expected {
-            match self.normalize_type_at(source, origin, expected)? {
+            match self.normalize_expected_at(source, origin, expected)? {
                 Outcome::Known(expected) => TypeRequest {
                     expected: Some(expected),
                     ..request
@@ -406,7 +409,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
         let primitive = match literal.kind() {
             LiteralKind::Integer => return self.type_integer_literal(source, literal, request),
-            LiteralKind::Float => match request.expected {
+            LiteralKind::Float => match request.expected_type() {
                 Some(expected)
                     if matches!(
                         self.signatures.types().kind(expected)?,
@@ -452,7 +455,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         literal: &Literal,
         request: TypeRequest,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let expected = match request.expected {
+        let expected = match request.expected_type() {
             Some(expected) => match self.signatures.types().kind(expected)? {
                 TypeKind::Primitive(primitive) => Some((expected, *primitive)),
                 _ => None,

@@ -200,8 +200,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.bind_call_slots(
                     source,
                     request.origin,
+                    ExpressionKey::new(context.module, request.expression),
                     &first.callable,
-                    &request.call.arguments,
+                    request.call,
                 )?
                 .map(|_| unreachable!()),
             ));
@@ -280,8 +281,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.bind_call_slots(
                     source,
                     request.origin,
+                    ExpressionKey::new(context.module, request.expression),
                     first.template.callable(),
-                    &request.call.arguments,
+                    request.call,
                 )?
                 .map(|_| unreachable!()),
             ));
@@ -505,7 +507,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             let first = candidates
                 .first()
                 .ok_or(BodyTypingError::EmptyDeclarationSet)?;
-            return match self.bind_call_slots(source, origin, &first.callable, &call.arguments)? {
+            return match self.bind_call_slots(
+                source,
+                origin,
+                ExpressionKey::new(context.module, expression),
+                &first.callable,
+                call,
+            )? {
                 Outcome::Poisoned(poison) => {
                     Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)))
                 }
@@ -935,8 +943,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let slots = match self.bind_call_slots(
             source,
             request.origin,
+            ExpressionKey::new(context.module, request.expression),
             &candidate.callable,
-            &request.call.arguments,
+            &request.call,
         )? {
             Outcome::Known(slots) => slots,
             outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
@@ -945,6 +954,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin: request.origin,
+                custody: ExpectationCustody::Selection(ExpressionKey::new(
+                    context.module,
+                    request.expression,
+                )),
                 generic_parameters: candidate.callable.generic_parameters(),
                 slots: &slots,
                 result_template: candidate.callable.result(),

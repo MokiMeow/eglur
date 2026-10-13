@@ -88,7 +88,7 @@ fn run(
             source,
             ExpressionKey::new(module, expression_id),
             expression,
-            TypeRequest::definitive(Some(integer)),
+            TypeRequest::local(Some(integer)),
             initial,
         )
         .unwrap();

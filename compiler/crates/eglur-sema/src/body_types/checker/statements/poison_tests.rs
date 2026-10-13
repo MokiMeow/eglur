@@ -77,7 +77,7 @@ fn drive(checker: &mut BodyChecker<'_, '_, '_>, outcomes: Vec<Outcome<BlockStep>
     checker.current_owner = Some(owner);
     let region = ControlRegionKey::Callable(owner);
     checker.enter_control_region(region.clone()).unwrap();
-    let mut frame = BlockFrame::new(statements.clone(), Some(integer));
+    let mut frame = BlockFrame::new(statements.clone(), Some(ExpectedType::caller(integer)));
     let mut paths = Vec::new();
     let mut metadata = Vec::new();
     WORK.set(Work::default());
@@ -87,7 +87,7 @@ fn drive(checker: &mut BodyChecker<'_, '_, '_>, outcomes: Vec<Outcome<BlockStep>
             .next_statement()
             .expect("every later statement must be visited");
         assert_eq!(statement, statements[index]);
-        assert_eq!(expected, Some(integer));
+        assert_eq!(expected.map(ExpectedType::ty), Some(integer));
         paths.push(path);
         let child = next.clone().map(|_| checker.value_expression(integer));
         checker

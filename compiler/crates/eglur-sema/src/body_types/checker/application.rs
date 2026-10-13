@@ -40,6 +40,7 @@ struct ApplicationArguments {
 
 struct PendingApplication {
     origin: OriginId,
+    custody: ExpectationCustody,
     parameters: Box<[GenericParameterId]>,
     parameter_set: BTreeSet<GenericParameterId>,
     arguments: ApplicationArguments,
@@ -87,6 +88,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     ) -> Result<ApplicationPlan, BodyTypingError> {
         let ApplicationRequest {
             origin,
+            custody,
             generic_parameters,
             slots,
             result_template,
@@ -121,7 +123,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         } else if let Some(expected) = request.expected
             && self.infer_constraints(
                 result_template,
-                expected,
+                expected.ty(),
                 &parameter_set,
                 &mut replacements,
             )? == ConstraintOutcome::Conflict
@@ -133,6 +135,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
         let application = PendingApplication {
             origin,
+            custody,
             parameters: generic_parameters.into(),
             parameter_set,
             arguments: ApplicationArguments {
@@ -195,7 +198,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     &application.replacements,
                 )? {
                     Some(expected) => {
-                        match self.normalize_type_at(source, argument.slot.origin, expected)? {
+                        let expected = ExpectedType::new(expected, argument.slot.custody);
+                        match self.normalize_expected_at(source, argument.slot.origin, expected)? {
                             Outcome::Known(expected) => Some(expected),
                             outcome => {
                                 return Ok(ApplicationPlan::Complete(application_refusal(outcome)));
@@ -342,8 +346,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .signatures
                 .types_mut()
                 .substitute(argument.slot.template, &application.replacements)?;
-            match self.normalize_type_at(source, argument.slot.origin, specialized)? {
-                Outcome::Known(ty) => specialized_slots.push(ty),
+            let specialized = ExpectedType::new(specialized, argument.slot.custody);
+            match self.normalize_expected_at(source, argument.slot.origin, specialized)? {
+                Outcome::Known(ty) => specialized_slots.push(ty.ty()),
                 outcome => return Ok(ApplicationPlan::Complete(application_refusal(outcome))),
             }
         }
@@ -351,8 +356,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .signatures
             .types_mut()
             .substitute(application.result_template, &application.replacements)?;
-        let result = match self.normalize_type_at(source, application.origin, result)? {
-            Outcome::Known(ty) => ty,
+        let result = ExpectedType::new(result, application.custody);
+        let result = match self.normalize_expected_at(source, application.origin, result)? {
+            Outcome::Known(ty) => ty.ty(),
             outcome => return Ok(ApplicationPlan::Complete(application_refusal(outcome))),
         };
         self.advance_application_checking(
@@ -398,7 +404,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             } else {
                 return Ok(ApplicationPlan::Expression {
                     expression: argument.slot.value,
-                    request: TypeRequest::definitive(Some(frame.specialized_slots[index])),
+                    request: TypeRequest::definitive(Some(ExpectedType::new(
+                        frame.specialized_slots[index],
+                        argument.slot.custody,
+                    ))),
                     path: frame.normal_continuation,
                     continuation: ApplicationContinuation::Check {
                         frame,

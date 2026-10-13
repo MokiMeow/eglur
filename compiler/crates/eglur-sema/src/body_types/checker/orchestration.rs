@@ -103,8 +103,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Err(BodyTypingError::WrongDeclarationKind(declaration));
         };
         let body = hir.body(function.body);
-        let result_ty =
-            match self.normalize_type_at(source, function.name.origin(), signature.result())? {
+        let result_expected = function.return_type.map_or_else(
+            || ExpectedType::caller(signature.result()),
+            |type_ref| ExpectedType::written(signature.result(), source.file(), type_ref),
+        );
+        let result_expected =
+            match self.normalize_expected_at(source, function.name.origin(), result_expected)? {
                 Outcome::Known(ty) => ty,
                 Outcome::Poisoned(poison) => {
                     return self.record_body_outcome(
@@ -115,7 +119,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
                 Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => return Ok(()),
             };
-        let previous_return = self.current_return.replace(result_ty);
+        let result_ty = result_expected.ty();
+        let previous_return = self.current_return.replace(result_expected);
         let region = ControlRegionKey::Callable(declaration);
         self.enter_control_region(region.clone())?;
         let outcome = (|| {
@@ -159,7 +164,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             hir,
                             body,
                             expression,
-                            TypeRequest::definitive(Some(result_ty)),
+                            TypeRequest::definitive(Some(result_expected)),
                         )?;
                         self.check_return_value(source, expression, result_ty, value)
                     }
@@ -226,7 +231,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 );
             }
         }
-        let expected = match self.normalize_type_at(source, item.origin(), expected)? {
+        let original_expected = ExpectedType::written(expected, source.file(), value.ty);
+        let expected = match self.normalize_expected_at(source, item.origin(), original_expected)? {
             Outcome::Known(ty) => ty,
             Outcome::Poisoned(poison) => {
                 return self.record_body_outcome(declaration, expected, Outcome::Poisoned(poison));
@@ -243,7 +249,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         )?;
         let outcome = match outcome {
             Outcome::Known(actual)
-                if self.signatures.types().is_assignable(actual.ty, expected)? =>
+                if self
+                    .signatures
+                    .types()
+                    .is_assignable(actual.ty, expected.ty())? =>
             {
                 Outcome::Known(actual)
             }
@@ -252,7 +261,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     .expression(value.value)
                     .ok_or(BodyTypingError::WrongBodyExpression(value.value))?
                     .origin();
-                Outcome::Poisoned(self.assignment_mismatch(source, origin, expected, actual.ty)?)
+                Outcome::Poisoned(self.assignment_mismatch(
+                    source,
+                    origin,
+                    expected.ty(),
+                    actual.ty,
+                )?)
             }
             other => other,
         };
@@ -267,7 +281,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         } else {
             outcome
         };
-        self.record_body_outcome(declaration, expected, outcome)
+        self.record_body_outcome(declaration, expected.ty(), outcome)
     }
 
     pub(super) fn record_body_outcome(

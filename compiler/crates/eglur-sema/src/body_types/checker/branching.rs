@@ -115,7 +115,10 @@ impl MatchFrame {
             region: self.region(),
             path,
             expression: self.expression.arms[self.next_arm].value,
-            request: TypeRequest::definitive(self.common.or(self.request.expected)),
+            request: TypeRequest::definitive(
+                self.request
+                    .retarget(self.common.or(self.request.expected_type())),
+            ),
             frame: self,
         }
     }
@@ -319,7 +322,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 },
                 path: frame.condition_continuation,
                 expression,
-                request: TypeRequest::definitive(frame.common.or(frame.request.expected)),
+                request: TypeRequest::definitive(
+                    frame
+                        .request
+                        .retarget(frame.common.or(frame.request.expected_type())),
+                ),
                 frame,
             });
         }
@@ -537,7 +544,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             let bool_ty = self.primitive(PrimitiveType::Bool)?;
             return Ok(BranchPlan::Expression {
                 expression: guard.condition,
-                request: TypeRequest::definitive(Some(bool_ty)),
+                request: TypeRequest::local(Some(bool_ty)),
                 continuation: BranchContinuation::MatchGuard { frame, bool_ty },
             });
         }

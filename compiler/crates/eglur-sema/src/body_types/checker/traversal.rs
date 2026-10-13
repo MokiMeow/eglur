@@ -24,7 +24,7 @@ enum Step {
     InCurrentRegion(ExprId, TypeRequest),
     Publish(ExpressionKey),
     Block(BlockFrame),
-    Statement(StmtId, Option<TypeId>),
+    Statement(StmtId, Option<ExpectedType>),
     ResumeStatement(StatementContinuation),
     ResumeBlock(BlockFrame),
     Value(Box<ValuePlan>),

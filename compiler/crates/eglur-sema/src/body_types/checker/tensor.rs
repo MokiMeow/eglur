@@ -180,7 +180,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             return Ok(InvocationPlan::Expression {
                 expression: argument.value,
-                request: TypeRequest::definitive(Some(frame.nat)),
+                request: TypeRequest::local(Some(frame.nat)),
                 path: frame.normal_continuation,
                 continuation: InvocationContinuation::TensorConstructor(frame),
             });
@@ -231,6 +231,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: 0,
+                custody: ExpectationCustody::Caller,
                 passing: ArgumentPassing::Value,
             };
             return self

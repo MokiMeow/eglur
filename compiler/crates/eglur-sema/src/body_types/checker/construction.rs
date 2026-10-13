@@ -172,6 +172,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: initializer.origin,
                 related: self.target_span(field_target),
                 evaluation_order: initializers[field_target],
+                custody: request.custody(),
                 passing: ArgumentPassing::Value,
             });
         }
@@ -180,6 +181,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
+                custody: request.custody(),
                 generic_parameters: &generic_parameters,
                 slots: &slots,
                 result_template,
@@ -326,7 +328,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
         };
-        let slots = match self.bind_constructor_slots(source, origin, &target, &shape, payload)? {
+        let slots = match self.bind_constructor_slots(
+            source,
+            origin,
+            &target,
+            &shape,
+            payload,
+            request.ty.custody(),
+        )? {
             Outcome::Known(slots) => slots,
             Outcome::Poisoned(poison) => {
                 return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
@@ -340,6 +349,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
+                custody: request.ty.custody(),
                 generic_parameters: &generic_parameters,
                 slots: &slots,
                 result_template,
@@ -371,6 +381,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: &CanonicalTarget,
         shape: &ConstructorShape,
         payload: &ConstructorPayload,
+        custody: ExpectationCustody,
     ) -> Result<Outcome<Vec<ApplicationSlot>>, BodyTypingError> {
         let expected_form = shape.form();
         let actual_form = ConstructorPayloadForm::from_payload(payload);
@@ -421,6 +432,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         origin: self.expression_origin(source, value)?,
                         related: None,
                         evaluation_order: index,
+                        custody,
                         passing: ArgumentPassing::Value,
                     });
                 }
@@ -509,6 +521,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         origin: initializer.origin,
                         related: self.target_span(declaration),
                         evaluation_order: initializers[declaration],
+                        custody,
                         passing: ArgumentPassing::Value,
                     });
                 }

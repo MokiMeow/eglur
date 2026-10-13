@@ -31,6 +31,20 @@ pub(super) fn with_checker_inputs(
     trusted: Option<&crate::TrustedSignatureEnvironment>,
     inspect: impl FnOnce(&mut BodyChecker<'_, '_, '_>),
 ) {
+    with_checker_declarations(
+        text,
+        external,
+        trusted.map(|signatures| crate::TrustedDeclarationInputs::new(signatures, None)),
+        inspect,
+    );
+}
+
+pub(super) fn with_checker_declarations(
+    text: &str,
+    external: &ExternalNameEnvironment,
+    trusted: Option<crate::TrustedDeclarationInputs<'_>>,
+    inspect: impl FnOnce(&mut BodyChecker<'_, '_, '_>),
+) {
     let file = FileId::new(0);
     let raw = SourceFile::new(file, text.as_bytes().to_vec());
     let validated = raw.validate().unwrap();
@@ -97,10 +111,7 @@ pub(super) fn with_checker_inputs(
             &imports,
             &sources,
             &Support,
-            crate::SignatureResolutionInputs::new(
-                Some(external),
-                trusted.map(|signatures| crate::TrustedDeclarationInputs::new(signatures, None)),
-            ),
+            crate::SignatureResolutionInputs::new(Some(external), trusted),
             &mut diagnostics,
         )
         .unwrap(),
