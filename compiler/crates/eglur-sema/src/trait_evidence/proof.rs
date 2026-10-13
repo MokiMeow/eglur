@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::record_reservation::RecordReservation;
 use crate::{
     DeclarationSignatures, DefId, EvidenceProofId, TraitEnvironment, TraitObligation, TraitProof,
 };
@@ -12,6 +13,9 @@ use implementation::{ImplementationFrame, ImplementationStep};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod record_growth_tests;
 
 #[derive(Default)]
 pub(super) struct ProofArena {
@@ -114,6 +118,9 @@ impl ProofArena {
             return Ok(id);
         }
         let id = EvidenceProofId::from_index(self.nodes.len())?;
+
+        RecordReservation::for_append(&self.nodes).reserve(&mut self.nodes);
+
         self.ids.insert(node.clone(), id);
         self.nodes.push(node);
         Ok(id)

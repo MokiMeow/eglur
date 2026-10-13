@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use crate::record_reservation::RecordReservation;
 use crate::{CanonicalTarget, DefId, ExternalDefId, IdentityOverflow, SubstId, TypeId};
 
 macro_rules! primitive_types {
@@ -509,6 +510,13 @@ impl CanonicalTypeStore {
         }
         let id = SubstId::from_index(self.substitutions.len())?;
         let ownership_presence = self.ownership_presence_for_types(arguments.iter().copied());
+
+        let records = RecordReservation::for_append(&self.substitutions);
+        let ownership = RecordReservation::for_append(&self.substitution_ownership_presence);
+
+        records.reserve(&mut self.substitutions);
+        ownership.reserve(&mut self.substitution_ownership_presence);
+
         self.substitution_ids.insert(arguments.clone(), id);
         self.substitutions.push(arguments);
         self.substitution_ownership_presence
@@ -814,6 +822,15 @@ impl CanonicalTypeStore {
         let id = TypeId::from_index(self.types.len())?;
         let may_need_generic_substitution = self.kind_needs_generic_substitution(&kind);
         let ownership_presence = self.kind_ownership_presence(&kind);
+
+        let records = RecordReservation::for_append(&self.types);
+        let generic = RecordReservation::for_append(&self.may_need_generic_substitution);
+        let ownership = RecordReservation::for_append(&self.ownership_presence);
+
+        records.reserve(&mut self.types);
+        generic.reserve(&mut self.may_need_generic_substitution);
+        ownership.reserve(&mut self.ownership_presence);
+
         self.type_ids.insert(kind.clone(), id);
         self.types.push(kind);
         self.may_need_generic_substitution
@@ -980,6 +997,9 @@ impl From<IdentityOverflow> for TypeStoreError {
         Self::IdentityOverflow(error)
     }
 }
+
+#[cfg(test)]
+mod record_growth_tests;
 
 #[cfg(test)]
 mod ownership_presence_tests;
