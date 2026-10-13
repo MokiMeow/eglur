@@ -1,6 +1,14 @@
 use std::fmt;
 use std::num::NonZeroU64;
 
+mod accounting;
+
+pub use accounting::{
+    AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity, AnalysisRootScope,
+    AnalysisRootStopReason, AnalysisRootTicket, AnalysisWorkAccounting, AnalysisWorkFailure,
+    AnalysisWorkIncomplete,
+};
+
 /// Unpriced quantities for a planned analysis operation.
 ///
 /// Supplying complete counts remains the operation owner's responsibility.

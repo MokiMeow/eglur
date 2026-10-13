@@ -34,8 +34,10 @@ mod type_rendering;
 mod types;
 
 pub use analysis_work::{
-    AnalysisWork, AnalysisWorkCategory, AnalysisWorkOverflow, AnalysisWorkPricing,
-    AnalysisWorkUnits,
+    AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity, AnalysisRootScope,
+    AnalysisRootStopReason, AnalysisRootTicket, AnalysisWork, AnalysisWorkAccounting,
+    AnalysisWorkCategory, AnalysisWorkFailure, AnalysisWorkIncomplete, AnalysisWorkOverflow,
+    AnalysisWorkPricing, AnalysisWorkUnits,
 };
 pub use body_types::*;
 pub use capability::*;
