@@ -43,6 +43,7 @@ mod constants;
 mod construction;
 mod control;
 mod dispatch;
+mod execution;
 mod expectation;
 mod expression;
 mod failure;
@@ -60,6 +61,7 @@ mod tensor;
 mod traversal;
 mod values;
 
+use execution::BodyFlow;
 use expectation::{ExpectationCustody, ExpectedType};
 
 #[cfg(test)]
@@ -84,6 +86,84 @@ pub fn typecheck_bodies(
     trait_environment: &mut TraitEnvironment,
     diagnostics: &mut DiagnosticStore,
 ) -> Result<PhaseAnalysis<BodyTypes>, BodyTypingError> {
+    match typecheck_bodies_inner(
+        collection,
+        imports,
+        names,
+        external_names,
+        sources,
+        support,
+        declarations,
+        trait_environment,
+        diagnostics,
+        None,
+    )? {
+        BodyExecution::Completed(phase) => Ok(*phase),
+        BodyExecution::Interrupted(_) => Err(BodyTypingError::UnexpectedUnmeteredInterruption),
+    }
+}
+
+/// Runs body analysis with explicit attempt custody, without implicit limits.
+///
+/// This boundary preserves interruptions; operation metering and original-demand
+/// attachment must be supplied by the analysis consumers.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the phase boundary keeps independently owned semantic products explicit"
+)]
+pub fn typecheck_bodies_with_work(
+    collection: &DeclarationCollection,
+    imports: &ResolvedImports,
+    names: &NameResolution,
+    external_names: Option<&ExternalNameEnvironment>,
+    sources: &[SemanticSource<'_>],
+    support: &dyn CompileSupport,
+    declarations: &mut ResolvedDeclarationSemantics,
+    trait_environment: &mut TraitEnvironment,
+    diagnostics: &mut DiagnosticStore,
+    analysis_work: &mut crate::AnalysisWorkAccounting,
+) -> Result<BodyExecution, BodyTypingError> {
+    typecheck_bodies_inner(
+        collection,
+        imports,
+        names,
+        external_names,
+        sources,
+        support,
+        declarations,
+        trait_environment,
+        diagnostics,
+        Some(analysis_work),
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "both execution modes share the independently owned phase inputs"
+)]
+fn typecheck_bodies_inner(
+    collection: &DeclarationCollection,
+    imports: &ResolvedImports,
+    names: &NameResolution,
+    external_names: Option<&ExternalNameEnvironment>,
+    sources: &[SemanticSource<'_>],
+    support: &dyn CompileSupport,
+    declarations: &mut ResolvedDeclarationSemantics,
+    trait_environment: &mut TraitEnvironment,
+    diagnostics: &mut DiagnosticStore,
+    analysis_work: Option<&mut crate::AnalysisWorkAccounting>,
+) -> Result<BodyExecution, BodyTypingError> {
+    if let Some(stop) = analysis_work
+        .as_deref()
+        .and_then(crate::AnalysisWorkAccounting::incomplete)
+    {
+        return Ok(BodyExecution::Interrupted(Box::new(InterruptedBody {
+            stop,
+            prefix: BodyTypingPrefix::empty(),
+            demands: Vec::new(),
+            internal_failures: Vec::new(),
+        })));
+    }
     let mut recorder = DemandRecorder::new(support);
     let capability = CompileCapability::Typecheck(TypecheckCapability::CheckBodies);
     let mut supported = true;
@@ -91,7 +171,9 @@ pub fn typecheck_bodies(
         supported &= recorder.require(capability, SemanticLocation::source(module.file()));
     }
     if !supported {
-        return Ok(recorder.finish(PhaseProduct::Unperformed));
+        return Ok(BodyExecution::Completed(Box::new(
+            recorder.finish(PhaseProduct::Unperformed),
+        )));
     }
 
     let mut source_map = BTreeMap::new();
@@ -101,7 +183,7 @@ pub fn typecheck_bodies(
         }
     }
     let (signatures, inhabitance) = declarations.parts_mut();
-    let mut checker = BodyChecker {
+    let checker = BodyChecker {
         collection,
         imports,
         names,
@@ -140,9 +222,10 @@ pub fn typecheck_bodies(
         control_path_barriers: Vec::new(),
         current_return: None,
         current_owner: None,
+        analysis_work,
+        internal_failures: Vec::new(),
     };
-    checker.check_all()?;
-    Ok(checker.finish())
+    checker.execute()
 }
 
 struct BodyChecker<'input, 'hir, 'support> {
@@ -182,6 +265,8 @@ struct BodyChecker<'input, 'hir, 'support> {
     control_path_barriers: Vec<usize>,
     current_return: Option<ExpectedType>,
     current_owner: Option<DefId>,
+    analysis_work: Option<&'input mut crate::AnalysisWorkAccounting>,
+    internal_failures: Vec<BodyTypingError>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -248,7 +333,7 @@ enum UnitOutcomeFold {
 }
 
 impl UnitOutcomeFold {
-    fn include(self, next: Outcome<()>) -> Result<Self, BodyTypingError> {
+    fn include(self, next: Outcome<()>) -> Result<Self, BodyFlow> {
         let (mut pending, poison) = match (self, next) {
             (Self::Poisoned(pending), Outcome::Poisoned(poison)) => (pending, poison),
             (Self::Poisoned(pending), _) => return Ok(Self::Poisoned(pending)),

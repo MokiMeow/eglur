@@ -57,7 +57,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         body: &Body,
         expression: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         self.type_expression_steps(
             BodyContext {
                 module,
@@ -75,7 +75,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         expression_id: ExprId,
         request: TypeRequest,
-    ) -> Result<ExpressionPlan, BodyTypingError> {
+    ) -> Result<ExpressionPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -83,6 +83,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ..
         } = context;
         let key = ExpressionKey::new(module, expression_id);
+        #[cfg(test)]
+        execution::tests::checkpoint(self, key)?;
+        self.ensure_analysis_active()?;
         #[cfg(test)]
         expectation::observe_request(key, request);
 
@@ -406,7 +409,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         literal: &Literal,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let primitive = match literal.kind() {
             LiteralKind::Integer => return self.type_integer_literal(source, literal, request),
             LiteralKind::Float => match request.expected_type() {
@@ -454,7 +457,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         literal: &Literal,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let expected = match request.expected_type() {
             Some(expected) => match self.signatures.types().kind(expected)? {
                 TypeKind::Primitive(primitive) => Some((expected, *primitive)),
@@ -558,7 +561,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         expression: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let key = ResolutionKey::Expression { module, expression };
         if let Some(deferred) = self.names.deferred(key).cloned() {
@@ -590,9 +593,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 NameLookupMaterialization::Poisoned(poison) => Ok(Outcome::Poisoned(poison)),
                 NameLookupMaterialization::Unperformed => Ok(Outcome::Unperformed),
                 NameLookupMaterialization::NotApplicable => Ok(Outcome::NotApplicable),
-                NameLookupMaterialization::MissingCapabilityInput(capability) => {
-                    Err(BodyTypingError::MissingCapabilityInput(capability))
-                }
+                NameLookupMaterialization::MissingCapabilityInput(capability) => Err(
+                    BodyFlow::Internal(BodyTypingError::MissingCapabilityInput(capability)),
+                ),
             };
         }
         match self.names.fact(key) {
@@ -611,7 +614,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         request: TypeRequest,
         resolution: &ResolvedName,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         match resolution {
             ResolvedName::Local(binding) => match self.locals.state(binding) {
@@ -718,9 +721,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
                 self.type_named_callable_value(module, source, expression, request, &callables)
             }
-            ResolvedName::TypeMemberOwner(_) => {
-                Err(BodyTypingError::WrongBodyExpression(expression))
-            }
+            ResolvedName::TypeMemberOwner(_) => Err(BodyFlow::Internal(
+                BodyTypingError::WrongBodyExpression(expression),
+            )),
         }
     }
 }

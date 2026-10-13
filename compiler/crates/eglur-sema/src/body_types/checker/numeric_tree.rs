@@ -83,7 +83,7 @@ impl NumericTreeFrame {
         &mut self,
         body: &Body,
         expression: ExprId,
-    ) -> Result<bool, BodyTypingError> {
+    ) -> Result<bool, BodyFlow> {
         let known = &mut self.literal_trees;
         let mut pending = vec![(expression, false)];
         while let Some((current, finishing)) = pending.pop() {
@@ -135,7 +135,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         mut frame: Box<NumericTreeFrame>,
-    ) -> Result<NumericTreePlan, BodyTypingError> {
+    ) -> Result<NumericTreePlan, BodyFlow> {
         let BodyContext { module, body, .. } = context;
         while let Some(step) = frame.pending.pop() {
             let (expression, request, path, finishing) = match step {

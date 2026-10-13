@@ -39,7 +39,7 @@ fn drive(
     checker: &mut BodyChecker<'_, '_, '_>,
     outcomes: Vec<Outcome<TypedExpression>>,
 ) -> (
-    Result<Outcome<TypedExpression>, BodyTypingError>,
+    Result<Outcome<TypedExpression>, BodyFlow>,
     Vec<NormalContinuation>,
 ) {
     let owner = checker
@@ -349,9 +349,9 @@ fn foreign_tuple_inputs_fail_immediately_without_completion_and_keep_child_facts
                 let (outcome, paths) = drive(checker, outcomes);
                 assert!(matches!(
                     outcome,
-                    Err(BodyTypingError::DiagnosticStore(
+                    Err(BodyFlow::Internal(BodyTypingError::DiagnosticStore(
                         eglur_diagnostics::DiagnosticStoreError::ForeignPoison
-                    ))
+                    )))
                 ));
                 let visited = if foreign_first { 2 } else { count };
                 assert_eq!(paths.len(), visited);

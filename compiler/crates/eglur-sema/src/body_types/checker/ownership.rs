@@ -7,7 +7,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         expression: ExprId,
         origin: OriginId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let (binding, source_ty) = match self.ownership_local(module, expression)? {
             Outcome::Known(Some(operand)) => operand,
             Outcome::Known(None) | Outcome::NotApplicable => {
@@ -64,7 +64,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         expression: ExprId,
         origin: OriginId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let (binding, source_ty) = match self.ownership_local(module, expression)? {
             Outcome::Known(Some(operand)) => operand,
             Outcome::Known(None) | Outcome::NotApplicable => {
@@ -107,7 +107,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         explicit_move: bool,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let operand = self.ownership_local(module, expression)?;
         if let Outcome::Poisoned(poison) = operand {
             return Ok(Outcome::Poisoned(poison));
@@ -167,7 +167,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         module: ModuleId,
         expression: ExprId,
-    ) -> Result<Outcome<Option<(LocalBindingId, TypeId)>>, BodyTypingError> {
+    ) -> Result<Outcome<Option<(LocalBindingId, TypeId)>>, BodyFlow> {
         let key = ResolutionKey::Expression { module, expression };
         match self.names.fact(key) {
             FactState::Known(ResolvedName::Local(binding)) => match self.locals.state(binding) {
@@ -190,7 +190,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         key: ExpressionKey,
         kind: TypedOwnershipOperationKind,
         source: LocalBindingId,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         self.ownership_operations.insert(
             key,
             SemanticFact::Known(TypedOwnershipOperation { kind, source }),

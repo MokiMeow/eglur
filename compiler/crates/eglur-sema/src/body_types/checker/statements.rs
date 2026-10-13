@@ -79,7 +79,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         mut block: BlockFrame,
         next: Outcome<BlockStep>,
-    ) -> Result<BlockFrame, BodyTypingError> {
+    ) -> Result<BlockFrame, BodyFlow> {
         if block.reachable
             && let Outcome::Known(step) = &next
         {
@@ -101,7 +101,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn finish_block(
         &mut self,
         block: BlockFrame,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         match block.state.finish() {
             Outcome::Known(()) => {
                 if block.reachable {
@@ -138,7 +138,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         statement_id: StmtId,
         expected: Option<ExpectedType>,
-    ) -> Result<StatementPlan, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext { source, body, .. } = context;
         let statement = body
             .statement(statement_id)
@@ -232,7 +232,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         continuation: StatementContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<StatementPlan, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let result = match continuation {
             StatementContinuation::Let(request) => self
@@ -288,7 +288,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: LetBindingRequest,
-    ) -> Result<StatementPlan, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -399,7 +399,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         request: PreparedLet,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+    ) -> Result<Outcome<NormalContinuation>, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -465,7 +465,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: ExprId,
         value: ExprId,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<StatementPlan, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -541,7 +541,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: TypedExpression,
         value_origin: OriginId,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+    ) -> Result<Outcome<NormalContinuation>, BodyFlow> {
         match outcome {
             Outcome::Known(value)
                 if self.signatures.types().is_assignable(value.ty, target.ty)? =>
@@ -572,7 +572,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: ReturnStatementRequest,
-    ) -> Result<StatementPlan, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let ReturnStatementRequest {
             statement,
@@ -633,7 +633,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         value: Outcome<TypedExpression>,
-    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+    ) -> Result<Outcome<NormalContinuation>, BodyFlow> {
         match value {
             Outcome::Known(value)
                 if self.signatures.types().ownership_root(value.ty)?.is_some() =>
@@ -661,7 +661,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         expected: TypeId,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let Outcome::Known(value) = outcome else {
             return Ok(outcome);
         };

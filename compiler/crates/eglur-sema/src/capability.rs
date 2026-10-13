@@ -620,4 +620,8 @@ impl<'support> DemandRecorder<'support> {
     pub(crate) fn finish<T>(self, product: PhaseProduct<T>) -> PhaseAnalysis<T> {
         PhaseAnalysis::new(product, self.demands)
     }
+
+    pub(crate) fn into_demands(self) -> Vec<CapabilityDemand> {
+        self.demands
+    }
 }

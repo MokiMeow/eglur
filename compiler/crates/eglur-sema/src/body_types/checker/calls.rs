@@ -38,7 +38,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         written: &CanonicalTarget,
-    ) -> Result<Outcome<QualifiedMethodOwner>, BodyTypingError> {
+    ) -> Result<Outcome<QualifiedMethodOwner>, BodyFlow> {
         if let CanonicalTarget::Primitive(owner) = written {
             return Ok(Outcome::Known(QualifiedMethodOwner {
                 target: written.clone(),
@@ -114,7 +114,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
     }
 
-    pub(super) fn method_subject(&self, receiver: TypeId) -> Result<TypeId, BodyTypingError> {
+    pub(super) fn method_subject(&self, receiver: TypeId) -> Result<TypeId, BodyFlow> {
         Ok(match self.signatures.types().kind(receiver)? {
             TypeKind::Reference { referent, .. } => *referent,
             _ => receiver,
@@ -126,7 +126,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         owner: &CanonicalTarget,
         callable: &CallableSignature,
         actual: TypeId,
-    ) -> Result<Option<TypeId>, BodyTypingError> {
+    ) -> Result<Option<TypeId>, BodyFlow> {
         let Some(receiver) = callable.parameters().first() else {
             return Ok(None);
         };
@@ -146,7 +146,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         module: ModuleId,
         methods: &[DefId],
-    ) -> Result<bool, BodyTypingError> {
+    ) -> Result<bool, BodyFlow> {
         let Some(first) = methods.first() else {
             return Ok(false);
         };
@@ -176,7 +176,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         subject: TypeId,
         targets: &[DefId],
-    ) -> Result<Outcome<Vec<MethodCandidate>>, BodyTypingError> {
+    ) -> Result<Outcome<Vec<MethodCandidate>>, BodyFlow> {
         let TypeKind::Nominal {
             head: NominalHead::Declaration(owner),
             substitution,
@@ -238,7 +238,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         subject: TypeId,
         name: &NameKey,
-    ) -> Result<Outcome<Vec<MethodCandidate>>, BodyTypingError> {
+    ) -> Result<Outcome<Vec<MethodCandidate>>, BodyFlow> {
         let mut candidates = Vec::new();
         for trait_target in self.visible_traits(module)? {
             match self.trait_method_candidates_for_owner(
@@ -265,7 +265,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         subject: TypeId,
         name: &NameKey,
         trait_target: &CanonicalTarget,
-    ) -> Result<Outcome<Vec<MethodCandidate>>, BodyTypingError> {
+    ) -> Result<Outcome<Vec<MethodCandidate>>, BodyFlow> {
         let owner = self
             .current_owner
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
@@ -330,18 +330,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         trait_parameters: &[GenericParameterId],
         callable: &CallableSignature,
         receiver: &TraitReceiverCandidate,
-    ) -> Result<MethodCandidate, BodyTypingError> {
+    ) -> Result<MethodCandidate, BodyFlow> {
         let trait_arguments = self
             .signatures
             .types()
             .substitution(receiver.trait_ref().substitution())?
             .to_vec();
         if trait_parameters.len() != trait_arguments.len() {
-            return Err(BodyTypingError::TraitMethodGenericArityMismatch {
-                trait_declaration: trait_target.clone(),
-                parameters: trait_parameters.len(),
-                arguments: trait_arguments.len(),
-            });
+            return Err(BodyFlow::Internal(
+                BodyTypingError::TraitMethodGenericArityMismatch {
+                    trait_declaration: trait_target.clone(),
+                    parameters: trait_parameters.len(),
+                    arguments: trait_arguments.len(),
+                },
+            ));
         }
         let replacements = trait_parameters
             .iter()
@@ -381,7 +383,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         subject: TypeId,
         replacements: &BTreeMap<GenericParameterId, TypeId>,
         generic_parameters: impl IntoIterator<Item = GenericParameterId>,
-    ) -> Result<CallableSignature, BodyTypingError> {
+    ) -> Result<CallableSignature, BodyFlow> {
         let parameter_types = callable
             .parameters()
             .iter()
@@ -393,15 +395,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             self.specialize_member_type(callable.result(), replacements, owner, subject)?;
         callable
             .with_specialized_contract(generic_parameters, parameter_types, result)
-            .ok_or(BodyTypingError::MethodSpecializationArityMismatch(
-                callable.id(),
+            .ok_or(BodyFlow::Internal(
+                BodyTypingError::MethodSpecializationArityMismatch(callable.id()),
             ))
     }
 
     pub(super) fn visible_traits(
         &self,
         module: ModuleId,
-    ) -> Result<Vec<CanonicalTarget>, BodyTypingError> {
+    ) -> Result<Vec<CanonicalTarget>, BodyFlow> {
         let module_declarations = self
             .collection
             .module(module)
@@ -453,7 +455,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         arguments: &[TypeRefId],
-    ) -> Result<Outcome<Vec<TypeId>>, BodyTypingError> {
+    ) -> Result<Outcome<Vec<TypeId>>, BodyFlow> {
         let mut resolved = Vec::with_capacity(arguments.len());
         let mut poison = PendingPoison::default();
         let mut unperformed = false;
@@ -523,7 +525,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         callable: &CallableSignature,
         receiver: &TypedExpression,
-    ) -> Result<Option<(TypeId, ArgumentPassing)>, BodyTypingError> {
+    ) -> Result<Option<(TypeId, ArgumentPassing)>, BodyFlow> {
         let Some(parameter) = callable.parameters().first() else {
             return Ok(None);
         };
@@ -577,7 +579,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         trait_ref: &TraitRef,
         replacements: &BTreeMap<GenericParameterId, TypeId>,
-    ) -> Result<TraitRef, BodyTypingError> {
+    ) -> Result<TraitRef, BodyFlow> {
         let arguments = self
             .signatures
             .types()
@@ -598,7 +600,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         member: &Name,
-    ) -> Result<Outcome<T>, BodyTypingError> {
+    ) -> Result<Outcome<T>, BodyFlow> {
         let name = member.text().unwrap_or("<invalid>");
         self.type_error(
             source,
@@ -616,7 +618,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         trait_target: &CanonicalTarget,
         subject: TypeId,
-    ) -> Result<Outcome<T>, BodyTypingError> {
+    ) -> Result<Outcome<T>, BodyFlow> {
         let FactState::Known(DeclarationSignature::Trait {
             generic_parameters, ..
         }) = self.signatures.declaration(trait_target)
@@ -656,7 +658,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         member: &Name,
         candidates: &[MethodCandidate],
         trait_tier: bool,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let rendered = candidates
             .iter()
             .map(|candidate| self.qualified_method_label(candidate.callable.declaration()))
@@ -706,7 +708,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn qualified_method_label(
         &self,
         target: &CanonicalTarget,
-    ) -> Result<String, BodyTypingError> {
+    ) -> Result<String, BodyFlow> {
         let CanonicalTarget::Source(method) = target else {
             return Ok(self.target_label(target));
         };
@@ -784,7 +786,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         call: &CallExpr,
         candidates: &[CallableSignature],
         typed_arguments: &BTreeMap<ExprId, TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let actual = call
             .arguments
             .iter()
@@ -822,7 +824,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         candidates: &[CallableSignature],
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let rendered = self.format_callable_candidates(candidates)?;
         let related = self.callable_candidate_spans(candidates, &rendered)?;
         let name = candidates
@@ -849,7 +851,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn format_callable_candidates(
         &self,
         candidates: &[CallableSignature],
-    ) -> Result<Vec<String>, BodyTypingError> {
+    ) -> Result<Vec<String>, BodyFlow> {
         candidates
             .iter()
             .map(|candidate| self.format_callable_signature(candidate))
@@ -859,7 +861,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn format_callable_signature(
         &self,
         callable: &CallableSignature,
-    ) -> Result<String, BodyTypingError> {
+    ) -> Result<String, BodyFlow> {
         let owner = self
             .current_owner
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
@@ -876,7 +878,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         candidates: &[CallableSignature],
         rendered: &[String],
-    ) -> Result<Vec<RelatedSpan>, BodyTypingError> {
+    ) -> Result<Vec<RelatedSpan>, BodyFlow> {
         candidates
             .iter()
             .zip(rendered)
@@ -895,7 +897,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     .expect("rendered candidate label is non-empty")
                 }))
             })
-            .collect()
+            .collect::<Result<Vec<_>, BodyTypingError>>()
+            .map_err(BodyFlow::from)
     }
 
     pub(super) fn type_intrinsic_unit_constructor(
@@ -906,7 +909,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: &CanonicalTarget,
         constructor: &crate::ConstructorSignature,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BodyContext { source, body, .. } = context;
         let qualified = body
             .expression(expression)
@@ -955,7 +958,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         call_site: ExpressionKey,
         callable: &CallableSignature,
         call: &CallExpr,
-    ) -> Result<Outcome<Vec<ApplicationSlot>>, BodyTypingError> {
+    ) -> Result<Outcome<Vec<ApplicationSlot>>, BodyFlow> {
         let arguments = &call.arguments;
         let parameters = callable.parameters();
         let bindings = match Self::bind_call_argument_indices(callable, arguments) {
@@ -1079,7 +1082,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         callable: &CallableSignature,
         parameter: &CallableParameter,
-    ) -> Result<Option<SourceSpan>, BodyTypingError> {
+    ) -> Result<Option<SourceSpan>, BodyFlow> {
         let (CanonicalTarget::Source(declaration), Some(pattern)) =
             (callable.declaration(), parameter.source_pattern())
         else {
@@ -1100,7 +1103,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         slot: &ApplicationSlot,
         mut value: TypedExpression,
-    ) -> Result<TypedExpression, BodyTypingError> {
+    ) -> Result<TypedExpression, BodyFlow> {
         if matches!(
             self.signatures.types().kind(value.ty)?,
             TypeKind::Reference { .. }
@@ -1138,7 +1141,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         origin: OriginId,
-    ) -> Result<Outcome<T>, BodyTypingError> {
+    ) -> Result<Outcome<T>, BodyFlow> {
         self.type_error(
             source,
             origin,
@@ -1154,7 +1157,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         template: TypeId,
         parameters: &BTreeSet<GenericParameterId>,
         replacements: &BTreeMap<GenericParameterId, TypeId>,
-    ) -> Result<Option<TypeId>, BodyTypingError> {
+    ) -> Result<Option<TypeId>, BodyFlow> {
         if self.type_mentions_unresolved(template, parameters, replacements)? {
             return Ok(None);
         }
@@ -1170,7 +1173,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         root: TypeId,
         parameters: &BTreeSet<GenericParameterId>,
         replacements: &BTreeMap<GenericParameterId, TypeId>,
-    ) -> Result<bool, BodyTypingError> {
+    ) -> Result<bool, BodyFlow> {
         let mut pending = vec![root];
         let mut seen = BTreeSet::new();
         while let Some(current) = pending.pop() {
@@ -1225,7 +1228,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         actual: TypeId,
         parameters: &BTreeSet<GenericParameterId>,
         replacements: &mut BTreeMap<GenericParameterId, TypeId>,
-    ) -> Result<ConstraintOutcome, BodyTypingError> {
+    ) -> Result<ConstraintOutcome, BodyFlow> {
         let template_kind = self.signatures.types().kind(template)?.clone();
         if let TypeKind::GenericParameter(parameter) = template_kind {
             if !parameters.contains(&parameter) {
@@ -1339,7 +1342,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         parameters: &[GenericParameterId],
         replacements: &BTreeMap<GenericParameterId, TypeId>,
         allowed_ownership_parameter: Option<&GenericParameterId>,
-    ) -> Result<Option<Poison>, BodyTypingError> {
+    ) -> Result<Option<Poison>, BodyFlow> {
         for parameter in parameters {
             let replacement = replacements[parameter];
             let admitted_conditional_payload = if allowed_ownership_parameter == Some(parameter) {
@@ -1404,7 +1407,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         slot: &ApplicationSlot,
         expected: TypeId,
         actual: TypeId,
-    ) -> Result<Poison, BodyTypingError> {
+    ) -> Result<Poison, BodyFlow> {
         let data = BTreeMap::from([
             (
                 Box::<str>::from("reason"),
@@ -1443,7 +1446,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         requirements: &[CallableRequirement],
         replacements: &BTreeMap<GenericParameterId, TypeId>,
-    ) -> Result<Option<Poison>, BodyTypingError> {
+    ) -> Result<Option<Poison>, BodyFlow> {
         for requirement in requirements {
             match requirement {
                 CallableRequirement::FixedWidthInteger(template) => {
@@ -1489,7 +1492,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         parameters: &[GenericParameterId],
         replacements: &BTreeMap<GenericParameterId, TypeId>,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let owner = self
             .current_owner
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
@@ -1497,8 +1500,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             let signature = match self.signatures.generic_parameter(parameter) {
                 FactState::Known(signature) => signature.clone(),
                 FactState::Unperformed | FactState::Poisoned(_) | FactState::NotApplicable => {
-                    return Err(BodyTypingError::UnavailableGenericParameter(
-                        parameter.clone(),
+                    return Err(BodyFlow::Internal(
+                        BodyTypingError::UnavailableGenericParameter(parameter.clone()),
                     ));
                 }
             };
@@ -1551,7 +1554,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         signature: CallableSignatureId,
         substitution: SubstId,
-    ) -> Result<CallableInstanceId, BodyTypingError> {
+    ) -> Result<CallableInstanceId, BodyFlow> {
         if let Some(&id) = self.callable_instance_ids.get(&(signature, substitution)) {
             return Ok(id);
         }

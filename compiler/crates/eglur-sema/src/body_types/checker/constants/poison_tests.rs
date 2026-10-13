@@ -283,9 +283,9 @@ fn foreign_dependency_failure_keeps_prior_facts_and_skips_completion() {
                 let result = checker.check_constant_declarations(&declarations);
                 assert!(matches!(
                     result,
-                    Err(BodyTypingError::DiagnosticStore(
+                    Err(BodyFlow::Internal(BodyTypingError::DiagnosticStore(
                         eglur_diagnostics::DiagnosticStoreError::ForeignPoison
-                    ))
+                    )))
                 ));
                 assert_eq!(work(0), Work::default());
                 assert_eq!(

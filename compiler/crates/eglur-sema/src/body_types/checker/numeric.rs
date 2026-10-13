@@ -44,7 +44,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         continuation: NumericContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<NumericPlan, BodyTypingError> {
+    ) -> Result<NumericPlan, BodyFlow> {
         let outcome = match continuation {
             NumericContinuation::BinaryLeft {
                 frame,
@@ -88,7 +88,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: CheckedBinaryRequest,
-    ) -> Result<NumericPlan, BodyTypingError> {
+    ) -> Result<NumericPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -149,7 +149,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         frame: BinaryFrame,
         left: Outcome<TypedExpression>,
         right: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BinaryFrame {
             key,
             origin,
@@ -253,7 +253,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         operand: ExprId,
         request: TypeRequest,
-    ) -> Result<NumericPlan, BodyTypingError> {
+    ) -> Result<NumericPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -290,7 +290,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         frame: NegationFrame,
         operand: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let NegationFrame {
             key,
             origin,
@@ -352,7 +352,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         )))
     }
 
-    fn is_nonnumeric_operand(&self, ty: TypeId) -> Result<bool, BodyTypingError> {
+    fn is_nonnumeric_operand(&self, ty: TypeId) -> Result<bool, BodyFlow> {
         Ok(match self.signatures.types().kind(ty)? {
             TypeKind::Primitive(dtype) => !dtype.is_numeric(),
             TypeKind::Never
@@ -372,17 +372,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         value: &TypedExpression,
         destination: PrimitiveType,
-    ) -> Result<bool, BodyTypingError> {
+    ) -> Result<bool, BodyFlow> {
         if let Some(value) = value.integer_constant {
             return Ok(IntegerValue::new(destination, value.value()).is_some());
         }
         let TypeKind::Primitive(source) = self.signatures.types().kind(value.ty)? else {
-            return Err(BodyTypingError::InvalidIntegerConstant);
+            return Err(BodyFlow::Internal(BodyTypingError::InvalidIntegerConstant));
         };
         let (Some((source_min, source_max)), Some((target_min, target_max))) =
             (source.integer_bounds(), destination.integer_bounds())
         else {
-            return Err(BodyTypingError::InvalidIntegerConstant);
+            return Err(BodyFlow::Internal(BodyTypingError::InvalidIntegerConstant));
         };
         Ok(target_min <= source_min && source_max <= target_max)
     }
@@ -403,7 +403,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         operator: CheckedNumericOperator,
         evaluation: IntegerEvaluation,
         primitive: PrimitiveType,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         match evaluation {
             IntegerEvaluation::Value(value) => {
                 let ty = self.primitive(value.primitive())?;
@@ -438,7 +438,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     ]),
                 )?))
             }
-            IntegerEvaluation::Invalid => Err(BodyTypingError::InvalidIntegerConstant),
+            IntegerEvaluation::Invalid => {
+                Err(BodyFlow::Internal(BodyTypingError::InvalidIntegerConstant))
+            }
         }
     }
 
@@ -447,7 +449,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         operator: CheckedNumericOperator,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let symbol = match operator {
             CheckedNumericOperator::Add => "+",
             CheckedNumericOperator::Subtract | CheckedNumericOperator::Negate => "-",

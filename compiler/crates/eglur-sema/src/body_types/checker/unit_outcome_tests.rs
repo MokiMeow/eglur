@@ -36,7 +36,7 @@ pub(super) fn work() -> Work {
     WORK.get()
 }
 
-fn fold(inputs: impl IntoIterator<Item = Outcome<()>>) -> Result<Outcome<()>, BodyTypingError> {
+fn fold(inputs: impl IntoIterator<Item = Outcome<()>>) -> Result<Outcome<()>, BodyFlow> {
     reset();
     let mut state = UnitOutcomeFold::Known;
     for input in inputs {
@@ -214,9 +214,9 @@ fn foreign_unit_inputs_refuse_the_first_mixed_pool_without_completion() {
             }));
             assert!(matches!(
                 result,
-                Err(BodyTypingError::DiagnosticStore(
+                Err(BodyFlow::Internal(BodyTypingError::DiagnosticStore(
                     DiagnosticStoreError::ForeignPoison
-                ))
+                )))
             ));
             assert_eq!(
                 work(),

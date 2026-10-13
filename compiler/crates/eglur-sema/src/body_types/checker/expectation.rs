@@ -84,7 +84,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         expected: ExpectedType,
-    ) -> Result<Outcome<ExpectedType>, BodyTypingError> {
+    ) -> Result<Outcome<ExpectedType>, BodyFlow> {
+        self.ensure_analysis_active()?;
         #[cfg(test)]
         tests::observe(tests::Event::Normalize(expected));
 

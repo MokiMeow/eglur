@@ -96,7 +96,7 @@ impl InvocationContract {
     fn generic_parameters<'a>(
         &'a self,
         signatures: &'a DeclarationSignatures,
-    ) -> Result<&'a [GenericParameterId], BodyTypingError> {
+    ) -> Result<&'a [GenericParameterId], BodyFlow> {
         Ok(match self {
             Self::Callable { callable, .. } => callable.generic_parameters(),
             Self::CallableValue { .. } => &[],
@@ -133,7 +133,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         call: &CallExpr,
         request: TypeRequest,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         if call.partial_application {
             return Ok(InvocationPlan::Complete(self.unsupported(
@@ -298,7 +298,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         call: &CallExpr,
         request: TypeRequest,
         callable: CallableSignature,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let call_site = ExpressionKey::new(context.module, expression);
         let slots = match self.bind_call_slots(source, origin, call_site, &callable, call)? {
@@ -350,7 +350,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         ty: TypeId,
         parameters: &[TypeId],
         result: TypeId,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         if let Some((argument, name)) = call
             .arguments
@@ -467,7 +467,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: IntrinsicCallRequest<'_>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext { source, body, .. } = context;
         let IntrinsicCallRequest {
             expression,
@@ -622,7 +622,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: MethodCallRequest<'_>,
         candidate: MethodCandidate,
         passing: ArgumentPassing,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let bindings =
             Self::bind_method_argument_indices(&candidate.callable, &request.call.arguments)
@@ -702,7 +702,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         frame: InvocationFrame,
         outcome: Outcome<ResolvedApplication>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let Outcome::Known(application) = outcome else {
             return Ok(outcome.map(|_| unreachable!()));
         };
@@ -840,10 +840,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         callee: ExprId,
         ty: TypeId,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let mut chain = context.body.grouping_chain(callee).peekable();
         if chain.peek().is_none() {
-            return Err(BodyTypingError::WrongBodyExpression(callee));
+            return Err(BodyFlow::Internal(BodyTypingError::WrongBodyExpression(
+                callee,
+            )));
         }
         for (expression, _) in chain {
             self.record_expression(
@@ -861,7 +863,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         candidate: ReduceByCandidateExpr,
         request: TypeRequest,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -919,7 +921,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         continuation: InvocationContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         match continuation {
             InvocationContinuation::TensorConstructor(frame) => {
                 self.resume_tensor_constructor(context, frame, outcome)
@@ -938,7 +940,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         frame: ReduceByFrame,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let Outcome::Known(_) = outcome else {
             return Ok(InvocationPlan::Complete(outcome));
         };
@@ -965,7 +967,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         origin: OriginId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         self.type_error(
             source,
             origin,

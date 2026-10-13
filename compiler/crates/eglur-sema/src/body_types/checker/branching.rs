@@ -190,7 +190,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         continuation: BranchContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<BranchPlan, BodyTypingError> {
+    ) -> Result<BranchPlan, BodyFlow> {
         match continuation {
             BranchContinuation::EmptyMatch(origin) => {
                 self.finish_empty_match(context.source, origin, outcome)
@@ -231,7 +231,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<BranchPlan, BodyTypingError> {
+    ) -> Result<BranchPlan, BodyFlow> {
         let Outcome::Known(scrutinee) = outcome else {
             return Ok(BranchPlan::Complete(outcome));
         };
@@ -258,7 +258,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: eglur_hir::IfExpr,
         request: TypeRequest,
         condition: Outcome<TypedExpression>,
-    ) -> Result<BranchPlan, BodyTypingError> {
+    ) -> Result<BranchPlan, BodyFlow> {
         let mut frame = Box::new(IfFrame {
             owner,
             origin,
@@ -313,7 +313,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         self.advance_if(frame)
     }
 
-    fn advance_if(&mut self, mut frame: Box<IfFrame>) -> Result<BranchPlan, BodyTypingError> {
+    fn advance_if(&mut self, mut frame: Box<IfFrame>) -> Result<BranchPlan, BodyFlow> {
         if let Some((branch, expression)) = frame.next_branch() {
             return Ok(BranchPlan::IfBranch {
                 region: ControlRegionKey::IfBranch {
@@ -364,7 +364,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         mut frame: Box<IfFrame>,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<BranchPlan, BodyTypingError> {
+    ) -> Result<BranchPlan, BodyFlow> {
         match outcome {
             Outcome::Known(branch) if !branch.normal_continuation.is_present() => {}
             Outcome::Known(branch) => {
@@ -411,7 +411,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: eglur_hir::MatchExpr,
         request: TypeRequest,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<BranchPlan, BodyTypingError> {
+    ) -> Result<BranchPlan, BodyFlow> {
         let mut frame = Box::new(MatchFrame {
             owner,
             coverage: Vec::with_capacity(expression.arms.len()),
@@ -442,7 +442,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         mut frame: Box<MatchFrame>,
-    ) -> Result<BranchPlan, BodyTypingError> {
+    ) -> Result<BranchPlan, BodyFlow> {
         if frame.next_arm < frame.expression.arms.len() {
             return Ok(BranchPlan::MatchArm {
                 region: frame.region(),
@@ -496,7 +496,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         mut frame: Box<MatchFrame>,
-    ) -> Result<BranchPlan, BodyTypingError> {
+    ) -> Result<BranchPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -557,7 +557,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         mut frame: Box<MatchFrame>,
         bool_ty: TypeId,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<BranchPlan, BodyTypingError> {
+    ) -> Result<BranchPlan, BodyFlow> {
         let guard = frame.expression.arms[frame.next_arm]
             .guard
             .as_ref()
@@ -618,7 +618,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         mut frame: Box<MatchFrame>,
         guard_continuation: NormalContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<BranchPlan, BodyTypingError> {
+    ) -> Result<BranchPlan, BodyFlow> {
         match outcome {
             Outcome::Known(value)
                 if !guard_continuation.is_present() || !value.normal_continuation.is_present() => {}

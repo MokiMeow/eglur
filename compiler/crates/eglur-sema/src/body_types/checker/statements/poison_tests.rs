@@ -38,7 +38,7 @@ fn source(count: usize) -> String {
 }
 
 struct BlockRun {
-    outcome: Result<Outcome<TypedExpression>, BodyTypingError>,
+    outcome: Result<Outcome<TypedExpression>, BodyFlow>,
     paths: Vec<NormalContinuation>,
     metadata: Vec<(Option<TypeId>, bool)>,
 }
@@ -402,9 +402,9 @@ fn foreign_block_inputs_fail_immediately_and_keep_published_child_pools() {
                 let run = drive(checker, outcomes);
                 assert!(matches!(
                     run.outcome,
-                    Err(BodyTypingError::DiagnosticStore(
+                    Err(BodyFlow::Internal(BodyTypingError::DiagnosticStore(
                         eglur_diagnostics::DiagnosticStoreError::ForeignPoison
-                    ))
+                    )))
                 ));
                 let visited = if foreign_first { 2 } else { count };
                 assert_eq!(run.paths.len(), visited);

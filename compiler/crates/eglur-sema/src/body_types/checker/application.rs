@@ -85,7 +85,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         request: ApplicationRequest<'_>,
-    ) -> Result<ApplicationPlan, BodyTypingError> {
+    ) -> Result<ApplicationPlan, BodyFlow> {
         let ApplicationRequest {
             origin,
             custody,
@@ -179,7 +179,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         mut frame: Box<InferenceFrame>,
-    ) -> Result<ApplicationPlan, BodyTypingError> {
+    ) -> Result<ApplicationPlan, BodyFlow> {
         loop {
             let application = &frame.application;
             if let Some(&index) = application.arguments.evaluation_order.get(frame.next) {
@@ -256,7 +256,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         continuation: ApplicationContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<ApplicationPlan, BodyTypingError> {
+    ) -> Result<ApplicationPlan, BodyFlow> {
         match continuation {
             ApplicationContinuation::Infer {
                 mut frame,
@@ -311,7 +311,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         application: PendingApplication,
         conflict: bool,
-    ) -> Result<ApplicationPlan, BodyTypingError> {
+    ) -> Result<ApplicationPlan, BodyFlow> {
         let complete = application
             .parameters
             .iter()
@@ -382,7 +382,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         mut frame: Box<CheckingFrame>,
-    ) -> Result<ApplicationPlan, BodyTypingError> {
+    ) -> Result<ApplicationPlan, BodyFlow> {
         while let Some(&index) = frame.arguments.evaluation_order.get(frame.next) {
             frame.next += 1;
             let argument = &frame.arguments.values[index];
@@ -437,7 +437,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         frame: &mut CheckingFrame,
         index: usize,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<ControlFlow<Outcome<ResolvedApplication>>, BodyTypingError> {
+    ) -> Result<ControlFlow<Outcome<ResolvedApplication>>, BodyFlow> {
         let slot = &frame.arguments.values[index].slot;
         let expected = frame.specialized_slots[index];
         let outcome = match outcome {

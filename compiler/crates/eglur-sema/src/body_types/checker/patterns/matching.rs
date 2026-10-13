@@ -66,7 +66,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, 'body>,
         pattern_id: PatternId,
         expected: TypeId,
-    ) -> Result<Outcome<PatternCheck>, BodyTypingError> {
+    ) -> Result<Outcome<PatternCheck>, BodyFlow> {
         let mut pending = (pattern_id, expected);
         let mut continuations = Vec::new();
         loop {
@@ -98,7 +98,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, 'body>,
         pattern_id: PatternId,
         expected: TypeId,
-    ) -> Result<PatternPlan<'body>, BodyTypingError> {
+    ) -> Result<PatternPlan<'body>, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -233,7 +233,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         pattern_id: PatternId,
         elements: &'body [PatternElement],
         expected: TypeId,
-    ) -> Result<PatternPlan<'body>, BodyTypingError> {
+    ) -> Result<PatternPlan<'body>, BodyFlow> {
         let source = context.source;
         let origin = context
             .body
@@ -295,7 +295,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         pattern_id: PatternId,
         payload: &'body eglur_hir::PatternPayload,
         expected: TypeId,
-    ) -> Result<PatternPlan<'body>, BodyTypingError> {
+    ) -> Result<PatternPlan<'body>, BodyFlow> {
         let source = context.source;
         let pattern = context
             .body
@@ -459,10 +459,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     pattern.origin(),
                 )))
             }
-            _ => Err(BodyTypingError::InconsistentConstructorPayloadForm {
-                expected: expected_form.spelling(),
-                actual: actual_form.spelling(),
-            }),
+            _ => Err(BodyFlow::Internal(
+                BodyTypingError::InconsistentConstructorPayloadForm {
+                    expected: expected_form.spelling(),
+                    actual: actual_form.spelling(),
+                },
+            )),
         }
     }
 
@@ -470,7 +472,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         continuation: PatternContinuation<'body>,
         outcome: Outcome<PatternCheck>,
-    ) -> Result<PatternPlan<'body>, BodyTypingError> {
+    ) -> Result<PatternPlan<'body>, BodyFlow> {
         match continuation {
             PatternContinuation::Alias { binding, expected } => Ok(PatternPlan::Complete(
                 outcome.map(|check| check.with_binding(binding, expected)),
@@ -542,7 +544,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         pattern_kind: &'static str,
         expected: TypeId,
         actual: Option<TypeId>,
-    ) -> Result<Poison, BodyTypingError> {
+    ) -> Result<Poison, BodyFlow> {
         let reason = if actual.is_some() {
             "typed_pattern"
         } else {
@@ -582,7 +584,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         scrutinee: TypeId,
         arms: &[(&eglur_hir::MatchArm, PatternCoverage)],
-    ) -> Result<Outcome<()>, BodyTypingError> {
+    ) -> Result<Outcome<()>, BodyFlow> {
         let mut total = false;
         let mut variants = BTreeSet::new();
         for (arm, coverage) in arms {
@@ -641,7 +643,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     fn match_variant_universe(
         &self,
         scrutinee: TypeId,
-    ) -> Result<Option<BTreeSet<CanonicalTarget>>, BodyTypingError> {
+    ) -> Result<Option<BTreeSet<CanonicalTarget>>, BodyFlow> {
         let TypeKind::Nominal { head, .. } = self.signatures.types().kind(scrutinee)? else {
             return Ok(None);
         };
@@ -667,11 +669,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         source: &SemanticSource<'_>,
         pattern: PatternId,
-    ) -> Result<OriginId, BodyTypingError> {
+    ) -> Result<OriginId, BodyFlow> {
         source
             .hir()
             .and_then(|hir| hir.body(pattern.body()).pattern(pattern))
             .map(eglur_hir::Pattern::origin)
-            .ok_or(BodyTypingError::WrongBodyPattern(pattern))
+            .ok_or(BodyFlow::Internal(BodyTypingError::WrongBodyPattern(
+                pattern,
+            )))
     }
 }

@@ -102,7 +102,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: QualifiedMemberCallRequest<'_>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         if !request.member.is_valid() {
             return Ok(InvocationPlan::Complete(Outcome::Poisoned(
@@ -233,7 +233,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: QualifiedMemberCallRequest<'_>,
         owner: QualifiedMethodOwner,
         name: &NameKey,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let family =
             match self.inherent_method_family(source, request.origin, &owner.target, name)? {
@@ -311,7 +311,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: MethodCallRequest<'_>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let member = request.member;
         if !member.is_valid() {
@@ -355,7 +355,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         frame: MethodReceiverFrame,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let Outcome::Known(value) = outcome else {
             return Ok(InvocationPlan::Complete(outcome));
         };
@@ -450,7 +450,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         call: &CallExpr,
         request: TypeRequest,
         targets: &[CanonicalTarget],
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::ResolveOverloads),
@@ -519,9 +519,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
                 Outcome::Unperformed => Ok(InvocationPlan::Complete(Outcome::Unperformed)),
                 Outcome::Deferred => Ok(InvocationPlan::Complete(Outcome::Deferred)),
-                Outcome::Known(_) | Outcome::NotApplicable => {
-                    Err(BodyTypingError::InconsistentOverloadBinding)
-                }
+                Outcome::Known(_) | Outcome::NotApplicable => Err(BodyFlow::Internal(
+                    BodyTypingError::InconsistentOverloadBinding,
+                )),
             };
         }
 
@@ -544,7 +544,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         mut frame: Box<DispatchArgumentsFrame>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         if let Some(argument) = frame.request.call.arguments.get(frame.next) {
             let argument = argument.value;
             frame.next += 1;
@@ -604,7 +604,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         continuation: DispatchContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         match continuation {
             DispatchContinuation::Receiver(frame) => {
                 self.resume_method_receiver(context, *frame, outcome)
@@ -634,7 +634,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: DispatchRequest,
         selection: MethodSelection,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let call = &request.call;
         let explicit = match self.resolve_explicit_method_arguments(source, &call.type_arguments)? {
@@ -730,7 +730,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         member: &Name,
         candidates: Vec<OverloadCandidate>,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let name = NameKey::from_hir(member).expect("valid method name has canonical spelling");
         let explicit =
@@ -832,7 +832,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         member: &Name,
         candidates: Vec<QualifiedConcreteCandidate>,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let presented = candidates
             .iter()
@@ -938,7 +938,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: DispatchRequest,
         member: &Name,
         candidate: MethodCandidate,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let slots = match self.bind_call_slots(
             source,
@@ -988,7 +988,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: DispatchRequest,
         candidates: Vec<OverloadCandidate>,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let call = &request.call;
         let explicit_arguments = call

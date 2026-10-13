@@ -6,7 +6,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: StructLiteralRequest<'_>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let expression = request.expression;
         let origin = request.origin;
@@ -34,7 +34,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         request: StructLiteralRequest<'_>,
         target: ConstructorTarget,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let StructLiteralRequest {
             expression,
@@ -62,10 +62,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             properties,
         } = target_signature
         else {
-            return Err(BodyTypingError::UnexpectedSignatureKind {
-                target,
-                expected: "struct after target-kind validation",
-            });
+            return Err(BodyFlow::Internal(
+                BodyTypingError::UnexpectedSignatureKind {
+                    target,
+                    expected: "struct after target-kind validation",
+                },
+            ));
         };
         let generic_parameters = generic_parameters.to_vec();
         let storage_fields = storage_fields.to_vec();
@@ -158,10 +160,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     return Ok(InvocationPlan::Complete(Outcome::Unperformed));
                 }
                 FactState::Known(_) | FactState::NotApplicable => {
-                    return Err(BodyTypingError::UnexpectedSignatureKind {
-                        target: field_target.clone(),
-                        expected: "stored field",
-                    });
+                    return Err(BodyFlow::Internal(
+                        BodyTypingError::UnexpectedSignatureKind {
+                            target: field_target.clone(),
+                            expected: "stored field",
+                        },
+                    ));
                 }
             };
             let initializer = &fields[initializers[field_target]];
@@ -209,7 +213,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: VariantConstructorRequest<'_>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let VariantConstructorRequest {
             expression,
@@ -281,10 +285,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ),
             DeclarationSignature::EnumVariant { payload, .. } => {
                 let CanonicalTarget::Source(variant) = &target else {
-                    return Err(BodyTypingError::UnexpectedSignatureKind {
-                        target,
-                        expected: "source enum variant",
-                    });
+                    return Err(BodyFlow::Internal(
+                        BodyTypingError::UnexpectedSignatureKind {
+                            target,
+                            expected: "source enum variant",
+                        },
+                    ));
                 };
                 let owner = self
                     .collection
@@ -302,10 +308,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         return Ok(InvocationPlan::Complete(Outcome::Unperformed));
                     }
                     FactState::Known(_) | FactState::NotApplicable => {
-                        return Err(BodyTypingError::UnexpectedSignatureKind {
-                            target: CanonicalTarget::Source(owner),
-                            expected: "enum",
-                        });
+                        return Err(BodyFlow::Internal(
+                            BodyTypingError::UnexpectedSignatureKind {
+                                target: CanonicalTarget::Source(owner),
+                                expected: "enum",
+                            },
+                        ));
                     }
                 };
                 let result =
@@ -322,10 +330,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 (generic_parameters, result, shape)
             }
             _ => {
-                return Err(BodyTypingError::UnexpectedSignatureKind {
-                    target,
-                    expected: "variant constructor after target-kind validation",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedSignatureKind {
+                        target,
+                        expected: "variant constructor after target-kind validation",
+                    },
+                ));
             }
         };
         let slots = match self.bind_constructor_slots(
@@ -382,7 +392,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         shape: &ConstructorShape,
         payload: &ConstructorPayload,
         custody: ExpectationCustody,
-    ) -> Result<Outcome<Vec<ApplicationSlot>>, BodyTypingError> {
+    ) -> Result<Outcome<Vec<ApplicationSlot>>, BodyFlow> {
         let expected_form = shape.form();
         let actual_form = ConstructorPayloadForm::from_payload(payload);
         if expected_form != actual_form {
@@ -440,8 +450,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             (ConstructorShape::Named(declarations), ConstructorPayload::Named(fields)) => {
                 if declarations.is_empty() {
-                    return Err(BodyTypingError::EmptyNamedConstructorPayload(
-                        target.clone(),
+                    return Err(BodyFlow::Internal(
+                        BodyTypingError::EmptyNamedConstructorPayload(target.clone()),
                     ));
                 }
                 let owner = self.target_label(target);
@@ -507,10 +517,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         }
                         FactState::Unperformed => return Ok(Outcome::Unperformed),
                         FactState::Known(_) | FactState::NotApplicable => {
-                            return Err(BodyTypingError::UnexpectedSignatureKind {
-                                target: declaration.clone(),
-                                expected: "named constructor field",
-                            });
+                            return Err(BodyFlow::Internal(
+                                BodyTypingError::UnexpectedSignatureKind {
+                                    target: declaration.clone(),
+                                    expected: "named constructor field",
+                                },
+                            ));
                         }
                     };
                     let initializer = &fields[initializers[declaration]];
@@ -527,10 +539,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
                 Ok(Outcome::Known(slots))
             }
-            _ => Err(BodyTypingError::InconsistentConstructorPayloadForm {
-                expected: expected_form.spelling(),
-                actual: actual_form.spelling(),
-            }),
+            _ => Err(BodyFlow::Internal(
+                BodyTypingError::InconsistentConstructorPayloadForm {
+                    expected: expected_form.spelling(),
+                    actual: actual_form.spelling(),
+                },
+            )),
         }
     }
 
@@ -541,7 +555,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: &CanonicalTarget,
         expected: ConstructorPayloadForm,
         actual: ConstructorPayloadForm,
-    ) -> Result<Poison, BodyTypingError> {
+    ) -> Result<Poison, BodyFlow> {
         let constructor = self.constructor_label(target)?;
         self.type_error(
             source,
@@ -571,7 +585,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         pattern: PatternId,
         origin: OriginId,
-    ) -> Result<Outcome<ConstructorTarget>, BodyTypingError> {
+    ) -> Result<Outcome<ConstructorTarget>, BodyFlow> {
         let target = match self.names.fact(ResolutionKey::Pattern { module, pattern }) {
             FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1 => {
                 targets[0].clone()
@@ -585,25 +599,31 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
             FactState::Known(ResolvedName::Local(_)) => {
-                return Err(BodyTypingError::UnexpectedPatternResolution {
-                    module,
-                    pattern,
-                    fact: "local binding",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedPatternResolution {
+                        module,
+                        pattern,
+                        fact: "local binding",
+                    },
+                ));
             }
             FactState::Known(ResolvedName::TypeMemberOwner(_)) => {
-                return Err(BodyTypingError::UnexpectedPatternResolution {
-                    module,
-                    pattern,
-                    fact: "type member owner",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedPatternResolution {
+                        module,
+                        pattern,
+                        fact: "type member owner",
+                    },
+                ));
             }
             FactState::NotApplicable => {
-                return Err(BodyTypingError::UnexpectedPatternResolution {
-                    module,
-                    pattern,
-                    fact: "not-applicable name",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedPatternResolution {
+                        module,
+                        pattern,
+                        fact: "not-applicable name",
+                    },
+                ));
             }
             FactState::Unperformed => return Ok(Outcome::Unperformed),
         };
@@ -612,10 +632,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
             FactState::Unperformed => return Ok(Outcome::Unperformed),
             FactState::NotApplicable => {
-                return Err(BodyTypingError::UnexpectedSignatureKind {
-                    target,
-                    expected: "pattern constructor target",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedSignatureKind {
+                        target,
+                        expected: "pattern constructor target",
+                    },
+                ));
             }
         };
         let kind = self.resolved_target_kind(&target, &signature)?;
@@ -629,7 +651,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn pattern_constructor_contract(
         &mut self,
         target: &ConstructorTarget,
-    ) -> Result<PatternConstructorContract, BodyTypingError> {
+    ) -> Result<PatternConstructorContract, BodyFlow> {
         let (generic_parameters, result, shape) = match &target.signature {
             DeclarationSignature::Constructor(constructor) => (
                 constructor.generic_parameters().to_vec(),
@@ -643,10 +665,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ),
             DeclarationSignature::EnumVariant { payload, .. } => {
                 let CanonicalTarget::Source(variant) = &target.declaration else {
-                    return Err(BodyTypingError::UnexpectedSignatureKind {
-                        target: target.declaration.clone(),
-                        expected: "source enum variant",
-                    });
+                    return Err(BodyFlow::Internal(
+                        BodyTypingError::UnexpectedSignatureKind {
+                            target: target.declaration.clone(),
+                            expected: "source enum variant",
+                        },
+                    ));
                 };
                 let owner = self
                     .collection
@@ -658,10 +682,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         generic_parameters, ..
                     }) => generic_parameters.to_vec(),
                     _ => {
-                        return Err(BodyTypingError::UnexpectedSignatureKind {
-                            target: CanonicalTarget::Source(owner),
-                            expected: "enum",
-                        });
+                        return Err(BodyFlow::Internal(
+                            BodyTypingError::UnexpectedSignatureKind {
+                                target: CanonicalTarget::Source(owner),
+                                expected: "enum",
+                            },
+                        ));
                     }
                 };
                 let result =
@@ -678,10 +704,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 (generic_parameters, result, shape)
             }
             _ => {
-                return Err(BodyTypingError::UnexpectedSignatureKind {
-                    target: target.declaration.clone(),
-                    expected: "variant constructor",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedSignatureKind {
+                        target: target.declaration.clone(),
+                        expected: "variant constructor",
+                    },
+                ));
             }
         };
         Ok(PatternConstructorContract {
@@ -700,7 +728,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         head_origin: OriginId,
         expected: ResolvedTargetKind,
-    ) -> Result<Outcome<ConstructorTarget>, BodyTypingError> {
+    ) -> Result<Outcome<ConstructorTarget>, BodyFlow> {
         let target = match self
             .names
             .fact(ResolutionKey::Expression { module, expression })
@@ -713,22 +741,28 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
             FactState::Known(ResolvedName::Local(_)) => {
-                return Err(BodyTypingError::UnexpectedConstructorResolution {
-                    expression: ExpressionKey::new(module, expression),
-                    fact: "local binding",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedConstructorResolution {
+                        expression: ExpressionKey::new(module, expression),
+                        fact: "local binding",
+                    },
+                ));
             }
             FactState::Known(ResolvedName::TypeMemberOwner(_)) => {
-                return Err(BodyTypingError::UnexpectedConstructorResolution {
-                    expression: ExpressionKey::new(module, expression),
-                    fact: "type member owner",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedConstructorResolution {
+                        expression: ExpressionKey::new(module, expression),
+                        fact: "type member owner",
+                    },
+                ));
             }
             FactState::NotApplicable => {
-                return Err(BodyTypingError::UnexpectedConstructorResolution {
-                    expression: ExpressionKey::new(module, expression),
-                    fact: "not-applicable name",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedConstructorResolution {
+                        expression: ExpressionKey::new(module, expression),
+                        fact: "not-applicable name",
+                    },
+                ));
             }
             FactState::Unperformed => return Ok(Outcome::Unperformed),
         };
@@ -749,10 +783,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
             FactState::Unperformed => return Ok(Outcome::Unperformed),
             FactState::NotApplicable => {
-                return Err(BodyTypingError::UnexpectedSignatureKind {
-                    target,
-                    expected: "constructor target",
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedSignatureKind {
+                        target,
+                        expected: "constructor target",
+                    },
+                ));
             }
         };
         let kind = self.resolved_target_kind(&target, &signature)?;
@@ -769,7 +805,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         head_origin: OriginId,
         target: &ConstructorTarget,
         expected: ResolvedTargetKind,
-    ) -> Result<Option<Poison>, BodyTypingError> {
+    ) -> Result<Option<Poison>, BodyFlow> {
         self.constructor_kind_error(
             source,
             head_origin,
@@ -786,7 +822,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: &CanonicalTarget,
         actual: ResolvedTargetKind,
         expected: ResolvedTargetKind,
-    ) -> Result<Option<Poison>, BodyTypingError> {
+    ) -> Result<Option<Poison>, BodyFlow> {
         if actual == expected {
             return Ok(None);
         }
@@ -828,7 +864,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         target: &CanonicalTarget,
         signature: &DeclarationSignature,
-    ) -> Result<ResolvedTargetKind, BodyTypingError> {
+    ) -> Result<ResolvedTargetKind, BodyFlow> {
         let signature_kind = ResolvedTargetKind::from_signature(signature);
         if let CanonicalTarget::Source(declaration) = target {
             let declaration_kind = self
@@ -838,10 +874,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .kind();
             let declaration_kind = ResolvedTargetKind::from_declaration(declaration_kind);
             if declaration_kind != signature_kind {
-                return Err(BodyTypingError::UnexpectedSignatureKind {
-                    target: target.clone(),
-                    expected: declaration_kind.spelling(),
-                });
+                return Err(BodyFlow::Internal(
+                    BodyTypingError::UnexpectedSignatureKind {
+                        target: target.clone(),
+                        expected: declaration_kind.spelling(),
+                    },
+                ));
             }
         }
         Ok(signature_kind)
@@ -851,7 +889,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         owner: CanonicalTarget,
         generic_parameters: &[GenericParameterId],
-    ) -> Result<TypeId, BodyTypingError> {
+    ) -> Result<TypeId, BodyFlow> {
         let mut arguments = Vec::with_capacity(generic_parameters.len());
         for parameter in generic_parameters {
             arguments.push(
@@ -893,10 +931,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
     }
 
-    pub(super) fn constructor_label(
-        &self,
-        target: &CanonicalTarget,
-    ) -> Result<String, BodyTypingError> {
+    pub(super) fn constructor_label(&self, target: &CanonicalTarget) -> Result<String, BodyFlow> {
         let CanonicalTarget::Source(variant) = target else {
             return Ok(self.target_label(target));
         };
@@ -939,13 +974,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn storage_field_mutability(
         &self,
         target: &CanonicalTarget,
-    ) -> Result<Mutability, BodyTypingError> {
+    ) -> Result<Mutability, BodyFlow> {
         let CanonicalTarget::Source(declaration) = target else {
             return Ok(Mutability::Immutable);
         };
         let (_, _, _hir, item) = self.source_item(*declaration)?;
         let ItemKind::StorageField(field) = item.kind() else {
-            return Err(BodyTypingError::WrongDeclarationKind(*declaration));
+            return Err(BodyFlow::Internal(BodyTypingError::WrongDeclarationKind(
+                *declaration,
+            )));
         };
         Ok(field.mutability)
     }
@@ -958,7 +995,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         message: &'static str,
         owner: &str,
         member: (&'static str, &str),
-    ) -> Result<Poison, BodyTypingError> {
+    ) -> Result<Poison, BodyFlow> {
         let (member_key, member) = member;
         self.type_error(
             source,
@@ -993,7 +1030,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         replacements: &BTreeMap<GenericParameterId, TypeId>,
         owner: &CanonicalTarget,
         receiver: TypeId,
-    ) -> Result<TypeId, BodyTypingError> {
+    ) -> Result<TypeId, BodyFlow> {
         let substituted = self
             .signatures
             .types_mut()

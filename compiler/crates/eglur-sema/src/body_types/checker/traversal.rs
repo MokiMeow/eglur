@@ -56,7 +56,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         expression: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         self.execute_body_steps(context, vec![Step::Expression(expression, request)])
     }
 
@@ -68,7 +68,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         body: &Body,
         expression: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         self.execute_body_steps(
             BodyContext {
                 module,
@@ -84,9 +84,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         mut pending: Vec<Step>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let result = self.run_body_steps(context, &mut pending);
-        let Err(mut error) = result else {
+        let Err(error) = result else {
             return result;
         };
 
@@ -95,7 +95,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             if let Step::Cleanup(cleanup) = step
                 && let Err(cleanup_error) = self.finish_typing_scope(cleanup)
             {
-                error = cleanup_error;
+                self.retain_cleanup_failure(cleanup_error);
             }
         }
         Err(error)
@@ -105,12 +105,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         pending: &mut Vec<Step>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let mut expression_value = None;
         let mut statement_value = None;
         let mut completed_match_arm = None;
         let mut completed_result_context = None;
         while let Some(step) = pending.pop() {
+            if !matches!(step, Step::Cleanup(_)) {
+                self.ensure_analysis_active()?;
+            }
             match step {
                 Step::Expression(expression, request) => {
                     match self.prepare_expression(context, expression, request)? {
@@ -498,7 +501,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         invocation: Box<InvocationFrame>,
         value: &mut Option<Outcome<TypedExpression>>,
         pending: &mut Vec<Step>,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         match plan {
             ApplicationPlan::Complete(outcome) => {
                 *value = Some(self.finish_invocation(context, *invocation, outcome)?);

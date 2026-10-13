@@ -23,7 +23,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         owner: &CanonicalTarget,
         owner_origin: OriginId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let owner = match self.qualified_method_owner(source, owner_origin, owner)? {
             Outcome::Known(owner) => owner,
@@ -71,7 +71,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         member: &Name,
         qualified_owner: &QualifiedMethodOwner,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let owner = &qualified_owner.target;
         let origin = self.expression_origin(source, expression)?;
         let Some(name) = NameKey::from_hir(member) else {
@@ -132,7 +132,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 FactState::Known(DeclarationSignature::Struct {
                     generic_parameters, ..
                 }) => generic_parameters.len(),
-                _ => return Err(BodyTypingError::UnknownDeclaration(*owner_id)),
+                _ => {
+                    return Err(BodyFlow::Internal(BodyTypingError::UnknownDeclaration(
+                        *owner_id,
+                    )));
+                }
             };
             let subject = if let Some(subject) = qualified_owner.fixed_subject {
                 subject
@@ -261,7 +265,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         member: &Name,
         trait_target: &CanonicalTarget,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let origin = self.expression_origin(source, expression)?;
         let Some(expected) = request.expected else {
             return self.missing_callable_value_context(source, origin, request);
@@ -453,7 +457,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         request: TypeRequest,
         signatures: &[CallableSignatureId],
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let origin = self.expression_origin(source, expression)?;
         let expected = match request.expected {
             Some(ty)
@@ -564,7 +568,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         selected: CallableValueCandidate,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         if let Some(poison) = self.validate_type_arguments(
             source,
             origin,
@@ -622,7 +626,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expected: Option<ExpectedType>,
         filter_parameters: bool,
         mut replacements: BTreeMap<GenericParameterId, TypeId>,
-    ) -> Result<CandidateOutcome, BodyTypingError> {
+    ) -> Result<CandidateOutcome, BodyFlow> {
         let expected_parameters = if filter_parameters {
             match expected {
                 Some(expected) => match self.signatures.types().kind(expected.ty())? {
@@ -710,7 +714,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     fn normalize_callable_candidate_type(
         &mut self,
         expected: ExpectedType,
-    ) -> Result<Result<TypeId, TraitNormalization>, BodyTypingError> {
+    ) -> Result<Result<TypeId, TraitNormalization>, BodyFlow> {
         #[cfg(test)]
         expectation::observe_candidate(expected);
 
@@ -734,7 +738,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         if request.allow_deferred {
             Ok(Outcome::Deferred)
         } else {
@@ -748,7 +752,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         expected: Option<ExpectedType>,
         candidates: &[CallableSignature],
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let expected = expected.expect("an overload value requires expected Fn context");
         let rendered = self.format_callable_candidates(candidates)?;
         let related = self.callable_candidate_spans(candidates, &rendered)?;

@@ -10,7 +10,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         binding: LocalBindingId,
         ty: TypeId,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let region = self.current_control_region()?.clone();
         match self.locals.state(&binding) {
             FactState::Known(existing) if existing.ty == ty && existing.region == region => Ok(()),
@@ -25,15 +25,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     }),
                 )
                 .map_err(Into::into),
-            FactState::Known(_) | FactState::Poisoned(_) | FactState::NotApplicable => {
-                Err(BodyTypingError::InconsistentPatternBinding(binding))
-            }
+            FactState::Known(_) | FactState::Poisoned(_) | FactState::NotApplicable => Err(
+                BodyFlow::Internal(BodyTypingError::InconsistentPatternBinding(binding)),
+            ),
         }
     }
     pub(super) fn unsupported_let_pattern(
         body: &Body,
         pattern_id: PatternId,
-    ) -> Result<Option<OriginId>, BodyTypingError> {
+    ) -> Result<Option<OriginId>, BodyFlow> {
         let pattern = body
             .pattern(pattern_id)
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
@@ -62,7 +62,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         body: &Body,
         pattern: PatternId,
-    ) -> Result<Option<(NameKey, OriginId)>, BodyTypingError> {
+    ) -> Result<Option<(NameKey, OriginId)>, BodyFlow> {
         let mut seen = BTreeMap::new();
         self.first_pattern_duplicate_with(body, pattern, &mut seen)
     }
@@ -72,7 +72,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         body: &Body,
         pattern_id: PatternId,
         seen: &mut BTreeMap<NameKey, OriginId>,
-    ) -> Result<Option<(NameKey, OriginId)>, BodyTypingError> {
+    ) -> Result<Option<(NameKey, OriginId)>, BodyFlow> {
         let pattern = body
             .pattern(pattern_id)
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
@@ -142,7 +142,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         body: &Body,
         fields: &[eglur_hir::FieldPattern],
         seen: &mut BTreeMap<NameKey, OriginId>,
-    ) -> Result<Option<(NameKey, OriginId)>, BodyTypingError> {
+    ) -> Result<Option<(NameKey, OriginId)>, BodyFlow> {
         for field in fields {
             match field {
                 eglur_hir::FieldPattern::Field {
@@ -190,7 +190,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         pattern_id: PatternId,
         ty: TypeId,
         mode: PatternBindingMode,
-    ) -> Result<Outcome<()>, BodyTypingError> {
+    ) -> Result<Outcome<()>, BodyFlow> {
         let mutability = mode.mutability();
         let mut pattern = body
             .pattern(pattern_id)
@@ -378,7 +378,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         body: &Body,
         pattern_id: PatternId,
         poison: Poison,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let pattern = body
             .pattern(pattern_id)
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
@@ -472,16 +472,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         binding: LocalBindingId,
         poison: Poison,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         match self.locals.state(&binding) {
             FactState::Unperformed => self
                 .locals
                 .insert(binding, SemanticFact::Poisoned(poison))
                 .map_err(Into::into),
             FactState::Poisoned(_) => Ok(()),
-            FactState::Known(_) | FactState::NotApplicable => {
-                Err(BodyTypingError::InconsistentPatternBinding(binding))
-            }
+            FactState::Known(_) | FactState::NotApplicable => Err(BodyFlow::Internal(
+                BodyTypingError::InconsistentPatternBinding(binding),
+            )),
         }
     }
 }
