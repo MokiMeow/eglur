@@ -170,6 +170,24 @@ impl AnalysisWorkAccounting {
         consumer: usize,
         allowance_ticks: u64,
     ) -> Result<AnalysisRootTicket, AnalysisWorkFailure> {
+        self.admit_with_work(
+            consumer,
+            allowance_ticks,
+            Ok(AnalysisWork {
+                steps: 0,
+                inspected_bytes: 0,
+                transferred_bytes: 0,
+                reserved_bytes: 0,
+            }),
+        )
+    }
+
+    pub(super) fn admit_with_work(
+        &mut self,
+        consumer: usize,
+        allowance_ticks: u64,
+        additional_work: Result<AnalysisWork, AnalysisWorkOverflow>,
+    ) -> Result<AnalysisRootTicket, AnalysisWorkFailure> {
         let roots = self
             .consumers
             .get(consumer)
@@ -182,8 +200,10 @@ impl AnalysisWorkAccounting {
         };
         self.ensure_active()?;
 
-        let remaining_ticks = match Self::admission_work().and_then(|work| self.pricing.price(work))
-        {
+        let price = additional_work
+            .and_then(|additional| Self::admission_work()?.checked_add(additional))
+            .and_then(|work| self.pricing.price(work));
+        let remaining_ticks = match price {
             Ok(cost) if cost.ticks() <= allowance_ticks => allowance_ticks - cost.ticks(),
             Ok(cost) => {
                 return Err(self.stop(

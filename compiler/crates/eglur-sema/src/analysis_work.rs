@@ -2,12 +2,14 @@ use std::fmt;
 use std::num::NonZeroU64;
 
 mod accounting;
+mod call_inputs;
 
 pub use accounting::{
     AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity, AnalysisRootScope,
     AnalysisRootStopReason, AnalysisRootTicket, AnalysisWorkAccounting, AnalysisWorkFailure,
     AnalysisWorkIncomplete,
 };
+pub use call_inputs::{AnalysisCallInputFailure, AnalysisCallInputs};
 
 /// Unpriced quantities for a planned analysis operation.
 ///
