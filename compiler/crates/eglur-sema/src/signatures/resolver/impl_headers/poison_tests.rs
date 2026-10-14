@@ -391,7 +391,9 @@ fn foreign_bound_error_retains_attempt_state_and_unpublished_facts() {
                 };
                 assert_eq!(
                     error,
-                    SignatureResolutionError::DiagnosticStore(DiagnosticStoreError::ForeignPoison)
+                    SignatureFlow::Internal(SignatureResolutionError::DiagnosticStore(
+                        DiagnosticStoreError::ForeignPoison
+                    ))
                 );
                 assert_eq!(
                     WORK.get(),

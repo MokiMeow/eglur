@@ -4,7 +4,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn prepare_alias_plan(
         &mut self,
         request: AliasRequest,
-    ) -> Result<AliasPlan, SignatureResolutionError> {
+    ) -> Result<AliasPlan, SignatureFlow> {
         let alias = request.alias;
         if let Some(state) = self.alias_states.get(&alias).cloned() {
             let result = match state {
@@ -56,7 +56,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             .item()
             .ok_or(SignatureResolutionError::MissingDeclarationItem(alias))?;
         let ItemKind::TypeAlias(item) = hir.item(item_id).kind() else {
-            return Err(SignatureResolutionError::WrongDeclarationItem(alias));
+            return Err(SignatureFlow::Internal(
+                SignatureResolutionError::WrongDeclarationItem(alias),
+            ));
         };
         let value = item.value;
         let context = self.source_context(alias, false)?;
@@ -79,7 +81,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         frame: AliasFrame,
         result: Resolution<TypeId>,
-    ) -> Result<Resolution<AliasTemplate>, SignatureResolutionError> {
+    ) -> Result<Resolution<AliasTemplate>, SignatureFlow> {
         let generic_parameters = frame.generic_parameters;
         let state = match &result {
             Resolution::Known(value) => AliasState::Resolved {

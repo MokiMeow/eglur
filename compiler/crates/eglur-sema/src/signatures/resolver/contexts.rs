@@ -4,7 +4,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn generic_context_state(
         &mut self,
         owner: DefId,
-    ) -> Result<Resolution<()>, SignatureResolutionError> {
+    ) -> Result<Resolution<()>, SignatureFlow> {
         let mut chain = Vec::new();
         let mut cursor = Some(owner);
         while let Some(current) = cursor {
@@ -32,10 +32,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         })
     }
 
-    fn direct_generic_state(
-        &mut self,
-        owner: DefId,
-    ) -> Result<Resolution<()>, SignatureResolutionError> {
+    fn direct_generic_state(&mut self, owner: DefId) -> Result<Resolution<()>, SignatureFlow> {
         #[cfg(test)]
         generic_state_tests::observe(generic_state_tests::Step::Lookup);
 
@@ -107,7 +104,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn declaration_context_state(
         &self,
         owner: DefId,
-    ) -> Result<Resolution<()>, SignatureResolutionError> {
+    ) -> Result<Resolution<()>, SignatureFlow> {
         let mut cursor = self
             .collection
             .declaration(owner)
@@ -142,7 +139,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         owner: DefId,
         allow_self: bool,
-    ) -> Result<SourceTypeContext, SignatureResolutionError> {
+    ) -> Result<SourceTypeContext, SignatureFlow> {
         let mut chain = Vec::new();
         let mut cursor = Some(owner);
         while let Some(current) = cursor {
@@ -194,7 +191,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn self_binding(
         &mut self,
         chain: &[DefId],
-    ) -> Result<Option<SelfBinding>, SignatureResolutionError> {
+    ) -> Result<Option<SelfBinding>, SignatureFlow> {
         for &candidate in chain.iter().rev() {
             let declaration = self
                 .collection

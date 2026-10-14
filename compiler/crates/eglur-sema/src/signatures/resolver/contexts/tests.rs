@@ -428,9 +428,9 @@ fn impl_self_stays_dynamic_and_failed_static_creation_is_not_published() {
         for _ in 0..2 {
             assert_eq!(
                 resolver.source_context(owner, true).err().unwrap(),
-                SignatureResolutionError::TypeStore(
+                SignatureFlow::Internal(SignatureResolutionError::TypeStore(
                     crate::TypeStoreError::UnregisteredNominalHead(head.clone())
-                )
+                ))
             );
             assert!(resolver.static_self_bindings.is_empty());
         }

@@ -1,5 +1,6 @@
 use std::cell::Cell;
 
+use super::super::SignatureFlow;
 use super::*;
 use crate::signatures::resolver::tests::with_resolver;
 use crate::signatures::resolver::{Resolution, SignatureResolutionError};
@@ -207,7 +208,9 @@ fn wrong_parent_hir_kind_is_refused_before_variant_lookup() {
                         sources[1].hir().unwrap()
                     )
                     .err(),
-                Some(SignatureResolutionError::WrongDeclarationItem(parent))
+                Some(SignatureFlow::Internal(
+                    SignatureResolutionError::WrongDeclarationItem(parent)
+                ))
             );
             assert_eq!(WORK.get().queries, 0);
         },

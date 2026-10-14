@@ -51,7 +51,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         request: &TypeRequest,
         completion: TypeCompletion,
-    ) -> Result<Resolution<TypeId>, SignatureResolutionError> {
+    ) -> Result<Resolution<TypeId>, SignatureFlow> {
         let source = self.sources[&request.site.file];
         let hir = self.source_hir(request.site.file)?;
         let origin = hir.type_ref(request.type_ref).origin();
@@ -77,7 +77,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn prepare_type_plan(
         &mut self,
         request: &TypeRequest,
-    ) -> Result<TypePlan, SignatureResolutionError> {
+    ) -> Result<TypePlan, SignatureFlow> {
         let source = self.sources[&request.site.file];
         let hir = self.source_hir(request.site.file)?;
         let occurrence = hir.type_ref(request.type_ref);
@@ -163,7 +163,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         frame: TypeFrame,
         complete: Completed,
-    ) -> Result<TypePlan, SignatureResolutionError> {
+    ) -> Result<TypePlan, SignatureFlow> {
         let source = self.sources[&frame.parent.site.file];
         let hir = self.source_hir(frame.parent.site.file)?;
         let origin = hir.type_ref(frame.parent.type_ref).origin();
@@ -266,7 +266,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         parent: &TypeRequest,
         continuation: TypeContinuation,
-    ) -> Result<TypePlan, SignatureResolutionError> {
+    ) -> Result<TypePlan, SignatureFlow> {
         let children = match &continuation {
             TypeContinuation::Tuple(children)
             | TypeContinuation::Function(children)

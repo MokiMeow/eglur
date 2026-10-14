@@ -346,7 +346,9 @@ fn callable_foreign_error_keeps_visited_occurrences_and_stops_before_return() {
                 };
                 assert_eq!(
                     error,
-                    SignatureResolutionError::DiagnosticStore(DiagnosticStoreError::ForeignPoison)
+                    SignatureFlow::Internal(SignatureResolutionError::DiagnosticStore(
+                        DiagnosticStoreError::ForeignPoison
+                    ))
                 );
                 assert_eq!(
                     WORK.get(),

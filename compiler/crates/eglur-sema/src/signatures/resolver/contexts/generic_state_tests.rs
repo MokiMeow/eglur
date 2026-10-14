@@ -69,7 +69,7 @@ fn owners(resolver: &SignatureResolver<'_, '_>, kind: DeclarationKind) -> Vec<De
 fn flat_state(
     resolver: &SignatureResolver<'_, '_>,
     owner: DefId,
-) -> Result<Resolution<()>, SignatureResolutionError> {
+) -> Result<Resolution<()>, SignatureFlow> {
     let mut cursor = Some(owner);
     let mut poison = None;
     let mut unperformed = false;
@@ -355,7 +355,7 @@ fn failed_pass_does_not_seal_and_terminal_absence_remains_distinct() {
         resolver.sources.clear();
         assert_eq!(
             resolver.resolve_source_generics().unwrap_err(),
-            SignatureResolutionError::MissingHir(sources[0].file())
+            SignatureFlow::Internal(SignatureResolutionError::MissingHir(sources[0].file()))
         );
         assert!(resolver.frozen_source_generic_scopes.is_none());
         assert!(matches!(
@@ -438,14 +438,18 @@ fn foreign_poison_errors_do_not_publish_failed_scope_summaries() {
             for _ in 0..2 {
                 assert!(matches!(
                     flat_state(resolver, owner),
-                    Err(SignatureResolutionError::DiagnosticStore(
-                        DiagnosticStoreError::ForeignPoison
+                    Err(SignatureFlow::Internal(
+                        SignatureResolutionError::DiagnosticStore(
+                            DiagnosticStoreError::ForeignPoison
+                        )
                     ))
                 ));
                 assert!(matches!(
                     resolver.generic_context_state(owner),
-                    Err(SignatureResolutionError::DiagnosticStore(
-                        DiagnosticStoreError::ForeignPoison
+                    Err(SignatureFlow::Internal(
+                        SignatureResolutionError::DiagnosticStore(
+                            DiagnosticStoreError::ForeignPoison
+                        )
                     ))
                 ));
                 assert!(
@@ -501,14 +505,18 @@ fn foreign_poison_errors_do_not_publish_failed_scope_summaries() {
             for _ in 0..2 {
                 assert!(matches!(
                     flat_state(resolver, method),
-                    Err(SignatureResolutionError::DiagnosticStore(
-                        DiagnosticStoreError::ForeignPoison
+                    Err(SignatureFlow::Internal(
+                        SignatureResolutionError::DiagnosticStore(
+                            DiagnosticStoreError::ForeignPoison
+                        )
                     ))
                 ));
                 assert!(matches!(
                     resolver.generic_context_state(method),
-                    Err(SignatureResolutionError::DiagnosticStore(
-                        DiagnosticStoreError::ForeignPoison
+                    Err(SignatureFlow::Internal(
+                        SignatureResolutionError::DiagnosticStore(
+                            DiagnosticStoreError::ForeignPoison
+                        )
                     ))
                 ));
             }

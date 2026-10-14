@@ -321,7 +321,9 @@ fn foreign_named_field_error_preserves_published_prefix() {
                 };
                 assert_eq!(
                     error,
-                    SignatureResolutionError::DiagnosticStore(DiagnosticStoreError::ForeignPoison)
+                    SignatureFlow::Internal(SignatureResolutionError::DiagnosticStore(
+                        DiagnosticStoreError::ForeignPoison
+                    ))
                 );
                 assert_eq!(
                     WORK.get(),

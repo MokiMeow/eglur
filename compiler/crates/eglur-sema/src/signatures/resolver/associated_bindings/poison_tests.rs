@@ -82,7 +82,7 @@ fn resolve<'hir>(
     owner: DefId,
     value: &eglur_hir::ImplDecl,
     header: &TraitImplHeader,
-) -> Result<Resolution<Vec<AssociatedBindingSignature>>, SignatureResolutionError> {
+) -> Result<Resolution<Vec<AssociatedBindingSignature>>, SignatureFlow> {
     resolver.resolve_source_impl_bindings(
         owner,
         source,
@@ -522,7 +522,9 @@ fn foreign_value_error_preserves_published_prefix_and_skips_completion() {
                 };
                 assert_eq!(
                     error,
-                    SignatureResolutionError::DiagnosticStore(DiagnosticStoreError::ForeignPoison)
+                    SignatureFlow::Internal(SignatureResolutionError::DiagnosticStore(
+                        DiagnosticStoreError::ForeignPoison
+                    ))
                 );
                 assert_eq!(
                     WORK.get(),

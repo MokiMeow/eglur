@@ -35,7 +35,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         _hir: &HirFile,
         type_ref: TypeRefId,
         context: &SourceTypeContext,
-    ) -> Result<Resolution<TraitRef>, SignatureResolutionError> {
+    ) -> Result<Resolution<TraitRef>, SignatureFlow> {
         self.resolve_trait_worklist(owner, source, type_ref, context)
     }
 
@@ -47,7 +47,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         type_ref: TypeRefId,
         position: TypePosition,
         context: &SourceTypeContext,
-    ) -> Result<Resolution<TypeId>, SignatureResolutionError> {
+    ) -> Result<Resolution<TypeId>, SignatureFlow> {
         self.resolve_type_worklist(owner, source, type_ref, position, context)
     }
 
@@ -58,7 +58,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         path: &eglur_hir::Path,
         arguments: &[TypeRefId],
         context: &SourceTypeContext,
-    ) -> Result<(Resolution<TypeId>, Option<CanonicalTarget>), SignatureResolutionError> {
+    ) -> Result<(Resolution<TypeId>, Option<CanonicalTarget>), SignatureFlow> {
         let segments = path.segments();
         if segments.len() != 2 {
             return Ok((
@@ -177,7 +177,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         types: &[TypeRefId],
         position: TypePosition,
         context: &SourceTypeContext,
-    ) -> Result<Resolution<Vec<TypeId>>, SignatureResolutionError> {
+    ) -> Result<Resolution<Vec<TypeId>>, SignatureFlow> {
         self.resolve_source_types_with_positions(
             owner,
             source,
@@ -196,7 +196,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         types: &[TypeRefId],
         positions: impl IntoIterator<Item = TypePosition>,
         context: &SourceTypeContext,
-    ) -> Result<Resolution<Vec<TypeId>>, SignatureResolutionError> {
+    ) -> Result<Resolution<Vec<TypeId>>, SignatureFlow> {
         let mut values = Vec::with_capacity(types.len());
         let mut poison = PoisonAccumulator::new();
         let mut unperformed = false;
@@ -231,7 +231,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         ty: TypeId,
         position: TypePosition,
         validation: TypeStructureValidation,
-    ) -> Result<Resolution<TypeId>, SignatureResolutionError> {
+    ) -> Result<Resolution<TypeId>, SignatureFlow> {
         if validation == TypeStructureValidation::Immediate
             && !position.is_extern()
             && self.types.contains_ownership(ty)?
@@ -296,7 +296,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &self,
         ty: TypeId,
         position: TypePosition,
-    ) -> Result<bool, SignatureResolutionError> {
+    ) -> Result<bool, SignatureFlow> {
         match position {
             TypePosition::CallableBoundary | TypePosition::LocalBoundary => {
                 if self.types.ownership_root(ty)?.is_some() {
@@ -325,7 +325,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &self,
         ty: TypeId,
         allow_unit: bool,
-    ) -> Result<bool, SignatureResolutionError> {
+    ) -> Result<bool, SignatureFlow> {
         match self.types.kind(ty)? {
             TypeKind::Primitive(primitive) => Ok(is_abi_numeric(*primitive)
                 || *primitive == crate::PrimitiveType::Bool
@@ -344,7 +344,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         origin: OriginId,
         ty: TypeId,
         validation: TypeStructureValidation,
-    ) -> Result<Resolution<TypeId>, SignatureResolutionError> {
+    ) -> Result<Resolution<TypeId>, SignatureFlow> {
         if validation == TypeStructureValidation::AfterBindingCycles {
             return Ok(Resolution::Known(ty));
         }
@@ -395,7 +395,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         origin: OriginId,
         arguments: Vec<TypeId>,
         validation: TypeStructureValidation,
-    ) -> Result<Resolution<Vec<TypeId>>, SignatureResolutionError> {
+    ) -> Result<Resolution<Vec<TypeId>>, SignatureFlow> {
         if validation == TypeStructureValidation::AfterBindingCycles {
             return Ok(Resolution::Known(arguments));
         }
@@ -438,7 +438,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         alias: DefId,
         cycle_site: Option<(&SemanticSource<'hir>, OriginId)>,
-    ) -> Result<Resolution<AliasTemplate>, SignatureResolutionError> {
+    ) -> Result<Resolution<AliasTemplate>, SignatureFlow> {
         self.resolve_alias_worklist(alias, cycle_site)
     }
 
@@ -447,7 +447,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         module: ModuleId,
         source: &SemanticSource<'hir>,
         path: &eglur_hir::Path,
-    ) -> Result<Resolution<CanonicalTarget>, SignatureResolutionError> {
+    ) -> Result<Resolution<CanonicalTarget>, SignatureFlow> {
         let Some(text) = path.text() else {
             return self.invalid_path_resolution(source, path);
         };
@@ -501,7 +501,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         origin: OriginId,
         spelling: &str,
         lookup: TypeNameLookup,
-    ) -> Result<Resolution<CanonicalTarget>, SignatureResolutionError> {
+    ) -> Result<Resolution<CanonicalTarget>, SignatureFlow> {
         match lookup {
             TypeNameLookup::Unique(target) => Ok(Resolution::Known(target)),
             TypeNameLookup::Ambiguous(candidates) => {
@@ -579,7 +579,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         module: ModuleId,
         source: &SemanticSource<'hir>,
         path: &eglur_hir::Path,
-    ) -> Result<Resolution<bool>, SignatureResolutionError> {
+    ) -> Result<Resolution<bool>, SignatureFlow> {
         let Some(keys) = path
             .segments()
             .iter()
@@ -681,7 +681,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn source_head_state(
         &mut self,
         target: &CanonicalTarget,
-    ) -> Result<Resolution<()>, SignatureResolutionError> {
+    ) -> Result<Resolution<()>, SignatureFlow> {
         let CanonicalTarget::Source(id) = target else {
             return Ok(Resolution::Known(()));
         };
@@ -722,9 +722,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         .insert(target.clone(), SemanticFact::Poisoned(poison.clone()))?;
                     Ok(Resolution::Poisoned(poison))
                 }
-                FactState::Known(_) | FactState::NotApplicable => {
-                    Err(SignatureResolutionError::InvalidSourceHeadState(*id))
-                }
+                FactState::Known(_) | FactState::NotApplicable => Err(SignatureFlow::Internal(
+                    SignatureResolutionError::InvalidSourceHeadState(*id),
+                )),
             };
         }
         Ok(Resolution::Known(()))

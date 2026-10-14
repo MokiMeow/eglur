@@ -10,7 +10,7 @@ mod enum_poison_tests;
 mod field_provenance_tests;
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
-    pub(super) fn resolve_source_declarations(&mut self) -> Result<(), SignatureResolutionError> {
+    pub(super) fn resolve_source_declarations(&mut self) -> Result<(), SignatureFlow> {
         let declarations = self
             .collection
             .modules()
@@ -40,9 +40,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         Ok(())
     }
 
-    pub(super) fn validate_source_overload_families(
-        &mut self,
-    ) -> Result<(), SignatureResolutionError> {
+    pub(super) fn validate_source_overload_families(&mut self) -> Result<(), SignatureFlow> {
         let mut families = BTreeMap::<(ModuleId, Option<DefId>, NameKey), Vec<DefId>>::new();
         for module in self.collection.modules() {
             for declaration in module
@@ -188,7 +186,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         related: Option<DefId>,
         code: &'static str,
         message: String,
-    ) -> Result<(), SignatureResolutionError> {
+    ) -> Result<(), SignatureFlow> {
         let poison = self.source_overload_error(primary, related, code, message)?;
         for &declaration in family {
             self.overload_family_poisons
@@ -203,7 +201,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         related: Option<DefId>,
         code: &'static str,
         message: String,
-    ) -> Result<Poison, SignatureResolutionError> {
+    ) -> Result<Poison, SignatureFlow> {
         let declaration = self
             .collection
             .declaration(declaration)
@@ -225,7 +223,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     .module(declaration.id().module())
                     .expect("related overload declaration module belongs to collection");
                 let source = self.sources[&module.file()];
-                Ok::<RelatedSpan, SignatureResolutionError>(
+                Ok::<RelatedSpan, SignatureFlow>(
                     RelatedSpan::new(
                         self.required_span(source, declaration.origin())?,
                         "overload family declaration established here",
@@ -248,7 +246,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         })
     }
 
-    pub(super) fn resolve_body_type_occurrences(&mut self) -> Result<(), SignatureResolutionError> {
+    pub(super) fn resolve_body_type_occurrences(&mut self) -> Result<(), SignatureFlow> {
         let modules = self
             .collection
             .modules()
@@ -338,7 +336,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_declaration(
         &mut self,
         declaration_id: DefId,
-    ) -> Result<Option<SemanticFact<DeclarationSignature>>, SignatureResolutionError> {
+    ) -> Result<Option<SemanticFact<DeclarationSignature>>, SignatureFlow> {
         let declaration = self
             .collection
             .declaration(declaration_id)
@@ -477,8 +475,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             }
             (DeclarationKind::AssociatedType, Some(ItemKind::AssociatedType(_))) => {
                 let Some(parent) = declaration.parent() else {
-                    return Err(SignatureResolutionError::WrongDeclarationItem(
-                        declaration_id,
+                    return Err(SignatureFlow::Internal(
+                        SignatureResolutionError::WrongDeclarationItem(declaration_id),
                     ));
                 };
                 Resolution::Known(DeclarationSignature::AssociatedType {
@@ -563,8 +561,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 )?
             }
             _ => {
-                return Err(SignatureResolutionError::WrongDeclarationItem(
-                    declaration_id,
+                return Err(SignatureFlow::Internal(
+                    SignatureResolutionError::WrongDeclarationItem(declaration_id),
                 ));
             }
         };
@@ -577,7 +575,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         source: &SemanticSource<'hir>,
         hir: &'source HirFile,
         declaration: &'source eglur_hir::ExternDecl,
-    ) -> Result<Resolution<DeclarationSignature>, SignatureResolutionError> {
+    ) -> Result<Resolution<DeclarationSignature>, SignatureFlow> {
         let mut poison = None;
         let visibility = self
             .collection
@@ -630,7 +628,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         source: &SemanticSource<'hir>,
         hir: &'source HirFile,
         declaration: SourceCallable<'source>,
-    ) -> Result<Resolution<DeclarationSignature>, SignatureResolutionError> {
+    ) -> Result<Resolution<DeclarationSignature>, SignatureFlow> {
         let context = self.source_context(declaration_id, true)?;
         let name = declaration.name();
         let parameters = declaration.parameters();
@@ -885,7 +883,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         source: &SemanticSource<'hir>,
         hir: &HirFile,
         value: &eglur_hir::StructDecl,
-    ) -> Result<Resolution<DeclarationSignature>, SignatureResolutionError> {
+    ) -> Result<Resolution<DeclarationSignature>, SignatureFlow> {
         let mut poison = None;
         let mut unperformed = false;
         if let Some(base) = value.base {
@@ -966,7 +964,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         source: &SemanticSource<'hir>,
         hir: &HirFile,
         value: &eglur_hir::ImplDecl,
-    ) -> Result<Resolution<DeclarationSignature>, SignatureResolutionError> {
+    ) -> Result<Resolution<DeclarationSignature>, SignatureFlow> {
         if let Some(poison) = self.impl_header_poison.get(&declaration_id).cloned() {
             self.poison_impl_bindings(declaration_id, &poison)?;
             return Ok(Resolution::Poisoned(poison));
@@ -1007,7 +1005,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         declaration_id: DefId,
         poison: &Poison,
-    ) -> Result<(), SignatureResolutionError> {
+    ) -> Result<(), SignatureFlow> {
         for binding in
             self.child_declarations(declaration_id, DeclarationKind::AssociatedTypeBinding)
         {
@@ -1026,7 +1024,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         owner: DefId,
         trait_ref: &TraitRef,
         mismatch: associated_bindings::AssociatedMismatch<'_>,
-    ) -> Result<Poison, SignatureResolutionError> {
+    ) -> Result<Poison, SignatureFlow> {
         let associated_bindings::AssociatedMismatch {
             name: associated,
             obligation,
@@ -1063,7 +1061,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         declaration_id: DefId,
         source: &SemanticSource<'hir>,
         hir: &HirFile,
-    ) -> Result<Resolution<DeclarationSignature>, SignatureResolutionError> {
+    ) -> Result<Resolution<DeclarationSignature>, SignatureFlow> {
         let declaration = self
             .collection
             .declaration(declaration_id)
@@ -1081,7 +1079,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             .item()
             .ok_or(SignatureResolutionError::MissingDeclarationItem(parent))?;
         let ItemKind::Enum(_) = hir.item(item).kind() else {
-            return Err(SignatureResolutionError::WrongDeclarationItem(parent));
+            return Err(SignatureFlow::Internal(
+                SignatureResolutionError::WrongDeclarationItem(parent),
+            ));
         };
         let variant = self
             .source_enum_variants
@@ -1210,7 +1210,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         declaration_id: DefId,
         source: &SemanticSource<'hir>,
         hir: &HirFile,
-    ) -> Result<Resolution<DeclarationSignature>, SignatureResolutionError> {
+    ) -> Result<Resolution<DeclarationSignature>, SignatureFlow> {
         let declaration = self
             .collection
             .declaration(declaration_id)
@@ -1236,7 +1236,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             .item()
             .ok_or(SignatureResolutionError::MissingDeclarationItem(enum_id))?;
         let ItemKind::Enum(enum_item) = hir.item(item).kind() else {
-            return Err(SignatureResolutionError::WrongDeclarationItem(enum_id));
+            return Err(SignatureFlow::Internal(
+                SignatureResolutionError::WrongDeclarationItem(enum_id),
+            ));
         };
         let field = enum_item
             .variants
@@ -1295,7 +1297,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn source_generic_parameter(
         &self,
         declaration_id: DefId,
-    ) -> Result<(FileId, &'hir GenericParameter), SignatureResolutionError> {
+    ) -> Result<(FileId, &'hir GenericParameter), SignatureFlow> {
         let declaration = self
             .collection
             .declaration(declaration_id)

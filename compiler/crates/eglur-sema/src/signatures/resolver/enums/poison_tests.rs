@@ -281,7 +281,9 @@ fn foreign_enum_name_error_preserves_prior_index_and_refuses_later_entries() {
                 WORK.set(Work::default());
                 assert_eq!(
                     resolver.index_enum_variant_names().unwrap_err(),
-                    SignatureResolutionError::DiagnosticStore(DiagnosticStoreError::ForeignPoison)
+                    SignatureFlow::Internal(SignatureResolutionError::DiagnosticStore(
+                        DiagnosticStoreError::ForeignPoison
+                    ))
                 );
                 assert_eq!(
                     WORK.get(),
