@@ -37,9 +37,9 @@ pub use analysis_work::{
     AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
     AnalysisCallRegistryFailure, AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity,
     AnalysisRootScope, AnalysisRootStopReason, AnalysisRootTicket, AnalysisSourceInputFailure,
-    AnalysisSourceInputRegistry, AnalysisWork, AnalysisWorkAccounting, AnalysisWorkCategory,
-    AnalysisWorkFailure, AnalysisWorkIncomplete, AnalysisWorkOverflow, AnalysisWorkPricing,
-    AnalysisWorkUnits,
+    AnalysisSourceInputRegistry, AnalysisSourceInputs, AnalysisWork, AnalysisWorkAccounting,
+    AnalysisWorkCategory, AnalysisWorkFailure, AnalysisWorkIncomplete, AnalysisWorkOverflow,
+    AnalysisWorkPricing, AnalysisWorkUnits,
 };
 pub use body_types::*;
 pub use capability::*;

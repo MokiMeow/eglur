@@ -18,8 +18,10 @@ use super::TrustedSignatureError;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SignatureResolutionError {
     MissingAnalysisStop,
+    MissingSourceCustody,
     UnexpectedUnmeteredInterruption,
     AnalysisRootClaim(crate::AnalysisRootClaimError),
+    AnalysisSourceInput(crate::AnalysisSourceInputFailure),
     DuplicateSource(FileId),
     MissingSource(FileId),
     MissingHir(FileId),
@@ -73,6 +75,9 @@ impl fmt::Display for SignatureResolutionError {
             Self::MissingAnalysisStop => {
                 formatter.write_str("signature interruption has no accounting stop")
             }
+            Self::MissingSourceCustody => {
+                formatter.write_str("source request lacks matching accounting custody")
+            }
             Self::UnexpectedUnmeteredInterruption => {
                 formatter.write_str("unmetered signature analysis was interrupted")
             }
@@ -80,6 +85,9 @@ impl fmt::Display for SignatureResolutionError {
                 formatter,
                 "invalid signature analysis root claim: {error:?}"
             ),
+            Self::AnalysisSourceInput(error) => {
+                write!(formatter, "invalid signature source custody: {error}")
+            }
             Self::DuplicateSource(file) => write!(formatter, "duplicate semantic source {file:?}"),
             Self::MissingSource(file) => write!(formatter, "missing semantic source {file:?}"),
             Self::MissingHir(file) => write!(formatter, "semantic source {file:?} has no HIR"),

@@ -10,12 +10,19 @@ use crate::record_reservation::RecordReservation;
 
 use super::*;
 
+mod set;
+pub use set::AnalysisSourceInputs;
+
 /// Invalid source custody, unrepresentable setup or interrupted analysis work.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AnalysisSourceInputFailure {
     Layout(LayoutError),
     InvalidHir(FileId),
     NotOriginalType(TypeOccurrenceId),
+    MissingHir(FileId),
+    DuplicateFile(FileId),
+    MissingFile(FileId),
+    SourceMismatch(FileId),
     Work(AnalysisWorkFailure),
 }
 
@@ -32,6 +39,12 @@ impl fmt::Display for AnalysisSourceInputFailure {
             Self::InvalidHir(file) => write!(formatter, "invalid source HIR: {file:?}"),
             Self::NotOriginalType(site) => {
                 write!(formatter, "not an original written type input: {site:?}")
+            }
+            Self::MissingHir(file) => write!(formatter, "source has no HIR: {file:?}"),
+            Self::DuplicateFile(file) => write!(formatter, "duplicate source custody: {file:?}"),
+            Self::MissingFile(file) => write!(formatter, "missing source custody: {file:?}"),
+            Self::SourceMismatch(file) => {
+                write!(formatter, "source custody HIR mismatch: {file:?}")
             }
             Self::Work(error) => error.fmt(formatter),
         }
@@ -50,7 +63,7 @@ enum SourceTypeSlot {
 ///
 /// The source owner retains one registry per attempt/file and supplies the
 /// canonical file/HIR association. Reconstruction is not replay. Setup indexes
-/// valid written HIR nodes and direct edges only; it neither expands aliases nor
+/// written HIR nodes and direct edges only; it neither expands aliases nor
 /// admits roots. Worklists must carry inherited tickets instead of admitting
 /// the children of tuples, function types, references or type applications.
 /// This adapter does not activate compiler limits or meter semantic resolution.
@@ -70,10 +83,32 @@ impl<'hir> AnalysisSourceInputRegistry<'hir> {
         file: FileId,
         hir: &'hir HirFile,
     ) -> Result<Self, AnalysisSourceInputFailure> {
-        let attempt = accounting.bind_input_consumer(consumer)?;
+        accounting.bind_input_consumer(consumer)?;
         if !hir.invalid_occurrences().is_empty() {
             return Err(AnalysisSourceInputFailure::InvalidHir(file));
         }
+        Self::index(accounting, consumer, file, hir)
+    }
+
+    /// Accepts recovered HIR through its validated source/poison association.
+    pub fn from_source(
+        accounting: &AnalysisWorkAccounting,
+        consumer: usize,
+        source: &crate::SemanticSource<'hir>,
+    ) -> Result<Self, AnalysisSourceInputFailure> {
+        let hir = source
+            .hir()
+            .ok_or(AnalysisSourceInputFailure::MissingHir(source.file()))?;
+        Self::index(accounting, consumer, source.file(), hir)
+    }
+
+    fn index(
+        accounting: &AnalysisWorkAccounting,
+        consumer: usize,
+        file: FileId,
+        hir: &'hir HirFile,
+    ) -> Result<Self, AnalysisSourceInputFailure> {
+        let attempt = accounting.bind_input_consumer(consumer)?;
 
         let count = hir.type_refs().len();
         Layout::array::<SourceTypeSlot>(count).map_err(AnalysisSourceInputFailure::Layout)?;
@@ -111,6 +146,19 @@ impl<'hir> AnalysisSourceInputRegistry<'hir> {
             attempt,
             slots,
             tickets: Vec::new(),
+        })
+    }
+
+    /// Observes custody without cloning, charging, admission or renewal.
+    pub fn admitted_ticket(
+        &self,
+        occurrence: TypeOccurrenceId,
+    ) -> Result<Option<&AnalysisRootTicket>, AnalysisSourceInputFailure> {
+        let ordinal = self.original_ordinal(occurrence)?;
+        Ok(match self.slots[ordinal] {
+            SourceTypeSlot::Original(Some(index)) => Some(&self.tickets[index]),
+            SourceTypeSlot::Original(None) => None,
+            SourceTypeSlot::Child => unreachable!("validated original occurrence"),
         })
     }
 

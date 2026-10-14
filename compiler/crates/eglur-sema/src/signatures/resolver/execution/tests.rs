@@ -2,7 +2,10 @@ use super::*;
 use std::cell::RefCell;
 
 use super::super::tests::with_resolver;
-use crate::{AnalysisRootTicket, AnalysisWork, AnalysisWorkPricing};
+use crate::{
+    AnalysisRootTicket, AnalysisSourceInputs, AnalysisWork, AnalysisWorkAccounting,
+    AnalysisWorkPricing,
+};
 
 struct Support;
 
@@ -108,9 +111,9 @@ pub(in crate::signatures::resolver) fn checkpoint(
 
     let work = resolver
         .analysis_work
-        .as_deref_mut()
+        .as_mut()
         .expect("checkpoint requires accounting");
-    let mut scope = work.claim(&ticket)?;
+    let mut scope = work.accounting.claim(&ticket)?;
     if stop {
         let estimate = AnalysisWork {
             steps: if fault == Fault::Overflow {
@@ -178,6 +181,8 @@ fn run_public(
     diagnostics: &mut DiagnosticStore,
     work: &mut AnalysisWorkAccounting,
 ) -> Result<SignatureExecution, SignatureResolutionError> {
+    let mut source_inputs =
+        AnalysisSourceInputs::new(work, sources.iter().map(|source| (0, source))).unwrap();
     resolve_declaration_signatures_with_work(
         resolver.collection,
         resolver.imports,
@@ -185,7 +190,7 @@ fn run_public(
         &Support,
         SignatureResolutionInputs::new(resolver.external_names, None),
         diagnostics,
-        work,
+        SignatureAnalysisWork::new(work, &mut source_inputs, &|_| 100_000),
     )
 }
 
@@ -256,8 +261,10 @@ fn preexisting_stop_precedes_source_preparation_and_capability_callbacks() {
             panic!("no capability work after stop")
         }
     }
-    with_resolver(&["type Value = i32"], |resolver, _| {
+    with_resolver(&["type Value = i32"], |resolver, sources| {
         let (mut work, _) = accounting();
+        let mut source_inputs =
+            AnalysisSourceInputs::new(&work, sources.iter().map(|source| (0, source))).unwrap();
         let stop = match work.admit(0, 0).unwrap_err() {
             AnalysisWorkFailure::Incomplete(stop) => stop,
             other => panic!("{other:?}"),
@@ -270,7 +277,9 @@ fn preexisting_stop_precedes_source_preparation_and_capability_callbacks() {
             &UnreachableSupport,
             SignatureResolutionInputs::new(resolver.external_names, None),
             &mut diagnostics,
-            &mut work,
+            SignatureAnalysisWork::new(&mut work, &mut source_inputs, &|_| {
+                panic!("no admission after stop")
+            }),
         )
         .unwrap();
         let result = interrupted(result);
@@ -292,6 +301,8 @@ fn unsupported_capability_remains_completed_unperformed_not_interrupted() {
     }
     with_resolver(&["type Value = i32"], |resolver, sources| {
         let (mut work, _) = accounting();
+        let mut source_inputs =
+            AnalysisSourceInputs::new(&work, sources.iter().map(|source| (0, source))).unwrap();
         let mut diagnostics = DiagnosticStore::new();
         let result = resolve_declaration_signatures_with_work(
             resolver.collection,
@@ -300,7 +311,9 @@ fn unsupported_capability_remains_completed_unperformed_not_interrupted() {
             &Unsupported,
             SignatureResolutionInputs::new(resolver.external_names, None),
             &mut diagnostics,
-            &mut work,
+            SignatureAnalysisWork::new(&mut work, &mut source_inputs, &|_| {
+                panic!("no admission for unsupported capability")
+            }),
         )
         .unwrap();
         let (product, demands) = completed(result).into_parts();
@@ -727,16 +740,21 @@ fn recovered_source_inputs_keep_the_same_unmetered_source_disposition() {
         };
         let inputs = SignatureResolutionInputs::new(Some(&external), None);
         let result = match work.as_deref_mut() {
-            Some(work) => resolve_declaration_signatures_with_work(
-                &collection,
-                &imports,
-                &sources,
-                &Support,
-                inputs,
-                &mut diagnostics,
-                work,
-            )
-            .map(completed),
+            Some(work) => {
+                let mut source_inputs =
+                    AnalysisSourceInputs::new(work, sources.iter().map(|source| (0, source)))
+                        .unwrap();
+                resolve_declaration_signatures_with_work(
+                    &collection,
+                    &imports,
+                    &sources,
+                    &Support,
+                    inputs,
+                    &mut diagnostics,
+                    SignatureAnalysisWork::new(work, &mut source_inputs, &|_| 100_000),
+                )
+                .map(completed)
+            }
             None => resolve_declaration_signatures(
                 &collection,
                 &imports,
@@ -784,13 +802,20 @@ fn terminal_stop_over_apparent_success_keeps_inhabitance_without_success_freeze(
             &mut diagnostics,
         )
         .unwrap();
-        resolver.analysis_work = Some(&mut work);
+        let mut source_inputs =
+            AnalysisSourceInputs::new(&work, sources.iter().map(|source| (0, source))).unwrap();
+        resolver.analysis_work = Some(SignatureAnalysisWork::new(
+            &mut work,
+            &mut source_inputs,
+            &|_| 100_000,
+        ));
         let facts = resolver.run_passes().unwrap();
         let count = resolver.callables.len();
         let stop = resolver
             .analysis_work
-            .as_deref_mut()
+            .as_mut()
             .unwrap()
+            .accounting
             .claim(&ticket)
             .unwrap()
             .precharge(AnalysisWork {

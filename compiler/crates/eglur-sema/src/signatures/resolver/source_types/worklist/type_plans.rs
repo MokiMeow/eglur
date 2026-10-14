@@ -397,6 +397,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     request: Request::Alias(AliasRequest {
                         alias,
                         cycle_site: Some((parent.site.file, origin)),
+                        custody: AliasCustody::Inherited(
+                            self.inherited_source_custody(parent.site.file, &parent.site.custody)?,
+                        ),
                     }),
                     continuation: TypeContinuation::AliasTemplate { alias, arguments },
                 })

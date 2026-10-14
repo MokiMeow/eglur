@@ -1,5 +1,5 @@
 use super::*;
-use crate::{AnalysisWorkAccounting, AnalysisWorkFailure};
+use crate::AnalysisWorkFailure;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum SignatureFlow {
@@ -22,6 +22,15 @@ impl From<AnalysisWorkFailure> for SignatureFlow {
                 Self::Internal(SignatureResolutionError::AnalysisRootClaim(error))
             }
             AnalysisWorkFailure::Incomplete(_) => Self::Interrupted,
+        }
+    }
+}
+
+impl From<crate::AnalysisSourceInputFailure> for SignatureFlow {
+    fn from(error: crate::AnalysisSourceInputFailure) -> Self {
+        match error {
+            crate::AnalysisSourceInputFailure::Work(error) => error.into(),
+            other => SignatureResolutionError::AnalysisSourceInput(other).into(),
         }
     }
 }
@@ -50,8 +59,8 @@ impl SignatureResolver<'_, '_> {
     pub(super) fn ensure_analysis_active(&self) -> Result<(), SignatureFlow> {
         if self
             .analysis_work
-            .as_deref()
-            .is_some_and(|work| work.incomplete().is_some())
+            .as_ref()
+            .is_some_and(|work| work.accounting.incomplete().is_some())
         {
             return Err(SignatureFlow::Interrupted);
         }
@@ -96,8 +105,8 @@ impl SignatureResolver<'_, '_> {
     ) -> Result<SignatureExecution, SignatureResolutionError> {
         if let Some(stop) = self
             .analysis_work
-            .as_deref()
-            .and_then(AnalysisWorkAccounting::incomplete)
+            .as_ref()
+            .and_then(|work| work.accounting.incomplete())
         {
             let (inhabitance, internal_failures) = match traversal {
                 Ok(facts) => (Some(facts), Vec::new()),

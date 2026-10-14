@@ -573,6 +573,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             let mut seen = BTreeSet::new();
             let parameter_name = parameter.name.text().unwrap_or("<invalid>");
             for &bound_id in &parameter.bounds {
+                let custody =
+                    self.original_source_custody(TypeOccurrenceId::new(file, bound_id))?;
+                self.claim_source_custody(&custody)?;
                 let bound = match self
                     .source_generic_bound_seeds
                     .get(&(declaration_id, bound_id))

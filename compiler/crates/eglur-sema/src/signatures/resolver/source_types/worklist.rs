@@ -7,13 +7,15 @@ mod trait_refs;
 mod type_plans;
 
 #[cfg(test)]
+pub(super) mod custody_tests;
+#[cfg(test)]
 mod poison_tests;
 
-#[derive(Clone)]
 struct SourceSite {
     owner: DefId,
     file: FileId,
     context: SourceTypeContext,
+    custody: SourceCustody,
 }
 
 #[derive(Clone)]
@@ -32,6 +34,12 @@ struct TraitRequest {
 struct AliasRequest {
     alias: DefId,
     cycle_site: Option<(FileId, OriginId)>,
+    custody: AliasCustody,
+}
+
+enum AliasCustody {
+    Original,
+    Inherited(SourceCustody),
 }
 
 enum Request {
@@ -192,6 +200,7 @@ enum AliasPlan {
 struct AliasFrame {
     alias: DefId,
     generic_parameters: Box<[GenericParameterId]>,
+    site: Rc<SourceSite>,
 }
 
 enum Step {
@@ -211,10 +220,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         context: &SourceTypeContext,
     ) -> Result<Resolution<TypeId>, SignatureFlow> {
         self.ensure_analysis_active()?;
+        let custody =
+            self.original_source_custody(TypeOccurrenceId::new(source.file(), type_ref))?;
         let site = Rc::new(SourceSite {
             owner,
             file: source.file(),
             context: context.clone(),
+            custody,
         });
         let request = Request::Type(TypeRequest {
             site,
@@ -235,10 +247,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         context: &SourceTypeContext,
     ) -> Result<Resolution<TraitRef>, SignatureFlow> {
         self.ensure_analysis_active()?;
+        let custody =
+            self.original_source_custody(TypeOccurrenceId::new(source.file(), type_ref))?;
         let site = Rc::new(SourceSite {
             owner,
             file: source.file(),
             context: context.clone(),
+            custody,
         });
         let request = Request::Trait(TraitRequest { site, type_ref });
         match self.run_source_worklist(request)? {
@@ -256,6 +271,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let request = Request::Alias(AliasRequest {
             alias,
             cycle_site: cycle_site.map(|(source, origin)| (source.file(), origin)),
+            custody: AliasCustody::Original,
         });
         match self.run_source_worklist(request)? {
             Completed::Alias(result) => Ok(result),
@@ -292,10 +308,24 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             }
             match step {
                 Step::Enter(Request::Type(request)) => {
+                    self.claim_source_custody(&request.site.custody)?;
+                    #[cfg(test)]
+                    custody_tests::observe(
+                        self,
+                        TypeOccurrenceId::new(request.site.file, request.type_ref),
+                        &request.site.custody,
+                    )?;
                     let plan = self.prepare_type_plan(&request)?;
                     self.schedule_type_plan(request, plan, &mut pending, &mut completed)?;
                 }
                 Step::Enter(Request::Trait(request)) => {
+                    self.claim_source_custody(&request.site.custody)?;
+                    #[cfg(test)]
+                    custody_tests::observe(
+                        self,
+                        TypeOccurrenceId::new(request.site.file, request.type_ref),
+                        &request.site.custody,
+                    )?;
                     let plan = self.prepare_trait_plan(&request)?;
                     self.schedule_trait_plan(request, plan, &mut pending, &mut completed)?;
                 }
@@ -310,12 +340,14 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             pending.push(Step::ResumeAlias(AliasFrame {
                                 alias,
                                 generic_parameters,
+                                site: Rc::clone(&request.site),
                             }));
                             pending.push(Step::Enter(Request::Type(request)));
                         }
                     }
                 }
                 Step::ResumeType(frame) => {
+                    self.claim_source_custody(&frame.parent.site.custody)?;
                     let Some(complete) = completed.take() else {
                         unreachable!("type dependency completed")
                     };
@@ -324,6 +356,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     self.schedule_type_plan(parent, plan, &mut pending, &mut completed)?;
                 }
                 Step::ResumeTrait(frame) => {
+                    self.claim_source_custody(&frame.parent.site.custody)?;
                     let Some(Completed::Type(result)) = completed.take() else {
                         unreachable!("trait argument completed as type")
                     };

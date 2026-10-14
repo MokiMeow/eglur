@@ -9,6 +9,7 @@ mod resolver;
 mod trusted;
 mod trusted_inherent;
 mod trusted_method_contracts;
+mod work;
 
 pub use error::SignatureResolutionError;
 pub use execution::{InterruptedSignatures, SignatureExecution, SignatureResolutionPrefix};
@@ -20,6 +21,7 @@ pub use resolver::{
     resolve_declaration_signatures_with_work,
 };
 pub use trusted::*;
+pub use work::SignatureAnalysisWork;
 
 pub(crate) use applications::{TypeApplication, TypeApplicationRegion, TypeApplicationSite};
 pub(crate) use generics::InstantiatedParameterBound;

@@ -13,7 +13,6 @@ use eglur_source::FileId;
 
 use super::model::declaration_fact_state;
 use super::*;
-use crate::AnalysisWorkAccounting;
 use crate::capability::{
     CompileCapability, CompileSupport, DemandRecorder, PhaseAnalysis, PhaseProduct,
     TypecheckCapability,
@@ -113,16 +112,16 @@ pub fn resolve_declaration_signatures(
     }
 }
 
-/// Runs the signature phase with explicit accounting custody, not implicit limits.
-/// Original admission and semantic operation metering must be supplied separately.
-pub fn resolve_declaration_signatures_with_work(
+/// Admits original written inputs and carries their tickets through source work.
+/// Semantic operation metering and driver activation are separate responsibilities.
+pub fn resolve_declaration_signatures_with_work<'hir>(
     collection: &DeclarationCollection,
     imports: &ResolvedImports,
-    sources: &[SemanticSource<'_>],
+    sources: &[SemanticSource<'hir>],
     support: &dyn CompileSupport,
     inputs: SignatureResolutionInputs<'_>,
     diagnostics: &mut DiagnosticStore,
-    work: &mut AnalysisWorkAccounting,
+    work: SignatureAnalysisWork<'_, 'hir>,
 ) -> Result<SignatureExecution, SignatureResolutionError> {
     resolve_signatures_inner(
         collection,
@@ -135,16 +134,16 @@ pub fn resolve_declaration_signatures_with_work(
     )
 }
 
-fn resolve_signatures_inner(
+fn resolve_signatures_inner<'hir>(
     collection: &DeclarationCollection,
     imports: &ResolvedImports,
-    sources: &[SemanticSource<'_>],
+    sources: &[SemanticSource<'hir>],
     support: &dyn CompileSupport,
     inputs: SignatureResolutionInputs<'_>,
     diagnostics: &mut DiagnosticStore,
-    work: Option<&mut AnalysisWorkAccounting>,
+    work: Option<SignatureAnalysisWork<'_, 'hir>>,
 ) -> Result<SignatureExecution, SignatureResolutionError> {
-    if let Some(stop) = work.as_deref().and_then(AnalysisWorkAccounting::incomplete) {
+    if let Some(stop) = work.as_ref().and_then(|work| work.accounting.incomplete()) {
         return Ok(SignatureExecution::Interrupted(Box::new(
             InterruptedSignatures {
                 stop,
@@ -166,6 +165,14 @@ fn resolve_signatures_inner(
         return Ok(SignatureExecution::Completed(Box::new(
             recorder.finish(PhaseProduct::Unperformed),
         )));
+    }
+
+    if let Some(work) = &work {
+        for source in sources.values() {
+            work.inputs
+                .validate_source(work.accounting, source)
+                .map_err(SignatureResolutionError::AnalysisSourceInput)?;
+        }
     }
 
     let mut resolver = SignatureResolver::new(
@@ -304,7 +311,7 @@ impl<'hir> SourceCallable<'hir> {
 }
 
 struct SignatureResolver<'input, 'hir> {
-    analysis_work: Option<&'input mut AnalysisWorkAccounting>,
+    analysis_work: Option<SignatureAnalysisWork<'input, 'hir>>,
     language_items: LanguageItems,
     type_applications: super::applications::TypeApplicationFacts,
     collection: &'input DeclarationCollection,

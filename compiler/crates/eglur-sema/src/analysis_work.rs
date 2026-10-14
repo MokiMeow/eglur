@@ -15,7 +15,9 @@ pub use call_inputs::{
     AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
     AnalysisCallRegistryFailure,
 };
-pub use source_inputs::{AnalysisSourceInputFailure, AnalysisSourceInputRegistry};
+pub use source_inputs::{
+    AnalysisSourceInputFailure, AnalysisSourceInputRegistry, AnalysisSourceInputs,
+};
 
 /// Unpriced quantities for a planned analysis operation.
 ///
