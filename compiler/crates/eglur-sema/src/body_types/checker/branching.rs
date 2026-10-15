@@ -115,10 +115,9 @@ impl MatchFrame {
             region: self.region(),
             path,
             expression: self.expression.arms[self.next_arm].value,
-            request: TypeRequest::definitive(
-                self.request
-                    .retarget(self.common.or(self.request.expected_type())),
-            ),
+            request: self
+                .request
+                .definitive_child(self.common.or(self.request.expected_type())),
             frame: self,
         }
     }
@@ -322,11 +321,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 },
                 path: frame.condition_continuation,
                 expression,
-                request: TypeRequest::definitive(
-                    frame
-                        .request
-                        .retarget(frame.common.or(frame.request.expected_type())),
-                ),
+                request: frame
+                    .request
+                    .definitive_child(frame.common.or(frame.request.expected_type())),
                 frame,
             });
         }

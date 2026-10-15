@@ -188,7 +188,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             ));
                             frame.pending.push(NumericTypeStep::Enter(
                                 *operand,
-                                TypeRequest::definitive(request.retarget(expected)),
+                                request.definitive_child(expected),
                                 continuation,
                             ));
                             continue;
@@ -209,7 +209,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 });
                                 frame.pending.push(NumericTypeStep::Enter(
                                     *right,
-                                    TypeRequest::probe(),
+                                    TypeRequest::probe(request.custody()),
                                     continuation,
                                 ));
                                 continue;
@@ -223,7 +223,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             });
                             frame.pending.push(NumericTypeStep::Enter(
                                 *left,
-                                TypeRequest::definitive(request.retarget(expected)),
+                                request.definitive_child(expected),
                                 continuation,
                             ));
                             continue;
@@ -254,7 +254,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     });
                     frame.pending.push(NumericTypeStep::Enter(
                         left,
-                        TypeRequest::definitive(request.retarget(expected)),
+                        request.definitive_child(expected),
                         continuation,
                     ));
                     continue;
@@ -285,7 +285,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .push(NumericTypeStep::Finish(expression, request, continuation));
                     frame.pending.push(NumericTypeStep::Enter(
                         right,
-                        TypeRequest::definitive(request.retarget(expected)),
+                        request.definitive_child(expected),
                         right_path,
                     ));
                     continue;

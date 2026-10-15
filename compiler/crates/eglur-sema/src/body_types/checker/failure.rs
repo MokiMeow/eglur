@@ -70,7 +70,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let region = ControlRegionKey::Result(ExpressionKey::new(module, expression));
         Ok(FailurePlan::ResultBlock {
             block,
-            request: TypeRequest::definitive(request.retarget(expected.map(|carrier| carrier.ty))),
+            request: request.definitive_child(expected.map(|carrier| carrier.ty)),
             context: ResultContext {
                 region,
                 expected,
@@ -329,7 +329,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let region = ControlRegionKey::Checked(ExpressionKey::new(module, expression));
         Ok(FailurePlan::CheckedBlock {
             block,
-            request: TypeRequest::definitive(request.retarget(expected_success)),
+            request: request.definitive_child(expected_success),
             context: CheckedContext {
                 region: region.clone(),
             },

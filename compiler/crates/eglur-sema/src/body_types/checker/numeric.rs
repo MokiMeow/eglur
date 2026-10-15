@@ -14,7 +14,7 @@ pub(super) enum NumericContinuation {
     BinaryLeft {
         frame: BinaryFrame,
         right: ExprId,
-        expected: Option<ExpectedType>,
+        request: TypeRequest,
     },
     BinaryRight {
         frame: BinaryFrame,
@@ -49,16 +49,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             NumericContinuation::BinaryLeft {
                 frame,
                 right,
-                expected,
+                request,
             } => {
                 let right_expected = match &outcome {
-                    Outcome::Known(left) if self.is_fixed_width_integer(left.ty)? => {
-                        Some(expected.map_or_else(
-                            || ExpectedType::caller(left.ty),
-                            |ty| ty.with_type(left.ty),
-                        ))
-                    }
-                    _ => expected,
+                    Outcome::Known(left) if self.is_fixed_width_integer(left.ty)? => Some(left.ty),
+                    _ => request.expected_type(),
                 };
                 let path = match &outcome {
                     Outcome::Known(left) => left.normal_continuation,
@@ -66,7 +61,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 };
                 return Ok(NumericPlan::Expression {
                     expression: right,
-                    request: TypeRequest::definitive(right_expected),
+                    request: request.definitive_child(right_expected),
                     path,
                     continuation: NumericContinuation::BinaryRight {
                         frame,
@@ -120,13 +115,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
         let left_const = self.is_const_evaluable_expression(module, body, left)?;
         let right_const = self.is_const_evaluable_expression(module, body, right)?;
-        let expected = match request.expected {
-            Some(ty) if self.is_fixed_width_integer(ty.ty())? => Some(ty),
+        let expected = match request.expected_type() {
+            Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
             _ => None,
         };
+        let request = request.definitive_child(expected);
         Ok(NumericPlan::Expression {
             expression: left,
-            request: TypeRequest::definitive(expected),
+            request,
             path: NormalContinuation::Present,
             continuation: NumericContinuation::BinaryLeft {
                 frame: BinaryFrame {
@@ -138,7 +134,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     right_const,
                 },
                 right,
-                expected,
+                request,
             },
         })
     }
@@ -269,13 +265,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(NumericPlan::Complete(Outcome::Unperformed));
         }
         let is_const = self.is_const_evaluable_expression(module, body, operand)?;
-        let expected = match request.expected {
-            Some(ty) if self.is_fixed_width_integer(ty.ty())? => Some(ty),
+        let expected = match request.expected_type() {
+            Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
             _ => None,
         };
         Ok(NumericPlan::Expression {
             expression: operand,
-            request: TypeRequest::definitive(expected),
+            request: request.definitive_child(expected),
             path: NormalContinuation::Present,
             continuation: NumericContinuation::Negation(NegationFrame {
                 key: ExpressionKey::new(module, expression),

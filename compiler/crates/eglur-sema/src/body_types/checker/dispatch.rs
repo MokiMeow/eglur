@@ -546,11 +546,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         mut frame: Box<DispatchArgumentsFrame>,
     ) -> Result<InvocationPlan, BodyFlow> {
         if let Some(argument) = frame.request.call.arguments.get(frame.next) {
+            let custody = ExpectationCustody::call_argument(
+                ExpressionKey::new(context.module, frame.request.expression),
+                &frame.request.call,
+                frame.next,
+            );
             let argument = argument.value;
             frame.next += 1;
             return Ok(InvocationPlan::Expression {
                 expression: argument,
-                request: TypeRequest::definitive(None),
+                request: TypeRequest::definitive(None).with_custody(custody),
                 path: frame.normal_continuation,
                 continuation: InvocationContinuation::Dispatch(DispatchContinuation::Argument {
                     frame,

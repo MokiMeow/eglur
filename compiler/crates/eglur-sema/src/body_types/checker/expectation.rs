@@ -60,17 +60,30 @@ impl ExpectedType {
 }
 
 impl TypeRequest {
+    pub(super) fn expected(self) -> Option<ExpectedType> {
+        self.expected.map(|ty| ExpectedType::new(ty, self.custody))
+    }
+
     pub(super) fn expected_type(self) -> Option<TypeId> {
-        self.expected.map(ExpectedType::ty)
+        self.expected
     }
 
     pub(super) fn custody(self) -> ExpectationCustody {
-        self.expected
-            .map_or(ExpectationCustody::Caller, ExpectedType::custody)
+        self.custody
     }
 
-    pub(super) fn retarget(self, expected: Option<TypeId>) -> Option<ExpectedType> {
-        expected.map(|ty| ExpectedType::new(ty, self.custody()))
+    /// Changes the expected type without discarding custody or inference flags.
+    pub(super) fn retarget(self, expected: Option<TypeId>) -> Self {
+        Self { expected, ..self }
+    }
+
+    pub(super) fn with_custody(self, custody: ExpectationCustody) -> Self {
+        Self { custody, ..self }
+    }
+
+    /// Starts definitive checking while retaining an existing whole demand.
+    pub(super) fn definitive_child(self, expected: Option<TypeId>) -> Self {
+        Self::local(expected).with_custody(self.custody)
     }
 
     pub(super) fn local(expected: Option<TypeId>) -> Self {

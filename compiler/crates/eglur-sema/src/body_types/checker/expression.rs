@@ -15,7 +15,7 @@ pub(super) enum ExpressionPlan {
     Block {
         key: ExpressionKey,
         statements: Box<[StmtId]>,
-        expected: Option<ExpectedType>,
+        request: TypeRequest,
     },
     Forward {
         key: ExpressionKey,
@@ -105,12 +105,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .expression(expression_id)
             .ok_or(BodyTypingError::WrongBodyExpression(expression_id))?;
         let origin = expression.origin();
-        let request = if let Some(expected) = request.expected {
+        let request = if let Some(expected) = request.expected() {
             match self.normalize_expected_at(source, origin, expected)? {
-                Outcome::Known(expected) => TypeRequest {
-                    expected: Some(expected),
-                    ..request
-                },
+                Outcome::Known(expected) => request.retarget(Some(expected.ty())),
                 Outcome::Poisoned(poison) => {
                     let outcome = Outcome::Poisoned(poison);
                     return Ok(ExpressionPlan::Publish { key, outcome });
@@ -134,7 +131,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 return Ok(ExpressionPlan::Block {
                     key,
                     statements,
-                    expected: request.expected,
+                    request,
                 });
             }
             ExprKind::Literal(literal) => self.type_literal(source, &literal, request)?,

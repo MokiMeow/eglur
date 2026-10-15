@@ -24,7 +24,7 @@ enum Step {
     InCurrentRegion(ExprId, TypeRequest),
     Publish(ExpressionKey),
     Block(BlockFrame),
-    Statement(StmtId, Option<ExpectedType>),
+    Statement(StmtId, TypeRequest),
     ResumeStatement(StatementContinuation),
     ResumeBlock(BlockFrame),
     Value(Box<ValuePlan>),
@@ -125,7 +125,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         ExpressionPlan::Block {
                             key,
                             statements,
-                            expected,
+                            request,
                         } => {
                             pending.push(Step::Publish(key));
                             if self.block_region_overrides.last() != Some(&expression) {
@@ -133,7 +133,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 self.enter_control_region(region.clone())?;
                                 pending.push(Step::Cleanup(Cleanup::Region(region)));
                             }
-                            pending.push(Step::Block(BlockFrame::new(statements, expected)));
+                            pending.push(Step::Block(BlockFrame::new(statements, request)));
                         }
                         ExpressionPlan::Forward {
                             key,
@@ -197,17 +197,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     self.record_expression(key, outcome.clone())?;
                 }
                 Step::Block(mut block) => {
-                    if let Some((statement, expected, path)) = block.next_statement() {
+                    if let Some((statement, request, path)) = block.next_statement() {
                         let barrier = self.push_control_path_barrier(path);
                         pending.push(Step::ResumeBlock(block));
                         pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
-                        pending.push(Step::Statement(statement, expected));
+                        pending.push(Step::Statement(statement, request));
                     } else {
                         expression_value = Some(self.finish_block(block)?);
                     }
                 }
-                Step::Statement(statement, expected) => {
-                    let plan = self.prepare_statement(context, statement, expected)?;
+                Step::Statement(statement, request) => {
+                    let plan = self.prepare_statement(context, statement, request)?;
                     self.schedule_statement(plan, &mut statement_value, pending);
                 }
                 Step::ResumeStatement(continuation) => {

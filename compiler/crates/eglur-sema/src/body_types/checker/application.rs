@@ -120,7 +120,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     outcome => return Ok(ApplicationPlan::Complete(application_refusal(outcome))),
                 }
             }
-        } else if let Some(expected) = request.expected
+        } else if let Some(expected) = request.expected()
             && self.infer_constraints(
                 result_template,
                 expected.ty(),
@@ -209,10 +209,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     None => None,
                 };
                 let request = match frame.pass {
-                    InferencePass::Probe => expected.map_or_else(TypeRequest::probe, |expected| {
-                        TypeRequest::definitive(Some(expected))
-                    }),
-                    InferencePass::Definitive => TypeRequest::definitive(expected),
+                    InferencePass::Probe => expected.map_or_else(
+                        || TypeRequest::probe(argument.slot.custody),
+                        |expected| TypeRequest::definitive(Some(expected)),
+                    ),
+                    InferencePass::Definitive => {
+                        TypeRequest::definitive(expected).with_custody(argument.slot.custody)
+                    }
                 };
                 return Ok(ApplicationPlan::Expression {
                     expression: argument.slot.value,

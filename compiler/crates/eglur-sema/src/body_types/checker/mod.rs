@@ -404,7 +404,8 @@ impl BlockStep {
 
 #[derive(Clone, Copy)]
 struct TypeRequest {
-    expected: Option<ExpectedType>,
+    expected: Option<TypeId>,
+    custody: ExpectationCustody,
     allow_deferred: bool,
     default_integer: bool,
     value_required: bool,
@@ -805,8 +806,13 @@ impl ConstructorPayloadForm {
 
 impl TypeRequest {
     const fn definitive(expected: Option<ExpectedType>) -> Self {
+        let (expected, custody) = match expected {
+            Some(expected) => (Some(expected.ty()), expected.custody()),
+            None => (None, ExpectationCustody::Caller),
+        };
         Self {
             expected,
+            custody,
             allow_deferred: false,
             default_integer: true,
             value_required: true,
@@ -816,15 +822,17 @@ impl TypeRequest {
     const fn discarded() -> Self {
         Self {
             expected: None,
+            custody: ExpectationCustody::Caller,
             allow_deferred: false,
             default_integer: true,
             value_required: false,
         }
     }
 
-    const fn probe() -> Self {
+    const fn probe(custody: ExpectationCustody) -> Self {
         Self {
             expected: None,
+            custody,
             allow_deferred: true,
             default_integer: false,
             value_required: true,

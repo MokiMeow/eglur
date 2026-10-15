@@ -107,7 +107,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .map(Outcome::Poisoned);
         }
 
-        let expected = match request.expected {
+        let expected = match request.expected() {
             Some(ty)
                 if matches!(
                     self.signatures.types().kind(ty.ty())?,
@@ -267,7 +267,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: TypeRequest,
     ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let origin = self.expression_origin(source, expression)?;
-        let Some(expected) = request.expected else {
+        let Some(expected) = request.expected() else {
             return self.missing_callable_value_context(source, origin, request);
         };
         let TypeKind::Callable { parameters, .. } = self.signatures.types().kind(expected.ty())?
@@ -459,7 +459,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         signatures: &[CallableSignatureId],
     ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let origin = self.expression_origin(source, expression)?;
-        let expected = match request.expected {
+        let expected = match request.expected() {
             Some(ty)
                 if matches!(
                     self.signatures.types().kind(ty.ty())?,

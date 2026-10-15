@@ -4,6 +4,8 @@ use super::*;
 use crate::ExternalDefId;
 use crate::body_types::checker::test_support::{with_checker, with_checker_declarations};
 
+mod unconstrained;
+
 #[derive(Clone, Copy)]
 pub(super) enum Event {
     Request {
@@ -103,7 +105,7 @@ fn variable_requests(
     events
         .iter()
         .filter_map(|event| match event {
-            Event::Request { key, request } if keys.contains(key) => request.expected,
+            Event::Request { key, request } if keys.contains(key) => request.expected(),
             _ => None,
         })
         .collect()
@@ -265,11 +267,16 @@ fn generic_probe_without_a_type_retains_slot_custody_for_final_normalization() {
         |checker, events| {
             let (site, call) = &calls(checker)[0];
             let key = ExpressionKey::new(site.module(), call.arguments[0].value);
-            assert!(events.iter().any(|event| matches!(event, Event::Request { key: found, request } if *found == key && request.expected.is_none() && request.allow_deferred)));
+            assert!(events.iter().any(|event| matches!(event, Event::Request { key: found, request } if *found == key && request.expected().is_none() && request.allow_deferred)));
             let expected = ExpectationCustody::CallArgument {
                 call: *site,
                 index: 0,
             };
+            assert!(events.iter().any(|event| matches!(event,
+                Event::Request { key: found, request }
+                if *found == key && request.expected().is_none()
+                    && request.allow_deferred && request.custody() == expected
+            )));
             assert!(
                 normalized(events)
                     .iter()
@@ -345,6 +352,7 @@ fn semantic_type_projection_does_not_merge_distinct_original_inputs() {
         assert_eq!(
             TypeRequest::definitive(Some(first))
                 .retarget(Some(boolean))
+                .expected()
                 .unwrap()
                 .custody(),
             first.custody()
@@ -520,7 +528,7 @@ fn cached_expression_keeps_incoming_custody_without_partitioning_semantic_facts(
             super::super::expression::ExpressionPlan::Complete(Outcome::Known(_))
         ));
         let events = EVENTS.with_borrow_mut(|events| events.take().unwrap());
-        assert!(events.iter().any(|event| matches!(event, Event::Request { key: found, request } if *found == key && request.expected == Some(expected))));
+        assert!(events.iter().any(|event| matches!(event, Event::Request { key: found, request } if *found == key && request.expected() == Some(expected))));
         assert!(normalized(&events).is_empty());
         let FactState::Known(after) = checker.expressions.state(&key) else {
             panic!("cached value lost")
@@ -529,8 +537,7 @@ fn cached_expression_keeps_incoming_custody_without_partitioning_semantic_facts(
     });
 }
 
-#[test]
-fn checked_success_and_numeric_children_share_the_whole_written_input() {
+fn with_numeric_events(text: &str, inspect: impl FnOnce(&mut BodyChecker<'_, '_, '_>, &[Event])) {
     let error = ExternalDefId::new("fixture::NumericError").unwrap();
     let module = crate::ModuleAddress::new(["fixture".into()]).unwrap();
     let external = ExternalNameEnvironment::new(
@@ -556,13 +563,16 @@ fn checked_success_and_numeric_children_share_the_whole_written_input() {
     let items =
         crate::TrustedLanguageItemEnvironment::new([(LanguageItem::NumericError, error)]).unwrap();
     let inputs = crate::TrustedDeclarationInputs::new(&trusted, None).with_language_items(&items);
+    with_events_inputs(text, &external, Some(inputs), inspect);
+}
+
+#[test]
+fn checked_success_and_numeric_children_share_the_whole_written_input() {
     for expression in ["x + y", "-x", "((1 + 2) * 3) + x", "x + ((1 + 2) * 3)"] {
-        with_events_inputs(
+        with_numeric_events(
             &format!(
                 "fn inspect(x: i8, y: i8) -> Res[i8, NumericError] = checked {{ yield {expression} }}"
             ),
-            &external,
-            Some(inputs),
             |checker, events| {
                 let written = return_custody(checker, "inspect");
                 let requests = variable_requests(checker, events, "x");
@@ -578,7 +588,7 @@ fn checked_success_and_numeric_children_share_the_whole_written_input() {
                 let requests = events
                     .iter()
                     .filter_map(|event| match event {
-                        Event::Request { request, .. } => request.expected,
+                        Event::Request { request, .. } => request.expected(),
                         _ => None,
                     })
                     .collect::<Vec<_>>();
@@ -636,7 +646,7 @@ fn question_operand_does_not_gain_a_new_contextual_expectation() {
                 })
                 .collect::<Vec<_>>();
             assert!(!requests.is_empty());
-            assert!(requests.iter().all(|request| request.expected.is_none()));
+            assert!(requests.iter().all(|request| request.expected().is_none()));
             assert!(matches!(
                 checker.bodies.state(&declaration(checker, "inspect")),
                 FactState::Known(_)

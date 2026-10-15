@@ -44,33 +44,31 @@ pub(super) struct PreparedLet {
 
 pub(super) struct BlockFrame {
     remaining: std::vec::IntoIter<StmtId>,
-    expected: Option<ExpectedType>,
+    request: TypeRequest,
     state: UnitOutcomeFold,
     result: Option<TypeId>,
     reachable: bool,
 }
 
 impl BlockFrame {
-    pub(super) fn new(statements: Box<[StmtId]>, expected: Option<ExpectedType>) -> Self {
+    pub(super) fn new(statements: Box<[StmtId]>, request: TypeRequest) -> Self {
         Self {
             remaining: statements.into_vec().into_iter(),
-            expected,
+            request,
             state: UnitOutcomeFold::Known,
             result: None,
             reachable: true,
         }
     }
 
-    pub(super) fn next_statement(
-        &mut self,
-    ) -> Option<(StmtId, Option<ExpectedType>, NormalContinuation)> {
+    pub(super) fn next_statement(&mut self) -> Option<(StmtId, TypeRequest, NormalContinuation)> {
         let statement = self.remaining.next()?;
         let path = if self.reachable {
             NormalContinuation::Present
         } else {
             NormalContinuation::Absent
         };
-        Some((statement, self.expected, path))
+        Some((statement, self.request, path))
     }
 }
 
@@ -137,7 +135,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         statement_id: StmtId,
-        expected: Option<ExpectedType>,
+        request: TypeRequest,
     ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext { source, body, .. } = context;
         let statement = body
@@ -195,7 +193,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             },
             StmtKind::Yield(value) => StatementPlan::Expression {
                 expression: *value,
-                request: TypeRequest::definitive(expected),
+                request: request.definitive_child(request.expected_type()),
                 path: NormalContinuation::Present,
                 continuation: StatementContinuation::Yield(statement_id),
             },

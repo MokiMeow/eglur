@@ -63,7 +63,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         values: Box<[ExprId]>,
         request: TypeRequest,
     ) -> Result<ValuePlan, BodyFlow> {
-        let expected = match request.expected {
+        let expected = match request.expected() {
             Some(expected) => match self.signatures.types().kind(expected.ty())? {
                 TypeKind::Tuple(elements) if elements.len() == values.len() => {
                     Some(elements.to_vec())
@@ -88,12 +88,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
     fn advance_tuple(&mut self, mut frame: Box<TupleFrame>) -> Result<ValuePlan, BodyFlow> {
         if let Some(&expression) = frame.values.get(frame.next) {
-            let request = TypeRequest {
-                expected: frame
-                    .request
-                    .retarget(frame.expected.as_ref().map(|elements| elements[frame.next])),
-                ..frame.request
-            };
+            let request = frame
+                .request
+                .retarget(frame.expected.as_ref().map(|elements| elements[frame.next]));
             frame.next += 1;
             return Ok(ValuePlan::Expression {
                 expression,
