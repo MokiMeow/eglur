@@ -144,7 +144,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.signatures
                     .types_mut()
                     .nominal(NominalHead::Declaration(owner.clone()), [])?
-            } else if let Some(expected) = expected {
+            } else if let Some(expected) = expected.as_ref() {
                 let TypeKind::Callable { parameters, .. } =
                     self.signatures.types().kind(expected.ty())?
                 else {
@@ -194,9 +194,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             match self.candidate_callable_value(
                 callable,
-                expected,
+                expected.clone(),
                 overloaded,
                 candidate.preset_replacements,
+                request.work.as_ref(),
             )? {
                 CandidateOutcome::Ready(value) => {
                     if let Some(constraint) = candidate.owner_constraint
@@ -207,7 +208,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     if first_ready.is_none() {
                         first_ready = Some(value.clone());
                     }
-                    let compatible = match expected {
+                    let compatible = match expected.as_ref() {
                         Some(expected) => self
                             .signatures
                             .types()
@@ -371,9 +372,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 presented.push(specialized.clone());
                 match self.candidate_callable_value(
                     specialized,
-                    Some(expected),
+                    Some(expected.clone()),
                     true,
                     BTreeMap::new(),
+                    request.work.as_ref(),
                 )? {
                     CandidateOutcome::Ready(mut value)
                         if self
@@ -492,15 +494,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
             match self.candidate_callable_value(
                 callable,
-                expected,
+                expected.clone(),
                 signatures.len() > 1,
                 BTreeMap::new(),
+                request.work.as_ref(),
             )? {
                 CandidateOutcome::Ready(candidate) => {
                     if first_ready.is_none() {
                         first_ready = Some(candidate.clone());
                     }
-                    let compatible = match expected {
+                    let compatible = match expected.as_ref() {
                         Some(expected) => self
                             .signatures
                             .types()
@@ -626,9 +629,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expected: Option<ExpectedType>,
         filter_parameters: bool,
         mut replacements: BTreeMap<GenericParameterId, TypeId>,
+        inherited: Option<&crate::AnalysisRootTicket>,
     ) -> Result<CandidateOutcome, BodyFlow> {
         let expected_parameters = if filter_parameters {
-            match expected {
+            match expected.as_ref() {
                 Some(expected) => match self.signatures.types().kind(expected.ty())? {
                     TypeKind::Callable { parameters, .. } => Some(parameters.to_vec()),
                     _ => None,
@@ -651,7 +655,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .cloned()
             .collect::<BTreeSet<_>>();
         if !parameters.is_empty() {
-            if let Some(expected) = expected {
+            if let Some(expected) = expected.as_ref() {
                 let template = self.signatures.types_mut().callable(
                     callable.parameters().iter().map(CallableParameter::ty),
                     callable.result(),
@@ -674,14 +678,23 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
         }
 
-        let custody = expected.map_or(ExpectationCustody::Caller, ExpectedType::custody);
+        let custody = expected
+            .as_ref()
+            .map_or(ExpectationCustody::Caller, ExpectedType::custody);
+        let work = expected
+            .as_ref()
+            .and_then(ExpectedType::work)
+            .or(inherited)
+            .cloned();
         let mut specialized = Vec::with_capacity(callable.parameters().len());
         for (index, parameter) in callable.parameters().iter().enumerate() {
             let ty = self
                 .signatures
                 .types_mut()
                 .substitute(parameter.ty(), &replacements)?;
-            let ty = match self.normalize_callable_candidate_type(ExpectedType::new(ty, custody))? {
+            let ty = match self.normalize_callable_candidate_type(
+                ExpectedType::new(ty, custody).with_work(work.clone()),
+            )? {
                 Ok(ty) => ty,
                 Err(failure) => return Ok(CandidateOutcome::NormalizationFailed(failure)),
             };
@@ -698,11 +711,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .signatures
             .types_mut()
             .substitute(callable.result(), &replacements)?;
-        let result =
-            match self.normalize_callable_candidate_type(ExpectedType::new(result, custody))? {
-                Ok(ty) => ty,
-                Err(failure) => return Ok(CandidateOutcome::NormalizationFailed(failure)),
-            };
+        let result = match self
+            .normalize_callable_candidate_type(ExpectedType::new(result, custody).with_work(work))?
+        {
+            Ok(ty) => ty,
+            Err(failure) => return Ok(CandidateOutcome::NormalizationFailed(failure)),
+        };
         let ty = self.signatures.types_mut().callable(specialized, result)?;
         Ok(CandidateOutcome::Ready(CallableValueCandidate {
             callable,
@@ -715,8 +729,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         expected: ExpectedType,
     ) -> Result<Result<TypeId, TraitNormalization>, BodyFlow> {
+        self.ensure_analysis_active()?;
+        if let Some(ticket) = expected.work()
+            && let Some(work) = &mut self.analysis_work
+        {
+            work.accounting.claim(ticket)?;
+        }
         #[cfg(test)]
-        expectation::observe_candidate(expected);
+        expectation::observe_candidate(expected.clone());
 
         let owner = self
             .current_owner

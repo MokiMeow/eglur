@@ -122,7 +122,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let request = request.definitive_child(expected);
         Ok(NumericPlan::Expression {
             expression: left,
-            request,
+            request: request.clone(),
             path: NormalContinuation::Present,
             continuation: NumericContinuation::BinaryLeft {
                 frame: BinaryFrame {

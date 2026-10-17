@@ -153,6 +153,23 @@ impl<'hir> AnalysisCallInputRegistry<'hir> {
         Ok(self.holders[index].selection_ticket().clone())
     }
 
+    /// Retrieves an existing selection without authorizing late admission.
+    pub(super) fn existing_selection_ticket(
+        &self,
+        accounting: &mut AnalysisWorkAccounting,
+        site: ExpressionKey,
+    ) -> Result<AnalysisRootTicket, AnalysisCallRegistryFailure> {
+        accounting.validate_input_binding(self.consumer, &self.attempt)?;
+        let occurrence = self.call_occurrence(site)?;
+        let index =
+            self.indices[occurrence].ok_or(AnalysisCallRegistryFailure::UnadmittedCall(site))?;
+        let ticket = self.holders[index].selection_ticket();
+        accounting
+            .claim(ticket)?
+            .precharge(Self::retrieval_work())?;
+        Ok(ticket.clone())
+    }
+
     /// Retrieves one written slot without admitting an implicit selection.
     pub fn argument_ticket(
         &mut self,

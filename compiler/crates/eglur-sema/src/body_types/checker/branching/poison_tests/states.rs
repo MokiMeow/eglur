@@ -68,6 +68,7 @@ fn run(
         })
         .unwrap();
     let context = BodyContext {
+        work: None,
         module,
         source,
         hir,

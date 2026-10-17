@@ -7,6 +7,8 @@ use crate::{
     SignatureAnalysisWork, SignatureExecution, SignatureResolutionInputs,
 };
 
+mod attachment;
+
 const TEXT: &str = "fn id[T](value: T) -> T = value\nfn inspect(x: i32) -> i32 = id(x)";
 const ALLOWANCE: u64 = 1_000_000;
 
@@ -151,6 +153,16 @@ fn snapshot(product: &BodyTypes) -> Vec<String> {
         format!("{:?}", product.bodies),
         format!("{:?}", product.invocations),
         format!("{:?}", product.locals),
+        format!("{:?}", product.members),
+        format!("{:?}", product.callable_values),
+        format!("{:?}", product.reduce_by_commitments),
+        format!("{:?}", product.regions),
+        format!("{:?}", product.checked_numeric),
+        format!("{:?}", product.ownership_operations),
+        format!("{:?}", product.transfers),
+        format!("{:?}", product.callable_instances),
+        format!("{:?}", product.obligations),
+        format!("{:?}", product.method_dispatches),
     ]
 }
 
@@ -463,7 +475,9 @@ fn actual_phase_preserves_a_registry_stop_and_completed_prefix() {
             let result = run(
                 &mut inputs,
                 external,
-                BodyAnalysisWork::new(&mut accounting, &mut sources, &mut bodies, &|_| 0),
+                BodyAnalysisWork::new(&mut accounting, &mut sources, &mut bodies, &|input| {
+                    if input == request { 0 } else { ALLOWANCE }
+                }),
             )
             .unwrap();
             let BodyExecution::Interrupted(stopped) = result else {

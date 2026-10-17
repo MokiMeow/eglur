@@ -15,7 +15,7 @@ mod set;
 pub use registry::{AnalysisCallInputRegistry, AnalysisCallRegistryFailure};
 pub use set::AnalysisBodyInputs;
 
-pub(crate) fn is_original_call(call: &CallExpr) -> bool {
+fn is_original_call(call: &CallExpr) -> bool {
     !call.partial_application
         && matches!(
             call.syntax,
@@ -23,7 +23,10 @@ pub(crate) fn is_original_call(call: &CallExpr) -> bool {
         )
 }
 
-fn original_call(body: &Body, site: ExpressionKey) -> Result<&CallExpr, AnalysisCallInputFailure> {
+pub(crate) fn original_call(
+    body: &Body,
+    site: ExpressionKey,
+) -> Result<&CallExpr, AnalysisCallInputFailure> {
     if site.expression().body() == body.id()
         && (site.expression().local() as usize) < body.expressions().len()
         && let Some(ExprKind::Call(call)) =

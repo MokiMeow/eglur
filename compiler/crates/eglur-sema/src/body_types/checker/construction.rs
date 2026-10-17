@@ -181,11 +181,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             });
         }
         let result_template = self.nominal_template(target.clone(), &generic_parameters)?;
+        let work = request.work.clone();
         let plan = self.prepare_application(
             source,
             ApplicationRequest {
                 origin,
                 custody: request.custody(),
+                selection_work: work.as_ref(),
                 generic_parameters: &generic_parameters,
                 slots: &slots,
                 result_template,
@@ -205,6 +207,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 slots,
                 target,
                 generic_parameters.into_boxed_slice(),
+                work,
             )),
         })
     }
@@ -344,7 +347,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             &target,
             &shape,
             payload,
-            request.ty.custody(),
+            ty.custody(),
         )? {
             Outcome::Known(slots) => slots,
             Outcome::Poisoned(poison) => {
@@ -355,11 +358,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::NotApplicable => return Ok(InvocationPlan::Complete(Outcome::NotApplicable)),
         };
         let deferred_reserved = !qualified && self.is_reserved_constructor(&target);
+        let work = ty.work.clone();
         let plan = self.prepare_application(
             source,
             ApplicationRequest {
                 origin,
-                custody: request.ty.custody(),
+                custody: ty.custody(),
+                selection_work: work.as_ref(),
                 generic_parameters: &generic_parameters,
                 slots: &slots,
                 result_template,
@@ -380,6 +385,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 slots,
                 target,
                 generic_parameters.into_boxed_slice(),
+                work,
             )),
         })
     }

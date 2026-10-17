@@ -127,7 +127,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => return Ok(()),
             };
         let result_ty = result_expected.ty();
-        let previous_return = self.current_return.replace(result_expected);
+        let previous_return = self.current_return.replace(result_expected.clone());
         let region = ControlRegionKey::Callable(declaration);
         self.enter_control_region(region.clone())?;
         let outcome = (|| {
@@ -261,7 +261,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             hir,
             body,
             value.value,
-            TypeRequest::definitive(Some(expected)),
+            TypeRequest::definitive(Some(expected.clone())),
         )?;
         let outcome = match outcome {
             Outcome::Known(actual)

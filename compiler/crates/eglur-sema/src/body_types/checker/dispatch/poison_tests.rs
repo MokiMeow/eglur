@@ -75,6 +75,7 @@ fn dispatch_frames_keep_late_roots_and_caller_specific_refusal_precedence() {
                     })
                     .collect();
                 let context = BodyContext {
+                    work: None,
                     module,
                     source,
                     hir,
@@ -92,7 +93,11 @@ fn dispatch_frames_keep_late_roots_and_caller_specific_refusal_precedence() {
                         expression,
                         origin,
                         call,
-                        ty: TypeRequest::definitive(None),
+                        ty: CallTypingRequest {
+                            expected: TypeRequest::definitive(None),
+                            selection: None,
+                            original: None,
+                        },
                     },
                     DispatchSelection::Overload(candidates),
                     NormalContinuation::Present,

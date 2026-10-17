@@ -167,7 +167,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         ExprKind::Group(inner) => {
                             frame.pending.push(NumericTypeStep::Finish(
                                 current,
-                                request,
+                                request.clone(),
                                 continuation,
                             ));
                             frame.pending.push(NumericTypeStep::Enter(
@@ -183,7 +183,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         } => {
                             frame.pending.push(NumericTypeStep::Finish(
                                 current,
-                                request,
+                                request.clone(),
                                 continuation,
                             ));
                             frame.pending.push(NumericTypeStep::Enter(
@@ -204,12 +204,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                     expression: current,
                                     left: *left,
                                     right: *right,
-                                    request,
+                                    request: request.clone(),
                                     continuation,
                                 });
                                 frame.pending.push(NumericTypeStep::Enter(
                                     *right,
-                                    TypeRequest::probe(request.custody()),
+                                    TypeRequest::probe(request.custody())
+                                        .with_work(request.work.clone()),
                                     continuation,
                                 ));
                                 continue;
@@ -218,7 +219,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 expression: current,
                                 left: *left,
                                 right: *right,
-                                request,
+                                request: request.clone(),
                                 continuation,
                             });
                             frame.pending.push(NumericTypeStep::Enter(
@@ -249,7 +250,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         expression,
                         left,
                         right,
-                        request,
+                        request: request.clone(),
                         continuation,
                     });
                     frame.pending.push(NumericTypeStep::Enter(
@@ -280,9 +281,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         FactState::Known(left) => left.normal_continuation,
                         _ => NormalContinuation::Absent,
                     });
-                    frame
-                        .pending
-                        .push(NumericTypeStep::Finish(expression, request, continuation));
+                    frame.pending.push(NumericTypeStep::Finish(
+                        expression,
+                        request.clone(),
+                        continuation,
+                    ));
                     frame.pending.push(NumericTypeStep::Enter(
                         right,
                         request.definitive_child(expected),

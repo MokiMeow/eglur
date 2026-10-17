@@ -62,6 +62,7 @@ mod traversal;
 mod values;
 mod work;
 
+use work::CallTypingRequest;
 pub use work::{BodyAnalysisInput, BodyAnalysisWork};
 
 use execution::BodyFlow;
@@ -414,10 +415,11 @@ impl BlockStep {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct TypeRequest {
     expected: Option<TypeId>,
     custody: ExpectationCustody,
+    work: Option<crate::AnalysisRootTicket>,
     allow_deferred: bool,
     default_integer: bool,
     value_required: bool,
@@ -429,6 +431,7 @@ struct BodyContext<'input, 'hir> {
     source: &'input SemanticSource<'hir>,
     hir: &'hir HirFile,
     body: &'hir Body,
+    work: Option<&'input crate::AnalysisRootTicket>,
 }
 
 #[derive(Clone, Copy)]
@@ -441,7 +444,7 @@ struct LetBindingRequest {
     initializer: Option<ExprId>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct CheckedBinaryRequest {
     expression: ExprId,
     origin: OriginId,
@@ -458,30 +461,31 @@ struct ReturnStatementRequest {
     value: Option<ExprId>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct IntrinsicCallRequest<'a> {
     expression: ExprId,
     origin: OriginId,
     call: &'a CallExpr,
     target: &'a CanonicalTarget,
     constructor: &'a crate::ConstructorSignature,
-    ty: TypeRequest,
+    ty: CallTypingRequest,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MethodCallRequest<'a> {
     expression: ExprId,
     origin: OriginId,
     call: &'a CallExpr,
     receiver: ExprId,
     member: &'a Name,
-    ty: TypeRequest,
+    ty: CallTypingRequest,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ApplicationRequest<'a> {
     origin: OriginId,
     custody: ExpectationCustody,
+    selection_work: Option<&'a crate::AnalysisRootTicket>,
     generic_parameters: &'a [GenericParameterId],
     slots: &'a [ApplicationSlot],
     result_template: TypeId,
@@ -493,7 +497,7 @@ struct ApplicationRequest<'a> {
     defer_underconstrained: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct StructLiteralRequest<'a> {
     expression: ExprId,
     origin: OriginId,
@@ -502,7 +506,7 @@ struct StructLiteralRequest<'a> {
     ty: TypeRequest,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct VariantConstructorRequest<'a> {
     expression: ExprId,
     origin: OriginId,
@@ -817,14 +821,18 @@ impl ConstructorPayloadForm {
 }
 
 impl TypeRequest {
-    const fn definitive(expected: Option<ExpectedType>) -> Self {
-        let (expected, custody) = match expected {
-            Some(expected) => (Some(expected.ty()), expected.custody()),
-            None => (None, ExpectationCustody::Caller),
+    fn definitive(expected: Option<ExpectedType>) -> Self {
+        let (expected, custody, work) = match expected {
+            Some(expected) => {
+                let (ty, custody, work) = expected.into_parts();
+                (Some(ty), custody, work)
+            }
+            None => (None, ExpectationCustody::Caller, None),
         };
         Self {
             expected,
             custody,
+            work,
             allow_deferred: false,
             default_integer: true,
             value_required: true,
@@ -835,6 +843,7 @@ impl TypeRequest {
         Self {
             expected: None,
             custody: ExpectationCustody::Caller,
+            work: None,
             allow_deferred: false,
             default_integer: true,
             value_required: false,
@@ -845,6 +854,7 @@ impl TypeRequest {
         Self {
             expected: None,
             custody,
+            work: None,
             allow_deferred: true,
             default_integer: false,
             value_required: true,

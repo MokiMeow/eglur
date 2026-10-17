@@ -67,6 +67,7 @@ fn drive(
     assert_eq!(values.len(), outcomes.len());
 
     let context = BodyContext {
+        work: None,
         module,
         source,
         hir,
@@ -79,7 +80,9 @@ fn drive(
         .tuple(vec![integer; outcomes.len()])
         .unwrap();
     let request = TypeRequest::local(Some(expected));
-    let mut plan = checker.prepare_tuple(values.clone(), request).unwrap();
+    let mut plan = checker
+        .prepare_tuple(values.clone(), request.clone())
+        .unwrap();
     let mut paths = Vec::new();
     WORK.set(Work::default());
 

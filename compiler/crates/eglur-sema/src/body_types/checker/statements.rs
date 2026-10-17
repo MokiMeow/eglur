@@ -68,7 +68,7 @@ impl BlockFrame {
         } else {
             NormalContinuation::Absent
         };
-        Some((statement, self.request, path))
+        Some((statement, self.request.clone(), path))
     }
 }
 
@@ -292,6 +292,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             hir,
             body,
+            ..
         } = context;
         let LetBindingRequest {
             origin,
@@ -380,7 +381,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
         Ok(StatementPlan::Expression {
             expression: initializer,
-            request: TypeRequest::definitive(expected),
+            request: TypeRequest::definitive(expected.clone()),
             path: NormalContinuation::Present,
             continuation: StatementContinuation::Let(PreparedLet {
                 origin,
@@ -430,7 +431,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             Outcome::Unperformed | Outcome::NotApplicable => return Ok(Outcome::Unperformed),
         };
-        if let Some(expected) = expected
+        if let Some(expected) = expected.as_ref()
             && !self
                 .signatures
                 .types()
@@ -450,7 +451,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             body,
             pattern,
-            expected.map_or(value.ty, ExpectedType::ty),
+            expected.as_ref().map_or(value.ty, ExpectedType::ty),
             PatternBindingMode::Let(mutability),
         )
         .map(|outcome| outcome.map(|_| normal_continuation))
@@ -577,7 +578,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             origin,
             value,
         } = request;
-        let Some(expected) = self.current_return else {
+        let Some(expected) = self.current_return.clone() else {
             let poison = self.type_error(
                 source,
                 origin,
@@ -615,7 +616,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             (Some(value), false) => Ok(StatementPlan::Expression {
                 expression: value,
-                request: TypeRequest::definitive(Some(expected)),
+                request: TypeRequest::definitive(Some(expected.clone())),
                 path: NormalContinuation::Present,
                 continuation: StatementContinuation::Return {
                     statement,

@@ -64,6 +64,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 source,
                 hir,
                 body,
+                work: None,
             },
             expression,
             request,
@@ -88,8 +89,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         #[cfg(test)]
         work::tests::checkpoint(self, key)?;
         self.ensure_analysis_active()?;
+        let request = self.attach_request_work(source.file(), request)?;
         #[cfg(test)]
-        expectation::observe_request(key, request);
+        expectation::observe_request(key, request.clone());
 
         match self.expressions.state(&key) {
             FactState::Known(expression) => {

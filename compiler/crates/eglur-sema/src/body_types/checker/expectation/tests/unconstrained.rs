@@ -24,7 +24,7 @@ fn requests_for_variable(
     events
         .iter()
         .filter_map(|event| match event {
-            Event::Request { key, request } if keys.contains(key) => Some(*request),
+            Event::Request { key, request } if keys.contains(key) => Some(request.clone()),
             _ => None,
         })
         .collect()

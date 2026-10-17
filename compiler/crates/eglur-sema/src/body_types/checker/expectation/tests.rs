@@ -6,21 +6,40 @@ use crate::body_types::checker::test_support::{with_checker, with_checker_declar
 
 mod unconstrained;
 
-#[derive(Clone, Copy)]
-pub(super) enum Event {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::body_types::checker) enum ResumeKind {
+    Value,
+    Application,
+    Invocation,
+    Statement,
+    Branch,
+    Numeric,
+    NumericTree,
+    Result,
+    Checked,
+    Question,
+}
+
+#[derive(Clone)]
+pub(in crate::body_types::checker) enum Event {
     Request {
         key: ExpressionKey,
         request: TypeRequest,
     },
     Normalize(ExpectedType),
     Candidate(ExpectedType),
+    Resume {
+        owner: Option<DefId>,
+        kind: ResumeKind,
+        work: Option<crate::AnalysisRootTicket>,
+    },
 }
 
 thread_local! {
     static EVENTS: RefCell<Option<Vec<Event>>> = const { RefCell::new(None) };
 }
 
-pub(super) fn observe(event: Event) {
+pub(in crate::body_types::checker) fn observe(event: Event) {
     EVENTS.with_borrow_mut(|events| {
         if let Some(events) = events {
             events.push(event);
@@ -34,6 +53,17 @@ impl Drop for Recording {
     fn drop(&mut self) {
         EVENTS.with_borrow_mut(|events| *events = None);
     }
+}
+
+pub(in crate::body_types::checker) fn capture<T>(run: impl FnOnce() -> T) -> (T, Vec<Event>) {
+    EVENTS.with_borrow_mut(|events| {
+        assert!(events.is_none());
+        *events = Some(Vec::new());
+    });
+    let _recording = Recording;
+    let result = run();
+    let events = EVENTS.with_borrow_mut(|events| events.take().unwrap());
+    (result, events)
 }
 
 fn with_events(text: &str, inspect: impl FnOnce(&mut BodyChecker<'_, '_, '_>, &[Event])) {
@@ -131,7 +161,7 @@ fn normalized(events: &[Event]) -> Vec<ExpectedType> {
     events
         .iter()
         .filter_map(|event| match event {
-            Event::Normalize(expected) => Some(*expected),
+            Event::Normalize(expected) => Some(expected.clone()),
             _ => None,
         })
         .collect()
@@ -315,7 +345,7 @@ fn function_value_candidates_keep_the_whole_fn_expectation() {
             let candidates = events
                 .iter()
                 .filter_map(|event| match event {
-                    Event::Candidate(value) => Some(*value),
+                    Event::Candidate(value) => Some(value.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -348,9 +378,9 @@ fn semantic_type_projection_does_not_merge_distinct_original_inputs() {
             .types_mut()
             .primitive(PrimitiveType::Bool)
             .unwrap();
-        assert_eq!(first.with_type(boolean).custody(), first.custody());
+        assert_eq!(first.clone().with_type(boolean).custody(), first.custody());
         assert_eq!(
-            TypeRequest::definitive(Some(first))
+            TypeRequest::definitive(Some(first.clone()))
                 .retarget(Some(boolean))
                 .expected()
                 .unwrap()
@@ -373,13 +403,7 @@ fn postfix_generated_arguments_borrow_caller_instead_of_inventing_slots() {
                 "fn id(value: i32) -> i32 = value\nfn pair(left: i32, right: i32) -> i32 = left\nfn inspect(x: i32) -> i32 = {expression}"
             ),
             |checker, events| {
-                let (site, call) = &calls(checker)[0];
-                for index in 0..call.arguments.len() {
-                    assert_eq!(
-                        ExpectationCustody::call_argument(*site, call, index),
-                        ExpectationCustody::Caller
-                    );
-                }
+                let (site, _) = &calls(checker)[0];
                 assert!(!normalized(events).iter().any(|value| matches!(value.custody(), ExpectationCustody::CallArgument { call, .. } if call == *site)));
             },
         );
@@ -454,7 +478,7 @@ fn overloaded_function_candidates_do_not_split_the_fn_input() {
             let candidates = events
                 .iter()
                 .filter_map(|event| match event {
-                    Event::Candidate(value) => Some(*value),
+                    Event::Candidate(value) => Some(value.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -514,13 +538,14 @@ fn cached_expression_keeps_incoming_custody_without_partitioning_semantic_facts(
         let plan = checker
             .prepare_expression(
                 BodyContext {
+                    work: None,
                     module,
                     source,
                     hir,
                     body,
                 },
                 expression,
-                TypeRequest::definitive(Some(expected)),
+                TypeRequest::definitive(Some(expected.clone())),
             )
             .unwrap();
         assert!(matches!(
@@ -528,7 +553,7 @@ fn cached_expression_keeps_incoming_custody_without_partitioning_semantic_facts(
             super::super::expression::ExpressionPlan::Complete(Outcome::Known(_))
         ));
         let events = EVENTS.with_borrow_mut(|events| events.take().unwrap());
-        assert!(events.iter().any(|event| matches!(event, Event::Request { key: found, request } if *found == key && request.expected() == Some(expected))));
+        assert!(events.iter().any(|event| matches!(event, Event::Request { key: found, request } if *found == key && request.expected() == Some(expected.clone()))));
         assert!(normalized(&events).is_empty());
         let FactState::Known(after) = checker.expressions.state(&key) else {
             panic!("cached value lost")
@@ -701,7 +726,7 @@ fn actual_candidate_slots_and_normalized_requests_retrieve_original_tickets() {
             for _ in 0..3 {
                 for candidate in &candidates {
                     let Outcome::Known(slots) = checker
-                        .bind_call_slots(source, origin, site, candidate, &call)
+                        .bind_call_slots(source, origin, Some(site), candidate, &call)
                         .unwrap()
                     else {
                         panic!("bound slots expected")

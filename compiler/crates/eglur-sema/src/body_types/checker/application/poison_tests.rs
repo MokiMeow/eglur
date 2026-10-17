@@ -80,6 +80,7 @@ fn checking_frames_preserve_early_abandonment_and_borrowed_foreign_refusal() {
                             .iter()
                             .enumerate()
                             .map(|(i, a)| ApplicationArgument {
+                                work: None,
                                 slot: ApplicationSlot {
                                     name: format!("v{i}").into_boxed_str(),
                                     template: integer,

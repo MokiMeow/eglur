@@ -9,14 +9,14 @@ struct DispatchRequest {
     expression: ExprId,
     origin: OriginId,
     call: CallExpr,
-    ty: TypeRequest,
+    ty: CallTypingRequest,
 }
 
 pub(super) struct QualifiedMemberCallRequest<'a> {
     pub(super) expression: ExprId,
     pub(super) origin: OriginId,
     pub(super) call: &'a CallExpr,
-    pub(super) ty: TypeRequest,
+    pub(super) ty: CallTypingRequest,
     pub(super) member: &'a Name,
     pub(super) owner: CanonicalTarget,
     pub(super) owner_origin: OriginId,
@@ -28,6 +28,15 @@ pub(super) enum DispatchContinuation {
         frame: Box<DispatchArgumentsFrame>,
         argument: ExprId,
     },
+}
+
+impl DispatchContinuation {
+    pub(super) fn analysis_work(&self) -> Option<&crate::AnalysisRootTicket> {
+        match self {
+            Self::Receiver(frame) => frame.request.ty.selection.as_ref(),
+            Self::Argument { frame, .. } => frame.request.ty.selection.as_ref(),
+        }
+    }
 }
 
 pub(super) struct MethodReceiverFrame {
@@ -200,7 +209,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.bind_call_slots(
                     source,
                     request.origin,
-                    ExpressionKey::new(context.module, request.expression),
+                    request.ty.original,
                     &first.callable,
                     request.call,
                 )?
@@ -281,7 +290,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.bind_call_slots(
                     source,
                     request.origin,
-                    ExpressionKey::new(context.module, request.expression),
+                    request.ty.original,
                     first.template.callable(),
                     request.call,
                 )?
@@ -333,7 +342,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
         Ok(InvocationPlan::Expression {
             expression: request.receiver,
-            request: TypeRequest::definitive(None),
+            request: TypeRequest::definitive(None).with_work(request.ty.selection.clone()),
             path: NormalContinuation::Present,
             continuation: InvocationContinuation::Dispatch(DispatchContinuation::Receiver(
                 Box::new(MethodReceiverFrame {
@@ -448,7 +457,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         call: &CallExpr,
-        request: TypeRequest,
+        request: CallTypingRequest,
         targets: &[CanonicalTarget],
     ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
@@ -510,7 +519,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return match self.bind_call_slots(
                 source,
                 origin,
-                ExpressionKey::new(context.module, expression),
+                request.original,
                 &first.callable,
                 call,
             )? {
@@ -546,16 +555,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         mut frame: Box<DispatchArgumentsFrame>,
     ) -> Result<InvocationPlan, BodyFlow> {
         if let Some(argument) = frame.request.call.arguments.get(frame.next) {
-            let custody = ExpectationCustody::call_argument(
-                ExpressionKey::new(context.module, frame.request.expression),
-                &frame.request.call,
-                frame.next,
-            );
+            let custody = ExpectationCustody::call_argument(frame.request.ty.original, frame.next);
             let argument = argument.value;
             frame.next += 1;
             return Ok(InvocationPlan::Expression {
                 expression: argument,
-                request: TypeRequest::definitive(None).with_custody(custody),
+                request: TypeRequest::definitive(None)
+                    .with_custody(custody)
+                    .with_work(
+                        matches!(custody, ExpectationCustody::Caller)
+                            .then(|| frame.request.ty.selection.clone())
+                            .flatten(),
+                    ),
                 path: frame.normal_continuation,
                 continuation: InvocationContinuation::Dispatch(DispatchContinuation::Argument {
                     frame,
@@ -948,7 +959,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let slots = match self.bind_call_slots(
             source,
             request.origin,
-            ExpressionKey::new(context.module, request.expression),
+            request.ty.original,
             &candidate.callable,
             &request.call,
         )? {
@@ -959,10 +970,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin: request.origin,
-                custody: ExpectationCustody::Selection(ExpressionKey::new(
-                    context.module,
-                    request.expression,
-                )),
+                custody: ExpectationCustody::selection(request.ty.original),
+                selection_work: request.ty.selection.as_ref(),
                 generic_parameters: candidate.callable.generic_parameters(),
                 slots: &slots,
                 result_template: candidate.callable.result(),
@@ -970,7 +979,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 explicit_parameters: Some(&candidate.explicit_parameters),
                 preset_replacements: Some(&candidate.preset_replacements),
                 allowed_ownership_parameter: None,
-                ty: request.ty,
+                ty: request.ty.expected,
                 defer_underconstrained: false,
             },
         )?;
@@ -983,6 +992,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 request.call.callee,
                 candidate,
                 member.origin(),
+                request.ty.selection,
             )),
         })
     }

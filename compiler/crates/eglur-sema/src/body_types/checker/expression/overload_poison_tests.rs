@@ -81,6 +81,7 @@ fn overload_target_call_and_value_complete_poison_once_after_all_targets() {
                     let sentinel = root(checker.diagnostics, count);
                     let all = union(&inputs, 0..inputs.len()).merge(&sentinel).unwrap();
                     let context = BodyContext {
+                        work: None,
                         module,
                         source,
                         hir,
@@ -108,7 +109,11 @@ fn overload_target_call_and_value_complete_poison_once_after_all_targets() {
                                 expression,
                                 origin,
                                 &call,
-                                TypeRequest::definitive(None),
+                                CallTypingRequest {
+                                    expected: TypeRequest::definitive(None),
+                                    selection: None,
+                                    original: None,
+                                },
                                 &targets,
                             )
                             .unwrap()

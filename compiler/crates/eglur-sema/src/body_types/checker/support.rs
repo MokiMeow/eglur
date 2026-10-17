@@ -54,10 +54,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     }
 
     pub(super) fn type_occurrence(
-        &self,
+        &mut self,
         source: &SemanticSource<'_>,
         ty: TypeRefId,
     ) -> Result<Outcome<TypeId>, BodyFlow> {
+        if let Some(work) = &mut self.analysis_work {
+            work.written_ticket(TypeOccurrenceId::new(source.file(), ty))?;
+        }
         match self
             .signatures
             .occurrence(TypeOccurrenceId::new(source.file(), ty))

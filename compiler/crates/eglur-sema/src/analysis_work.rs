@@ -10,7 +10,7 @@ pub use accounting::{
     AnalysisRootStopReason, AnalysisRootTicket, AnalysisWorkAccounting, AnalysisWorkFailure,
     AnalysisWorkIncomplete,
 };
-pub(crate) use call_inputs::is_original_call;
+pub(crate) use call_inputs::original_call;
 pub use call_inputs::{
     AnalysisBodyInputs, AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
     AnalysisCallRegistryFailure,

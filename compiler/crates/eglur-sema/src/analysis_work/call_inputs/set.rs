@@ -125,6 +125,15 @@ impl<'hir> AnalysisBodyInputs<'hir> {
             .argument_ticket_with(accounting, site, index, allowance)
     }
 
+    pub(crate) fn existing_selection_ticket(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        site: ExpressionKey,
+    ) -> Result<AnalysisRootTicket, AnalysisCallRegistryFailure> {
+        self.registry(site)?
+            .existing_selection_ticket(accounting, site)
+    }
+
     fn registry(
         &mut self,
         site: ExpressionKey,

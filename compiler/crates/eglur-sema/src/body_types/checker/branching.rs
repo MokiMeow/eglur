@@ -299,7 +299,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Unperformed | Outcome::NotApplicable => frame.unperformed = true,
             Outcome::Deferred => frame.deferred = true,
         }
-        if frame.expression.else_branch.is_none() && request.value_required {
+        if frame.expression.else_branch.is_none() && frame.request.value_required {
             let found = self.type_error(
                 source,
                 origin,

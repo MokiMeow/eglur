@@ -4,6 +4,73 @@ use crate::{
     AnalysisSourceInputFailure, AnalysisSourceInputs, AnalysisWorkAccounting,
 };
 
+#[derive(Clone)]
+pub(super) struct CallTypingRequest {
+    pub(super) expected: TypeRequest,
+    pub(super) selection: Option<AnalysisRootTicket>,
+    pub(super) original: Option<ExpressionKey>,
+}
+
+impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
+    pub(super) fn expectation_work(
+        &mut self,
+        file: FileId,
+        custody: ExpectationCustody,
+        inherited: Option<&AnalysisRootTicket>,
+    ) -> Result<Option<AnalysisRootTicket>, BodyFlow> {
+        let Some(work) = &mut self.analysis_work else {
+            return Ok(None);
+        };
+        if let Some(ticket) = inherited {
+            return Ok(Some(work.inherited_ticket(file, ticket)?));
+        }
+        Ok(match custody {
+            ExpectationCustody::Caller => None,
+            ExpectationCustody::Written(occurrence) => Some(work.written_ticket(occurrence)?),
+            ExpectationCustody::CallArgument { call, index } => {
+                Some(work.argument_ticket(call, index)?)
+            }
+            ExpectationCustody::Selection(call) => Some(
+                work.bodies
+                    .existing_selection_ticket(work.accounting, call)?,
+            ),
+        })
+    }
+
+    pub(super) fn attach_request_work(
+        &mut self,
+        file: FileId,
+        mut request: TypeRequest,
+    ) -> Result<TypeRequest, BodyFlow> {
+        request.work = self.expectation_work(file, request.custody(), request.work.as_ref())?;
+        Ok(request)
+    }
+
+    pub(super) fn prepare_call_work(
+        &mut self,
+        site: ExpressionKey,
+        body: &Body,
+        expected: TypeRequest,
+    ) -> Result<CallTypingRequest, BodyFlow> {
+        let original = crate::analysis_work::original_call(body, site)
+            .ok()
+            .map(|_| site);
+        let selection = if original.is_some() {
+            match &mut self.analysis_work {
+                Some(work) => Some(work.selection_ticket(site)?),
+                None => None,
+            }
+        } else {
+            expected.work.clone()
+        };
+        Ok(CallTypingRequest {
+            expected,
+            selection,
+            original,
+        })
+    }
+}
+
 /// Original source inputs supplied to an explicit allowance policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BodyAnalysisInput {

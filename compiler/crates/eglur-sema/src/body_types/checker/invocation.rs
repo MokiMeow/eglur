@@ -17,6 +17,19 @@ pub(super) enum InvocationPlan {
     },
 }
 
+impl InvocationPlan {
+    pub(super) fn analysis_work(&self) -> Option<&crate::AnalysisRootTicket> {
+        match self {
+            Self::Application { continuation, .. } => continuation.work.as_ref(),
+            Self::Expression {
+                continuation: InvocationContinuation::Dispatch(dispatch),
+                ..
+            } => dispatch.analysis_work(),
+            Self::Expression { .. } | Self::Complete(_) => None,
+        }
+    }
+}
+
 pub(super) enum InvocationContinuation {
     ReduceBy(Box<ReduceByFrame>),
     TensorConstructor(Box<TensorConstructorFrame>),
@@ -28,6 +41,7 @@ pub(super) struct InvocationFrame {
     origin: OriginId,
     slots: Vec<ApplicationSlot>,
     contract: InvocationContract,
+    work: Option<crate::AnalysisRootTicket>,
 }
 
 impl InvocationFrame {
@@ -38,11 +52,13 @@ impl InvocationFrame {
         callee: ExprId,
         candidate: MethodCandidate,
         member_origin: OriginId,
+        work: Option<crate::AnalysisRootTicket>,
     ) -> Self {
         Self {
             expression,
             origin,
             slots,
+            work,
             contract: InvocationContract::Method {
                 candidate: Box::new(candidate),
                 member_origin,
@@ -57,11 +73,13 @@ impl InvocationFrame {
         slots: Vec<ApplicationSlot>,
         target: CanonicalTarget,
         parameters: Box<[GenericParameterId]>,
+        work: Option<crate::AnalysisRootTicket>,
     ) -> Self {
         Self {
             expression,
             origin,
             slots,
+            work,
             contract: InvocationContract::Constructor {
                 target,
                 parameters,
@@ -142,6 +160,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin,
             )));
         }
+
+        let request = self.prepare_call_work(
+            ExpressionKey::new(module, expression),
+            context.body,
+            request,
+        )?;
 
         let (callee_id, callee) = context
             .body
@@ -296,12 +320,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         call: &CallExpr,
-        request: TypeRequest,
+        request: CallTypingRequest,
         callable: CallableSignature,
     ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
-        let call_site = ExpressionKey::new(context.module, expression);
-        let slots = match self.bind_call_slots(source, origin, call_site, &callable, call)? {
+        let slots = match self.bind_call_slots(source, origin, request.original, &callable, call)? {
             Outcome::Known(slots) => slots,
             outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
         };
@@ -310,7 +333,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
-                custody: ExpectationCustody::Selection(call_site),
+                custody: ExpectationCustody::selection(request.original),
+                selection_work: request.selection.as_ref(),
                 generic_parameters: callable.generic_parameters(),
                 slots: &slots,
                 result_template: callable.result(),
@@ -318,7 +342,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 explicit_parameters: None,
                 preset_replacements: None,
                 allowed_ownership_parameter: None,
-                ty: request,
+                ty: request.expected,
                 defer_underconstrained: false,
             },
         )?;
@@ -328,6 +352,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 expression,
                 origin,
                 slots,
+                work: request.selection,
                 contract: InvocationContract::Callable {
                     callable,
                     callee: call.callee,
@@ -346,7 +371,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         call: &CallExpr,
-        request: TypeRequest,
+        request: CallTypingRequest,
         ty: TypeId,
         parameters: &[TypeId],
         result: TypeId,
@@ -422,11 +447,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: index,
-                custody: ExpectationCustody::call_argument(
-                    ExpressionKey::new(context.module, expression),
-                    call,
-                    index,
-                ),
+                custody: ExpectationCustody::call_argument(request.original, index),
                 passing: ArgumentPassing::Value,
             })
             .collect::<Vec<_>>();
@@ -434,10 +455,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
-                custody: ExpectationCustody::Selection(ExpressionKey::new(
-                    context.module,
-                    expression,
-                )),
+                custody: ExpectationCustody::selection(request.original),
+                selection_work: request.selection.as_ref(),
                 generic_parameters: &[],
                 slots: &slots,
                 result_template: result,
@@ -445,7 +464,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 explicit_parameters: None,
                 preset_replacements: None,
                 allowed_ownership_parameter: None,
-                ty: request,
+                ty: request.expected,
                 defer_underconstrained: false,
             },
         )?;
@@ -455,6 +474,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 expression,
                 origin,
                 slots,
+                work: request.selection,
                 contract: InvocationContract::CallableValue {
                     callee: call.callee,
                     ty,
@@ -565,11 +585,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: index,
-                custody: ExpectationCustody::call_argument(
-                    ExpressionKey::new(context.module, expression),
-                    call,
-                    index,
-                ),
+                custody: ExpectationCustody::call_argument(request.original, index),
                 passing: ArgumentPassing::Value,
             })
             .collect::<Vec<_>>();
@@ -585,10 +601,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
-                custody: ExpectationCustody::Selection(ExpressionKey::new(
-                    context.module,
-                    expression,
-                )),
+                custody: ExpectationCustody::selection(request.original),
+                selection_work: request.selection.as_ref(),
                 generic_parameters: constructor.generic_parameters(),
                 slots: &slots,
                 result_template: constructor.result(),
@@ -597,7 +611,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 preset_replacements: None,
                 allowed_ownership_parameter: self
                     .conditional_ownership_parameter(target, constructor.generic_parameters()),
-                ty: request,
+                ty: request.expected,
                 defer_underconstrained: !qualified && self.is_reserved_constructor(target),
             },
         )?;
@@ -612,6 +626,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     target: target.clone(),
                     parameters: constructor.generic_parameters().into(),
                 },
+                work: request.selection,
             }),
         })
     }
@@ -655,11 +670,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: self.parameter_span(&candidate.callable, parameter)?,
                 evaluation_order: argument_index + 1,
-                custody: ExpectationCustody::call_argument(
-                    ExpressionKey::new(context.module, request.expression),
-                    request.call,
-                    argument_index,
-                ),
+                custody: ExpectationCustody::call_argument(request.ty.original, argument_index),
                 passing: ArgumentPassing::Value,
             });
         }
@@ -667,10 +678,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin: request.origin,
-                custody: ExpectationCustody::Selection(ExpressionKey::new(
-                    context.module,
-                    request.expression,
-                )),
+                custody: ExpectationCustody::selection(request.ty.original),
+                selection_work: request.ty.selection.as_ref(),
                 generic_parameters: candidate.callable.generic_parameters(),
                 slots: &slots,
                 result_template: candidate.callable.result(),
@@ -678,7 +687,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 explicit_parameters: Some(&candidate.explicit_parameters),
                 preset_replacements: Some(&candidate.preset_replacements),
                 allowed_ownership_parameter: None,
-                ty: request.ty,
+                ty: request.ty.expected,
                 defer_underconstrained: false,
             },
         )?;
@@ -693,6 +702,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     candidate: Box::new(candidate),
                     member_origin: request.member.origin(),
                 },
+                work: request.ty.selection,
             }),
         })
     }
@@ -708,6 +718,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
 
         let BodyContext { module, source, .. } = context;
+        self.expectation_work(
+            source.file(),
+            ExpectationCustody::Caller,
+            frame.work.as_ref(),
+        )?;
         if let InvocationContract::Method { candidate, .. } = &frame.contract
             && let Some(constraint) = &candidate.owner_constraint
             && !constraint.matches(self.signatures.types_mut(), &application.replacements)?

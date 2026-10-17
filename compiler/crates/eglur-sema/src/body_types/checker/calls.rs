@@ -918,11 +918,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 _ => None,
             })
             .unwrap_or(false);
+        let work = request.work.clone();
         let ApplicationPlan::Complete(outcome) = self.prepare_application(
             source,
             ApplicationRequest {
                 origin,
                 custody: request.custody(),
+                selection_work: work.as_ref(),
                 generic_parameters: constructor.generic_parameters(),
                 slots: &[],
                 result_template: constructor.result(),
@@ -946,6 +948,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Vec::new(),
                 target.clone(),
                 constructor.generic_parameters().into(),
+                work,
             ),
             outcome,
         )
@@ -955,7 +958,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         call_origin: OriginId,
-        call_site: ExpressionKey,
+        original: Option<ExpressionKey>,
         callable: &CallableSignature,
         call: &CallExpr,
     ) -> Result<Outcome<Vec<ApplicationSlot>>, BodyFlow> {
@@ -1071,7 +1074,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: self.parameter_span(callable, parameter)?,
                 evaluation_order: argument_index,
-                custody: ExpectationCustody::call_argument(call_site, call, argument_index),
+                custody: ExpectationCustody::call_argument(original, argument_index),
                 passing: ArgumentPassing::Value,
             });
         }

@@ -27,6 +27,7 @@ pub(super) enum ApplicationContinuation {
 
 struct ApplicationArgument {
     slot: ApplicationSlot,
+    work: Option<crate::AnalysisRootTicket>,
     typed: Option<TypedExpression>,
     // A deferred earlier argument may later diverge; keep exits for source-order pruning.
     transfers: Vec<ControlTransfer>,
@@ -41,6 +42,7 @@ struct ApplicationArguments {
 struct PendingApplication {
     origin: OriginId,
     custody: ExpectationCustody,
+    selection_work: Option<crate::AnalysisRootTicket>,
     parameters: Box<[GenericParameterId]>,
     parameter_set: BTreeSet<GenericParameterId>,
     arguments: ApplicationArguments,
@@ -89,6 +91,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let ApplicationRequest {
             origin,
             custody,
+            selection_work,
             generic_parameters,
             slots,
             result_template,
@@ -136,6 +139,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let application = PendingApplication {
             origin,
             custody,
+            selection_work: selection_work.cloned(),
             parameters: generic_parameters.into(),
             parameter_set,
             arguments: ApplicationArguments {
@@ -144,6 +148,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     .cloned()
                     .map(|slot| ApplicationArgument {
                         slot,
+                        work: None,
                         typed: None,
                         transfers: Vec::new(),
                     })
@@ -181,10 +186,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         mut frame: Box<InferenceFrame>,
     ) -> Result<ApplicationPlan, BodyFlow> {
         loop {
-            let application = &frame.application;
+            let application = &mut frame.application;
             if let Some(&index) = application.arguments.evaluation_order.get(frame.next) {
                 frame.next += 1;
-                let argument = &application.arguments.values[index];
+                let argument = &mut application.arguments.values[index];
+                let inherited = argument.work.as_ref().or_else(|| {
+                    matches!(argument.slot.custody, ExpectationCustody::Caller)
+                        .then_some(application.selection_work.as_ref())
+                        .flatten()
+                });
+                argument.work =
+                    self.expectation_work(source.file(), argument.slot.custody, inherited)?;
                 if frame.pass == InferencePass::Definitive
                     && let Some(value) = &argument.typed
                 {
@@ -198,7 +210,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     &application.replacements,
                 )? {
                     Some(expected) => {
-                        let expected = ExpectedType::new(expected, argument.slot.custody);
+                        let expected = ExpectedType::new(expected, argument.slot.custody)
+                            .with_work(argument.work.clone());
                         match self.normalize_expected_at(source, argument.slot.origin, expected)? {
                             Outcome::Known(expected) => Some(expected),
                             outcome => {
@@ -216,7 +229,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     InferencePass::Definitive => {
                         TypeRequest::definitive(expected).with_custody(argument.slot.custody)
                     }
-                };
+                }
+                .with_work(argument.work.clone());
                 return Ok(ApplicationPlan::Expression {
                     expression: argument.slot.value,
                     request,
@@ -312,7 +326,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     fn prepare_application_checking(
         &mut self,
         source: &SemanticSource<'_>,
-        application: PendingApplication,
+        mut application: PendingApplication,
         conflict: bool,
     ) -> Result<ApplicationPlan, BodyFlow> {
         let complete = application
@@ -344,12 +358,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .collect::<Vec<_>>();
         let substitution = self.signatures.types_mut().intern_substitution(arguments)?;
         let mut specialized_slots = Vec::with_capacity(application.arguments.values.len());
-        for argument in &application.arguments.values {
+        for argument in &mut application.arguments.values {
+            let inherited = argument.work.as_ref().or_else(|| {
+                matches!(argument.slot.custody, ExpectationCustody::Caller)
+                    .then_some(application.selection_work.as_ref())
+                    .flatten()
+            });
+            argument.work =
+                self.expectation_work(source.file(), argument.slot.custody, inherited)?;
             let specialized = self
                 .signatures
                 .types_mut()
                 .substitute(argument.slot.template, &application.replacements)?;
-            let specialized = ExpectedType::new(specialized, argument.slot.custody);
+            let specialized = ExpectedType::new(specialized, argument.slot.custody)
+                .with_work(argument.work.clone());
             match self.normalize_expected_at(source, argument.slot.origin, specialized)? {
                 Outcome::Known(ty) => specialized_slots.push(ty.ty()),
                 outcome => return Ok(ApplicationPlan::Complete(application_refusal(outcome))),
@@ -359,7 +381,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .signatures
             .types_mut()
             .substitute(application.result_template, &application.replacements)?;
-        let result = ExpectedType::new(result, application.custody);
+        let result = ExpectedType::new(result, application.custody)
+            .with_work(application.selection_work.clone());
         let result = match self.normalize_expected_at(source, application.origin, result)? {
             Outcome::Known(ty) => ty.ty(),
             outcome => return Ok(ApplicationPlan::Complete(application_refusal(outcome))),
@@ -407,10 +430,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             } else {
                 return Ok(ApplicationPlan::Expression {
                     expression: argument.slot.value,
-                    request: TypeRequest::definitive(Some(ExpectedType::new(
-                        frame.specialized_slots[index],
-                        argument.slot.custody,
-                    ))),
+                    request: TypeRequest::definitive(Some(
+                        ExpectedType::new(frame.specialized_slots[index], argument.slot.custody)
+                            .with_work(argument.work.clone()),
+                    )),
                     path: frame.normal_continuation,
                     continuation: ApplicationContinuation::Check {
                         frame,
@@ -441,6 +464,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         index: usize,
         outcome: Outcome<TypedExpression>,
     ) -> Result<ControlFlow<Outcome<ResolvedApplication>>, BodyFlow> {
+        self.expectation_work(
+            source.file(),
+            ExpectationCustody::Caller,
+            frame.arguments.values[index].work.as_ref(),
+        )?;
         let slot = &frame.arguments.values[index].slot;
         let expected = frame.specialized_slots[index];
         let outcome = match outcome {
