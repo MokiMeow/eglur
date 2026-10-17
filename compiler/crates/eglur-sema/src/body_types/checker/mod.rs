@@ -60,6 +60,9 @@ mod support;
 mod tensor;
 mod traversal;
 mod values;
+mod work;
+
+pub use work::{BodyAnalysisInput, BodyAnalysisWork};
 
 use execution::BodyFlow;
 use expectation::{ExpectationCustody, ExpectedType};
@@ -105,23 +108,24 @@ pub fn typecheck_bodies(
 
 /// Runs body analysis with explicit attempt custody, without implicit limits.
 ///
-/// This boundary preserves interruptions; operation metering and original-demand
-/// attachment must be supplied by the analysis consumers.
+/// The caller retains source and body inputs across phases and passes. This
+/// boundary preserves interruptions; operation metering and per-request ticket
+/// attachment remain the analysis consumers' responsibility.
 #[allow(
     clippy::too_many_arguments,
     reason = "the phase boundary keeps independently owned semantic products explicit"
 )]
-pub fn typecheck_bodies_with_work(
+pub fn typecheck_bodies_with_work<'hir>(
     collection: &DeclarationCollection,
     imports: &ResolvedImports,
     names: &NameResolution,
     external_names: Option<&ExternalNameEnvironment>,
-    sources: &[SemanticSource<'_>],
+    sources: &[SemanticSource<'hir>],
     support: &dyn CompileSupport,
     declarations: &mut ResolvedDeclarationSemantics,
     trait_environment: &mut TraitEnvironment,
     diagnostics: &mut DiagnosticStore,
-    analysis_work: &mut crate::AnalysisWorkAccounting,
+    analysis_work: BodyAnalysisWork<'_, 'hir>,
 ) -> Result<BodyExecution, BodyTypingError> {
     typecheck_bodies_inner(
         collection,
@@ -141,21 +145,21 @@ pub fn typecheck_bodies_with_work(
     clippy::too_many_arguments,
     reason = "both execution modes share the independently owned phase inputs"
 )]
-fn typecheck_bodies_inner(
+fn typecheck_bodies_inner<'hir>(
     collection: &DeclarationCollection,
     imports: &ResolvedImports,
     names: &NameResolution,
     external_names: Option<&ExternalNameEnvironment>,
-    sources: &[SemanticSource<'_>],
+    sources: &[SemanticSource<'hir>],
     support: &dyn CompileSupport,
     declarations: &mut ResolvedDeclarationSemantics,
     trait_environment: &mut TraitEnvironment,
     diagnostics: &mut DiagnosticStore,
-    analysis_work: Option<&mut crate::AnalysisWorkAccounting>,
+    analysis_work: Option<BodyAnalysisWork<'_, 'hir>>,
 ) -> Result<BodyExecution, BodyTypingError> {
     if let Some(stop) = analysis_work
-        .as_deref()
-        .and_then(crate::AnalysisWorkAccounting::incomplete)
+        .as_ref()
+        .and_then(|work| work.accounting().incomplete())
     {
         return Ok(BodyExecution::Interrupted(Box::new(InterruptedBody {
             stop,
@@ -180,6 +184,14 @@ fn typecheck_bodies_inner(
     for source in sources {
         if source_map.insert(source.file(), source).is_some() {
             return Err(BodyTypingError::DuplicateSource(source.file()));
+        }
+    }
+    if let Some(work) = &analysis_work {
+        for module in collection.modules() {
+            let source = source_map
+                .get(&module.file())
+                .ok_or(BodyTypingError::MissingSource(module.file()))?;
+            work.validate_source(module, source)?;
         }
     }
     let (signatures, inhabitance) = declarations.parts_mut();
@@ -265,7 +277,7 @@ struct BodyChecker<'input, 'hir, 'support> {
     control_path_barriers: Vec<usize>,
     current_return: Option<ExpectedType>,
     current_owner: Option<DefId>,
-    analysis_work: Option<&'input mut crate::AnalysisWorkAccounting>,
+    analysis_work: Option<BodyAnalysisWork<'input, 'hir>>,
     internal_failures: Vec<BodyTypingError>,
 }
 

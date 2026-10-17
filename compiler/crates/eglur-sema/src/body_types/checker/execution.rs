@@ -1,5 +1,8 @@
 use super::*;
-use crate::{AnalysisWorkAccounting, AnalysisWorkFailure};
+use crate::{
+    AnalysisCallInputFailure, AnalysisCallRegistryFailure, AnalysisSourceInputFailure,
+    AnalysisWorkFailure,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum BodyFlow {
@@ -22,6 +25,24 @@ impl From<AnalysisWorkFailure> for BodyFlow {
                 Self::Internal(BodyTypingError::AnalysisRootClaim(error))
             }
             AnalysisWorkFailure::Incomplete(_) => Self::Interrupted,
+        }
+    }
+}
+
+impl From<AnalysisSourceInputFailure> for BodyFlow {
+    fn from(failure: AnalysisSourceInputFailure) -> Self {
+        match failure {
+            AnalysisSourceInputFailure::Work(work) => work.into(),
+            error => Self::Internal(BodyTypingError::SourceInputs(error)),
+        }
+    }
+}
+
+impl From<AnalysisCallRegistryFailure> for BodyFlow {
+    fn from(failure: AnalysisCallRegistryFailure) -> Self {
+        match failure {
+            AnalysisCallRegistryFailure::Input(AnalysisCallInputFailure::Work(work)) => work.into(),
+            error => Self::Internal(BodyTypingError::CallInputs(error)),
         }
     }
 }
@@ -51,8 +72,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn ensure_analysis_active(&self) -> Result<(), BodyFlow> {
         if self
             .analysis_work
-            .as_deref()
-            .is_some_and(|work| work.incomplete().is_some())
+            .as_ref()
+            .is_some_and(|work| work.accounting().incomplete().is_some())
         {
             return Err(BodyFlow::Interrupted);
         }
@@ -70,8 +91,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     ) -> Result<BodyExecution, BodyTypingError> {
         if let Some(stop) = self
             .analysis_work
-            .as_deref()
-            .and_then(AnalysisWorkAccounting::incomplete)
+            .as_ref()
+            .and_then(|work| work.accounting().incomplete())
         {
             if let Err(BodyFlow::Internal(error)) = traversal {
                 self.internal_failures.push(error);

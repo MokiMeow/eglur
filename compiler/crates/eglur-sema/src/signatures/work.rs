@@ -29,13 +29,7 @@ impl<'work, 'hir> SignatureAnalysisWork<'work, 'hir> {
         &mut self,
         occurrence: TypeOccurrenceId,
     ) -> Result<crate::AnalysisRootTicket, AnalysisSourceInputFailure> {
-        let allowance = if self.inputs.admitted_ticket(occurrence)?.is_some() {
-            // Replay never invokes policy or replaces the retained allowance.
-            0
-        } else {
-            (self.allowance)(occurrence)
-        };
         self.inputs
-            .written_ticket(self.accounting, occurrence, allowance)
+            .written_ticket_with(self.accounting, occurrence, || (self.allowance)(occurrence))
     }
 }

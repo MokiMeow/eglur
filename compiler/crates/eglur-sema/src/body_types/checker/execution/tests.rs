@@ -1,7 +1,10 @@
 use std::cell::RefCell;
 
 use super::*;
-use crate::{AnalysisRootStopReason, AnalysisRootTicket, AnalysisWork, AnalysisWorkPricing};
+use crate::{
+    AnalysisRootStopReason, AnalysisRootTicket, AnalysisWork, AnalysisWorkAccounting,
+    AnalysisWorkPricing,
+};
 
 #[derive(Clone, Copy)]
 enum InjectedFailure {
@@ -76,8 +79,9 @@ pub(in crate::body_types::checker) fn checkpoint(
                 };
                 let charged = checker
                     .analysis_work
-                    .as_deref_mut()
+                    .as_mut()
                     .unwrap()
+                    .accounting
                     .claim(&probe.ticket)
                     .and_then(|mut scope| scope.precharge(work))
                     .map_err(BodyFlow::from);
@@ -309,23 +313,29 @@ fn accounting_entry_and_unmetered_entry_have_identical_completed_products() {
         let mut snapshot = None;
         super::super::test_support::with_phase_inputs(text, &external, None, |inputs| {
             let phase = match work {
-                Some(work) => match typecheck_bodies_with_work(
-                    inputs.collection,
-                    inputs.imports,
-                    inputs.names,
-                    Some(&external),
-                    inputs.sources,
-                    &AllSupported,
-                    inputs.declarations,
-                    inputs.trait_environment,
-                    inputs.diagnostics,
-                    work,
-                )
-                .unwrap()
-                {
-                    BodyExecution::Completed(phase) => *phase,
-                    BodyExecution::Interrupted(_) => panic!("no stop was requested"),
-                },
+                Some(work) => {
+                    let (mut source_inputs, mut body_inputs) =
+                        super::super::test_support::analysis_inputs(work, &inputs);
+                    match typecheck_bodies_with_work(
+                        inputs.collection,
+                        inputs.imports,
+                        inputs.names,
+                        Some(&external),
+                        inputs.sources,
+                        &AllSupported,
+                        inputs.declarations,
+                        inputs.trait_environment,
+                        inputs.diagnostics,
+                        BodyAnalysisWork::new(work, &mut source_inputs, &mut body_inputs, &|_| {
+                            100_000
+                        }),
+                    )
+                    .unwrap()
+                    {
+                        BodyExecution::Completed(phase) => *phase,
+                        BodyExecution::Interrupted(_) => panic!("no stop was requested"),
+                    }
+                }
                 None => typecheck_bodies(
                     inputs.collection,
                     inputs.imports,
@@ -369,21 +379,23 @@ fn accounting_entry_and_unmetered_entry_have_identical_completed_products() {
 fn accounting_entry_refuses_a_preexisting_stop_before_new_capability_or_source_work() {
     let external = ExternalNameEnvironment::new([], [], []).unwrap();
     let (mut work, ticket) = accounting();
-    work.claim(&ticket)
-        .unwrap()
-        .precharge(AnalysisWork {
-            steps: u64::MAX,
-            inspected_bytes: 0,
-            transferred_bytes: 0,
-            reserved_bytes: 0,
-        })
-        .unwrap_err();
-    let original = work.incomplete().unwrap();
     super::super::test_support::with_phase_inputs(
         "fn inspect(x: i32) -> i32 = x",
         &external,
         None,
         |inputs| {
+            let (mut source_inputs, mut body_inputs) =
+                super::super::test_support::analysis_inputs(&work, &inputs);
+            work.claim(&ticket)
+                .unwrap()
+                .precharge(AnalysisWork {
+                    steps: u64::MAX,
+                    inspected_bytes: 0,
+                    transferred_bytes: 0,
+                    reserved_bytes: 0,
+                })
+                .unwrap_err();
+            let original = work.incomplete().unwrap();
             let stopped = interrupted(
                 typecheck_bodies_with_work(
                     inputs.collection,
@@ -395,7 +407,9 @@ fn accounting_entry_refuses_a_preexisting_stop_before_new_capability_or_source_w
                     inputs.declarations,
                     inputs.trait_environment,
                     inputs.diagnostics,
-                    &mut work,
+                    BodyAnalysisWork::new(&mut work, &mut source_inputs, &mut body_inputs, &|_| {
+                        100_000
+                    }),
                 )
                 .unwrap(),
             );
@@ -417,6 +431,8 @@ fn public_accounting_entry_propagates_a_deep_source_stop_and_retains_its_prefix(
         &external,
         None,
         |inputs| {
+            let (mut source_inputs, mut body_inputs) =
+                super::super::test_support::analysis_inputs(&work, &inputs);
             let stopped = interrupted(
                 typecheck_bodies_with_work(
                     inputs.collection,
@@ -428,7 +444,9 @@ fn public_accounting_entry_propagates_a_deep_source_stop_and_retains_its_prefix(
                     inputs.declarations,
                     inputs.trait_environment,
                     inputs.diagnostics,
-                    &mut work,
+                    BodyAnalysisWork::new(&mut work, &mut source_inputs, &mut body_inputs, &|_| {
+                        100_000
+                    }),
                 )
                 .unwrap(),
             );
@@ -511,20 +529,22 @@ fn checked_and_numeric_preparation_contexts_unwind_on_stop() {
 fn sticky_stop_wins_over_a_swallowed_marker_or_internal_flow() {
     for traversal in [Ok(()), Err(BodyTypingError::InvalidIntegerConstant.into())] {
         let (mut work, ticket) = accounting();
-        work.claim(&ticket)
-            .unwrap()
-            .precharge(AnalysisWork {
-                steps: u64::MAX,
-                inspected_bytes: 0,
-                transferred_bytes: 0,
-                reserved_bytes: 0,
-            })
-            .unwrap_err();
-        let original = work.incomplete().unwrap();
         with_execution(
             "fn inspect(x: i32) -> i32 = x",
             Some(&mut work),
-            |checker| {
+            |mut checker| {
+                let accounting = &mut *checker.analysis_work.as_mut().unwrap().accounting;
+                accounting
+                    .claim(&ticket)
+                    .unwrap()
+                    .precharge(AnalysisWork {
+                        steps: u64::MAX,
+                        inspected_bytes: 0,
+                        transferred_bytes: 0,
+                        reserved_bytes: 0,
+                    })
+                    .unwrap_err();
+                let original = accounting.incomplete().unwrap();
                 let has_internal = traversal.is_err();
                 let stopped = interrupted(checker.complete_execution(traversal).unwrap());
                 assert_eq!(stopped.stop(), original);

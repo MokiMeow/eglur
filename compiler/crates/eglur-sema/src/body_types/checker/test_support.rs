@@ -68,6 +68,19 @@ pub(super) fn with_checker_owned(
     inspect: impl FnOnce(BodyChecker<'_, '_, '_>),
 ) {
     with_phase_inputs(text, external, trusted, |inputs| {
+        let mut source_inputs;
+        let mut body_inputs;
+        let analysis_work = if let Some(accounting) = analysis_work {
+            (source_inputs, body_inputs) = analysis_inputs(accounting, &inputs);
+            Some(BodyAnalysisWork::new(
+                accounting,
+                &mut source_inputs,
+                &mut body_inputs,
+                &|_| 100_000,
+            ))
+        } else {
+            None
+        };
         let (signatures, inhabitance) = inputs.declarations.parts_mut();
         let checker = BodyChecker {
             collection: inputs.collection,
@@ -125,6 +138,34 @@ pub(super) struct BodyPhaseInputs<'input, 'hir> {
     pub declarations: &'input mut ResolvedDeclarationSemantics,
     pub trait_environment: &'input mut TraitEnvironment,
     pub diagnostics: &'input mut DiagnosticStore,
+}
+
+pub(super) fn analysis_inputs<'hir>(
+    accounting: &crate::AnalysisWorkAccounting,
+    inputs: &BodyPhaseInputs<'_, 'hir>,
+) -> (
+    crate::AnalysisSourceInputs<'hir>,
+    crate::AnalysisBodyInputs<'hir>,
+) {
+    let source_inputs = crate::AnalysisSourceInputs::new(
+        accounting,
+        inputs.sources.iter().map(|source| (0, source)),
+    )
+    .unwrap();
+    let sources = inputs
+        .sources
+        .iter()
+        .map(|source| (source.file(), source))
+        .collect::<BTreeMap<_, _>>();
+    let body_inputs = crate::AnalysisBodyInputs::new(
+        accounting,
+        inputs
+            .collection
+            .modules()
+            .map(|module| (0, module, sources[&module.file()])),
+    )
+    .unwrap();
+    (source_inputs, body_inputs)
 }
 
 pub(super) fn with_phase_inputs(

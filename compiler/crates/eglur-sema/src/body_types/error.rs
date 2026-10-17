@@ -18,6 +18,8 @@ pub enum BodyTypingError {
     MissingAnalysisStop,
     UnexpectedUnmeteredInterruption,
     AnalysisRootClaim(crate::AnalysisRootClaimError),
+    SourceInputs(crate::AnalysisSourceInputFailure),
+    CallInputs(crate::AnalysisCallRegistryFailure),
     DuplicateSource(FileId),
     MissingSource(FileId),
     MissingHir(FileId),
@@ -121,6 +123,8 @@ impl fmt::Display for BodyTypingError {
             Self::AnalysisRootClaim(error) => {
                 write!(formatter, "invalid body analysis root claim: {error:?}")
             }
+            Self::SourceInputs(error) => error.fmt(formatter),
+            Self::CallInputs(error) => error.fmt(formatter),
             Self::DuplicateSource(file) => write!(formatter, "duplicate semantic source {file:?}"),
             Self::MissingSource(file) => write!(formatter, "missing semantic source {file:?}"),
             Self::MissingHir(file) => write!(formatter, "semantic source {file:?} has no HIR"),
@@ -323,6 +327,8 @@ impl std::error::Error for BodyTypingError {
             Self::TraitEnvironment(error) => Some(error),
             Self::Inhabitance(error) => Some(error),
             Self::DiagnosticStore(error) => Some(error),
+            Self::SourceInputs(error) => Some(error),
+            Self::CallInputs(error) => Some(error),
             Self::MissingAnalysisStop
             | Self::UnexpectedUnmeteredInterruption
             | Self::AnalysisRootClaim(_)

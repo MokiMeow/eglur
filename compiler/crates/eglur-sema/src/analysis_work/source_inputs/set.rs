@@ -43,6 +43,25 @@ impl<'hir> AnalysisSourceInputs<'hir> {
             .written_ticket(accounting, occurrence, allowance_ticks)
     }
 
+    pub(crate) fn written_ticket_with(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        occurrence: TypeOccurrenceId,
+        allowance: impl FnOnce() -> u64,
+    ) -> Result<AnalysisRootTicket, AnalysisSourceInputFailure> {
+        let registry = self
+            .files
+            .get_mut(&occurrence.file())
+            .ok_or(AnalysisSourceInputFailure::MissingFile(occurrence.file()))?;
+        accounting.validate_input_binding(registry.consumer, &registry.attempt)?;
+        let allowance_ticks = if registry.admitted_ticket(occurrence)?.is_some() {
+            0
+        } else {
+            allowance()
+        };
+        registry.written_ticket(accounting, occurrence, allowance_ticks)
+    }
+
     pub fn inherited_ticket(
         &self,
         accounting: &mut AnalysisWorkAccounting,

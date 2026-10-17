@@ -2,17 +2,25 @@ use std::alloc::{Layout, LayoutError};
 use std::fmt;
 use std::sync::Arc;
 
+use eglur_hir::BodyId;
+use eglur_source::FileId;
+
 use crate::ModuleId;
 use crate::record_reservation::RecordReservation;
 
 use super::*;
 
 /// Invalid registry input, unrepresentable setup or interrupted analysis work.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AnalysisCallRegistryFailure {
     Layout(LayoutError),
     Input(AnalysisCallInputFailure),
     UnadmittedCall(ExpressionKey),
+    DuplicateModule(ModuleId),
+    MissingModule(ModuleId),
+    MissingHir(FileId),
+    SourceMismatch { module: ModuleId, file: FileId },
+    MissingBody { module: ModuleId, body: BodyId },
 }
 
 impl From<AnalysisCallInputFailure> for AnalysisCallRegistryFailure {
@@ -34,6 +42,20 @@ impl fmt::Display for AnalysisCallRegistryFailure {
             Self::Input(error) => error.fmt(formatter),
             Self::UnadmittedCall(site) => {
                 write!(formatter, "call input was not admitted: {site:?}")
+            }
+            Self::DuplicateModule(module) => {
+                write!(formatter, "duplicate call input module: {module:?}")
+            }
+            Self::MissingModule(module) => {
+                write!(formatter, "missing call input module: {module:?}")
+            }
+            Self::MissingHir(file) => write!(formatter, "call input source has no HIR: {file:?}"),
+            Self::SourceMismatch { module, file } => write!(
+                formatter,
+                "call input source mismatch: {module:?}, {file:?}"
+            ),
+            Self::MissingBody { module, body } => {
+                write!(formatter, "missing call input body: {module:?}, {body:?}")
             }
         }
     }
@@ -85,6 +107,15 @@ impl<'hir> AnalysisCallInputRegistry<'hir> {
         site: ExpressionKey,
         allowance_ticks: u64,
     ) -> Result<AnalysisRootTicket, AnalysisCallRegistryFailure> {
+        self.selection_ticket_with(accounting, site, || allowance_ticks)
+    }
+
+    pub(super) fn selection_ticket_with(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        site: ExpressionKey,
+        allowance: impl FnOnce() -> u64,
+    ) -> Result<AnalysisRootTicket, AnalysisCallRegistryFailure> {
         accounting.validate_input_binding(self.consumer, &self.attempt)?;
         let occurrence = self.call_occurrence(site)?;
 
@@ -108,7 +139,7 @@ impl<'hir> AnalysisCallInputRegistry<'hir> {
             self.consumer,
             site,
             self.body,
-            allowance_ticks,
+            allowance(),
             None,
             work,
         )?;
@@ -130,10 +161,27 @@ impl<'hir> AnalysisCallInputRegistry<'hir> {
         written_index: usize,
         allowance_ticks: u64,
     ) -> Result<AnalysisRootTicket, AnalysisCallRegistryFailure> {
+        self.argument_ticket_with(accounting, site, written_index, || allowance_ticks)
+    }
+
+    pub(super) fn argument_ticket_with(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        site: ExpressionKey,
+        written_index: usize,
+        allowance: impl FnOnce() -> u64,
+    ) -> Result<AnalysisRootTicket, AnalysisCallRegistryFailure> {
         accounting.validate_input_binding(self.consumer, &self.attempt)?;
         let occurrence = self.call_occurrence(site)?;
         let index =
             self.indices[occurrence].ok_or(AnalysisCallRegistryFailure::UnadmittedCall(site))?;
+        let argument = self.holders[index].arguments.get(written_index).ok_or(
+            AnalysisCallInputFailure::UnknownArgument {
+                call: site,
+                index: written_index,
+            },
+        )?;
+        let allowance_ticks = if argument.is_some() { 0 } else { allowance() };
         let ticket = self.holders[index].argument_ticket_with_work(
             accounting,
             written_index,

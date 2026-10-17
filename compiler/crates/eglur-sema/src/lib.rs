@@ -34,7 +34,7 @@ mod type_rendering;
 mod types;
 
 pub use analysis_work::{
-    AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
+    AnalysisBodyInputs, AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
     AnalysisCallRegistryFailure, AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity,
     AnalysisRootScope, AnalysisRootStopReason, AnalysisRootTicket, AnalysisSourceInputFailure,
     AnalysisSourceInputRegistry, AnalysisSourceInputs, AnalysisWork, AnalysisWorkAccounting,

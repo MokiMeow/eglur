@@ -12,7 +12,7 @@ pub use accounting::{
 };
 pub(crate) use call_inputs::is_original_call;
 pub use call_inputs::{
-    AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
+    AnalysisBodyInputs, AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
     AnalysisCallRegistryFailure,
 };
 pub use source_inputs::{

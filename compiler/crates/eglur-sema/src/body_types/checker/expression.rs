@@ -85,6 +85,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let key = ExpressionKey::new(module, expression_id);
         #[cfg(test)]
         execution::tests::checkpoint(self, key)?;
+        #[cfg(test)]
+        work::tests::checkpoint(self, key)?;
         self.ensure_analysis_active()?;
         #[cfg(test)]
         expectation::observe_request(key, request);
