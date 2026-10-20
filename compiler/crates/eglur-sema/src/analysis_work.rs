@@ -3,6 +3,7 @@ use std::num::NonZeroU64;
 
 mod accounting;
 mod call_inputs;
+mod proof_inputs;
 mod source_inputs;
 
 #[cfg(test)]
@@ -18,6 +19,7 @@ pub use call_inputs::{
     AnalysisBodyInputs, AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
     AnalysisCallRegistryFailure,
 };
+pub use proof_inputs::{AnalysisBoundInputs, AnalysisDispatchInputs, AnalysisProofInputFailure};
 pub use source_inputs::{
     AnalysisSourceInputFailure, AnalysisSourceInputRegistry, AnalysisSourceInputs,
 };
