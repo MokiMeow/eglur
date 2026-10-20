@@ -89,6 +89,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         mut self,
         traversal: Result<(), BodyFlow>,
     ) -> Result<BodyExecution, BodyTypingError> {
+        #[cfg(test)]
+        tests::sweep_support::terminal(&self);
         if let Some(stop) = self
             .analysis_work
             .as_ref()

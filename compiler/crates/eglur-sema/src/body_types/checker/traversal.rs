@@ -118,6 +118,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
 
         // Unwind lexical scopes without publishing or resuming failed work.
+        #[cfg(test)]
+        execution::tests::sweep_support::before_unwind(self);
         while let Some(ScopedStep { step, .. }) = pending.pop() {
             if let Step::Cleanup(cleanup) = step
                 && let Err(cleanup_error) = self.finish_typing_scope(cleanup)

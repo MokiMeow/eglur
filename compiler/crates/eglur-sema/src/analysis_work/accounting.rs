@@ -147,6 +147,24 @@ pub struct AnalysisWorkAccounting {
     attempt: Arc<()>,
     consumers: Vec<ConsumerRoots>,
     incomplete: Option<AnalysisWorkIncomplete>,
+    #[cfg(test)]
+    observer: Option<fn(ChargeEvent)>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ChargeKind {
+    Admission,
+    Work,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ChargeEvent {
+    pub root: AnalysisRootIdentity,
+    pub kind: ChargeKind,
+    pub work: AnalysisWork,
+    pub ticks: u64,
 }
 
 impl AnalysisWorkAccounting {
@@ -161,6 +179,8 @@ impl AnalysisWorkAccounting {
             attempt: Arc::new(()),
             consumers,
             incomplete: None,
+            #[cfg(test)]
+            observer: None,
         })
     }
 
@@ -201,7 +221,7 @@ impl AnalysisWorkAccounting {
         self.ensure_active()?;
 
         let reservation = RecordReservation::try_for_append(&roots.roots);
-        let price = additional_work
+        let planned = additional_work
             .and_then(|work| {
                 reservation
                     .as_ref()
@@ -210,8 +230,17 @@ impl AnalysisWorkAccounting {
                         AnalysisWorkCategory::ReservedBytes,
                     ))
             })
-            .and_then(|additional| Self::admission_work()?.checked_add(additional))
-            .and_then(|work| self.pricing.price(work));
+            .and_then(|additional| Self::admission_work()?.checked_add(additional));
+        let price = planned.and_then(|work| self.pricing.price(work));
+        #[cfg(test)]
+        if let (Some(observer), Ok(work), Ok(cost)) = (self.observer, planned, price) {
+            observer(ChargeEvent {
+                root,
+                kind: ChargeKind::Admission,
+                work,
+                ticks: cost.ticks(),
+            });
+        }
         let remaining_ticks = match price {
             Ok(cost) if cost.ticks() <= allowance_ticks => allowance_ticks - cost.ticks(),
             Ok(cost) => {
@@ -333,6 +362,15 @@ impl AnalysisWorkAccounting {
                 return Err(self.stop(root, AnalysisRootStopReason::Unrepresentable(overflow)));
             }
         };
+        #[cfg(test)]
+        if let Some(observer) = self.observer {
+            observer(ChargeEvent {
+                root,
+                kind: ChargeKind::Work,
+                work,
+                ticks: cost,
+            });
+        }
         let remaining_ticks = self.consumers[root.consumer].roots[root.requirement].remaining_ticks;
         if cost > remaining_ticks {
             return Err(self.stop(
@@ -346,6 +384,11 @@ impl AnalysisWorkAccounting {
 
         self.consumers[root.consumer].roots[root.requirement].remaining_ticks -= cost;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observe_charges(&mut self, observer: fn(ChargeEvent)) {
+        self.observer = Some(observer);
     }
 
     fn stop(

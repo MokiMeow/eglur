@@ -6,6 +6,10 @@ use crate::{
     AnalysisWorkPricing,
 };
 
+mod facts;
+mod sweep;
+pub(in crate::body_types::checker) mod sweep_support;
+
 #[derive(Clone, Copy)]
 enum InjectedFailure {
     Exhaustion,
@@ -45,6 +49,7 @@ pub(in crate::body_types::checker) fn checkpoint(
     checker: &mut BodyChecker<'_, '_, '_>,
     key: ExpressionKey,
 ) -> Result<(), BodyFlow> {
+    sweep_support::expression(key);
     PROBE.with_borrow_mut(|probe| {
         let Some(probe) = probe else {
             return Ok(());

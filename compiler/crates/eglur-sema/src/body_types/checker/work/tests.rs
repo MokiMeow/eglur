@@ -1,6 +1,8 @@
 use std::cell::{Cell, RefCell};
 
-use super::super::test_support::{BodyPhaseInputs, analysis_inputs, with_phase_inputs};
+use super::super::test_support::{
+    BodyPhaseInputs, analysis_inputs, fingerprints, with_phase_inputs,
+};
 use super::*;
 use crate::{
     AnalysisCallInputFailure, AnalysisRootClaimError, AnalysisWorkFailure, AnalysisWorkPricing,

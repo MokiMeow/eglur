@@ -40,6 +40,7 @@ thread_local! {
 }
 
 pub(in crate::body_types::checker) fn observe(event: Event) {
+    super::super::execution::tests::sweep_support::typing(&event);
     EVENTS.with_borrow_mut(|events| {
         if let Some(events) = events {
             events.push(event);

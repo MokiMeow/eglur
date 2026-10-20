@@ -5,6 +5,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         mut self,
         _: execution::CompletedBodyTraversal,
     ) -> PhaseAnalysis<BodyTypes> {
+        #[cfg(test)]
+        execution::tests::sweep_support::finished();
         self.transfers.sort();
         self.transfers.dedup();
         debug_assert!(self.region_stack.is_empty());
@@ -95,6 +97,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Ok(())
         })();
         self.current_owner = previous_owner;
+        #[cfg(test)]
+        if let Some(fact) = self.bodies.recorded_state(&declaration) {
+            execution::tests::sweep_support::published_body(declaration, fact);
+        }
         result
     }
 

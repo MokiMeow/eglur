@@ -169,54 +169,6 @@ fn exercise_with_inputs(
     observed.unwrap()
 }
 
-fn fingerprints(
-    inputs: &mut BodyPhaseInputs<'_, '_>,
-    bodies: &BodyTypes,
-) -> crate::SemanticFingerprints {
-    let evidence = crate::resolve_trait_evidence(
-        inputs.collection,
-        inputs.sources,
-        &Support,
-        inputs.declarations.signatures_mut(),
-        inputs.trait_environment,
-        bodies,
-        inputs.diagnostics,
-    )
-    .unwrap()
-    .into_parts()
-    .0;
-    let PhaseProduct::Performed(evidence) = evidence else {
-        panic!("incomplete evidence")
-    };
-    let effects = crate::analyze_effects(
-        inputs.collection,
-        inputs.names,
-        inputs.sources,
-        &Support,
-        inputs.declarations.signatures(),
-        bodies,
-        &evidence,
-        None,
-        inputs.diagnostics,
-    )
-    .unwrap()
-    .into_parts()
-    .0;
-    crate::SemanticFingerprints::compute(
-        inputs.collection,
-        inputs.imports,
-        inputs.names,
-        inputs.declarations.signatures(),
-        inputs.sources,
-        bodies,
-        inputs.trait_environment,
-        &PhaseProduct::Performed(evidence),
-        &effects,
-    )
-    .unwrap()
-    .expect("complete bodies must retain fingerprints")
-}
-
 #[test]
 fn direct_named_and_overload_replay_keep_written_argument_tickets() {
     for declaration in [

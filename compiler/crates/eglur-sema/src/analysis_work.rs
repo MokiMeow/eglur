@@ -5,6 +5,9 @@ mod accounting;
 mod call_inputs;
 mod source_inputs;
 
+#[cfg(test)]
+pub(crate) use accounting::{ChargeEvent, ChargeKind};
+
 pub use accounting::{
     AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity, AnalysisRootScope,
     AnalysisRootStopReason, AnalysisRootTicket, AnalysisWorkAccounting, AnalysisWorkFailure,
