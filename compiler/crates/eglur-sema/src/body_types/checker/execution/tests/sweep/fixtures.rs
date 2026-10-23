@@ -44,6 +44,8 @@ pub(super) fn sources() -> Vec<(&'static str, String, bool)> {
         ("probe", format!("{id}\nfn inspect(x: i32) -> Unit {{\nlet out = id(x)\n}}"), true),
         ("function-value", format!("{id}\nfn inspect(x: i32) -> i32 {{\nlet f: Fn(i32) -> i32 = id\nyield f(x)\n}}"), true),
         ("branches", "fn inspect(flag: Bool, x: i32, y: i32) -> i32 {\nlet v: i32 = if flag { yield x } else { yield y }\nyield match v { _ if flag => x, _ => y }\n}".into(), true),
+        ("pattern-bindings", format!("{id}\nfn inspect(input: ((i32, i32), (i32, i32))) -> i32 = match input {{ ((first, second), (third, fourth)) if true => id(first), ((a, b), (c, d)) => id(d) }}"), true),
+        ("pattern-prefix-failure", format!("{id}\nfn inspect(input: ((i32, i32), i32)) -> i32 = match input {{ ((first, second), (bad, _)) => id(first), _ => 0 }}"), false),
         ("result", "fn inspect(x: Opt[i32]) -> Opt[i32] = result {\nlet y = x?\nyield x\n}".into(), true),
         ("member-reference", format!("struct Pair {{ field value: i32 }}\n{id}\nfn inspect(x: i32) -> i32 {{\nlet p = Pair {{ value: x }}\nyield id(* &p.value)\n}}"), true),
         ("ordinary-reduce-by", "struct Counter { fn reduce_by(self: &Self, pair: (i32, i32)) -> i32 = pair.0 }\nfn inspect(c: &Counter, x: i32) -> i32 = c.reduce_by((x, x))".into(), true),

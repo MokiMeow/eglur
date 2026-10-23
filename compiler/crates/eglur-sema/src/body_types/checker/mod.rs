@@ -74,6 +74,9 @@ mod test_support;
 #[cfg(test)]
 mod unit_outcome_tests;
 
+#[cfg(test)]
+mod pattern_check_tests;
+
 /// Checks source bodies once against canonical declaration signatures.
 #[allow(
     clippy::too_many_arguments,
@@ -583,12 +586,30 @@ impl PatternCheck {
         self
     }
 
-    fn merge(&mut self, other: Self) {
+    fn merge(&mut self, mut other: Self) {
+        #[cfg(test)]
+        pattern_check_tests::observe_merge();
+
         self.irrefutable &= other.irrefutable;
         self.coverage.total = self.irrefutable;
         self.coverage.variants.clear();
-        for (binding, ty) in other.bindings {
-            self.bindings.entry(binding).or_insert(ty);
+
+        if self.bindings.len() < other.bindings.len() {
+            std::mem::swap(&mut self.bindings, &mut other.bindings);
+            for (binding, ty) in other.bindings {
+                #[cfg(test)]
+                pattern_check_tests::observe_entry();
+
+                // The original accumulator still wins collisions after the swap.
+                self.bindings.insert(binding, ty);
+            }
+        } else {
+            for (binding, ty) in other.bindings {
+                #[cfg(test)]
+                pattern_check_tests::observe_entry();
+
+                self.bindings.entry(binding).or_insert(ty);
+            }
         }
     }
 
