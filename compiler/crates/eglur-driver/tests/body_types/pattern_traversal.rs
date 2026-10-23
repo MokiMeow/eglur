@@ -168,6 +168,36 @@ fn deep_variant_and_tuple_rest_patterns_skip_unbound_payloads() {
 }
 
 #[test]
+fn intrinsic_constructor_rest_patterns_keep_nested_payload_types() {
+    for width in [8, 32, 128] {
+        let tuple = (0..width)
+            .map(|index| if index % 2 == 0 { "i64" } else { "Bool" })
+            .collect::<Vec<_>>()
+            .join(", ");
+        for (pattern, value) in [("Some(..)", "0"), ("Some((first, second, ..))", "first")] {
+            let source = format!(
+                "fn f(input: Opt[({tuple})]) -> i64 = match input {{ {pattern} => {value}, None => 0 }}"
+            );
+            check_pattern(&source, &[], |resolution, trace| {
+                assert!(!trace.has_missing());
+                if value == "first" {
+                    assert_i64_binding(resolution, "first");
+                    let FactState::Known(fact) = local(resolution, "second") else {
+                        panic!("nested intrinsic payload lost its Bool binding")
+                    };
+                    assert_eq!(
+                        resolution.signatures().types().kind(fact.ty()).unwrap(),
+                        &TypeKind::Primitive(PrimitiveType::Bool)
+                    );
+                } else {
+                    assert_eq!(resolution.names().locals().len(), 1);
+                }
+            });
+        }
+    }
+}
+
+#[test]
 fn deep_pattern_type_failure_keeps_one_diagnostic_and_poisoned_bindings() {
     let source = option_match(240, "i64", "(value, _)", "value");
     check_pattern(&source, &["PATTERN_TYPE_MISMATCH"], |resolution, trace| {

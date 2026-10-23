@@ -46,6 +46,7 @@ pub(super) fn sources() -> Vec<(&'static str, String, bool)> {
         ("branches", "fn inspect(flag: Bool, x: i32, y: i32) -> i32 {\nlet v: i32 = if flag { yield x } else { yield y }\nyield match v { _ if flag => x, _ => y }\n}".into(), true),
         ("pattern-bindings", format!("{id}\nfn inspect(input: ((i32, i32), (i32, i32))) -> i32 = match input {{ ((first, second), (third, fourth)) if true => id(first), ((a, b), (c, d)) => id(d) }}"), true),
         ("tuple-rest", format!("type Wide = (i32, Bool, i32, Bool, i32, Bool, i32, Bool)\n{id}\nfn inspect(input: Wide) -> i32 = match input {{ (first, ..) if true => id(first), (last, ..) => id(last) }}"), true),
+        ("variant-rest", format!("enum Wide[T] {{ Wrap(T, Bool, T, Bool, T, Bool, T, Bool)\nEnd }}\n{id}\nfn inspect(input: Wide[i32]) -> i32 = match input {{ Wide::Wrap(first, ..) if true => id(first), Wide::Wrap(last, ..) => id(last), _ => 0 }}"), true),
         ("pattern-prefix-failure", format!("{id}\nfn inspect(input: ((i32, i32), i32)) -> i32 = match input {{ ((first, second), (bad, _)) => id(first), _ => 0 }}"), false),
         ("result", "fn inspect(x: Opt[i32]) -> Opt[i32] = result {\nlet y = x?\nyield x\n}".into(), true),
         ("member-reference", format!("struct Pair {{ field value: i32 }}\n{id}\nfn inspect(x: i32) -> i32 {{\nlet p = Pair {{ value: x }}\nyield id(* &p.value)\n}}"), true),

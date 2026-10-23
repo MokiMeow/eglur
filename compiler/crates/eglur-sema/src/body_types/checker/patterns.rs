@@ -1,6 +1,12 @@
 use super::*;
 
+mod construction;
 mod matching;
+
+use construction::PatternConstructorShape;
+
+#[cfg(test)]
+mod construction_tests;
 
 #[cfg(test)]
 mod poison_tests;

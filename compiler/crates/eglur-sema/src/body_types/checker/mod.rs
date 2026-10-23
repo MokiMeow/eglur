@@ -541,13 +541,6 @@ struct ConstructorTarget {
     kind: ResolvedTargetKind,
 }
 
-struct PatternConstructorContract {
-    declaration: CanonicalTarget,
-    generic_parameters: Vec<GenericParameterId>,
-    result: TypeId,
-    shape: ConstructorShape,
-}
-
 struct PatternCheck {
     coverage: PatternCoverage,
     irrefutable: bool,
