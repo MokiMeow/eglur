@@ -14,14 +14,26 @@ impl AnalysisDispatchInputs {
         site: MethodDispatchSite,
         allowance_ticks: u64,
     ) -> Result<Self, AnalysisProofInputFailure> {
+        Self::admit_with_work(accounting, consumer, site, allowance_ticks, Ok(no_work()))
+    }
+
+    pub(super) fn admit_with_work(
+        accounting: &mut AnalysisWorkAccounting,
+        consumer: usize,
+        site: MethodDispatchSite,
+        allowance_ticks: u64,
+        additional: Result<AnalysisWork, AnalysisWorkOverflow>,
+    ) -> Result<Self, AnalysisProofInputFailure> {
         let ticket = accounting.admit_with_work(
             consumer,
             allowance_ticks,
-            Ok(AnalysisWork {
-                steps: 1,
-                inspected_bytes: 0,
-                transferred_bytes: size_of::<Self>() as u64,
-                reserved_bytes: 0,
+            additional.and_then(|work| {
+                work.checked_add(AnalysisWork {
+                    steps: 1,
+                    inspected_bytes: 0,
+                    transferred_bytes: size_of::<Self>() as u64,
+                    reserved_bytes: 0,
+                })
             }),
         )?;
         Ok(Self { site, ticket })
@@ -32,11 +44,23 @@ impl AnalysisDispatchInputs {
         self.site
     }
 
+    pub(super) const fn ticket(&self) -> &AnalysisRootTicket {
+        &self.ticket
+    }
+
     pub fn existing_ticket(
         &self,
         accounting: &mut AnalysisWorkAccounting,
     ) -> Result<AnalysisRootTicket, AnalysisProofInputFailure> {
-        accounting.claim(&self.ticket)?.precharge(ticket_work())?;
+        self.existing_ticket_with_work(accounting, no_work())
+    }
+
+    pub(super) fn existing_ticket_with_work(
+        &self,
+        accounting: &mut AnalysisWorkAccounting,
+        additional: AnalysisWork,
+    ) -> Result<AnalysisRootTicket, AnalysisProofInputFailure> {
+        charge_ticket_retrieval(accounting, &self.ticket, additional)?;
         Ok(self.ticket.clone())
     }
 }

@@ -22,6 +22,26 @@ impl AnalysisBoundInputs {
         bound_index: usize,
         allowance_ticks: u64,
     ) -> Result<Self, AnalysisProofInputFailure> {
+        Self::admit_with_work(
+            accounting,
+            consumer,
+            site,
+            parameter,
+            bound_index,
+            allowance_ticks,
+            Ok(no_work()),
+        )
+    }
+
+    pub(super) fn admit_with_work(
+        accounting: &mut AnalysisWorkAccounting,
+        consumer: usize,
+        site: ExpressionKey,
+        parameter: &GenericParameterSignature,
+        bound_index: usize,
+        allowance_ticks: u64,
+        additional: Result<AnalysisWork, AnalysisWorkOverflow>,
+    ) -> Result<Self, AnalysisProofInputFailure> {
         let count = parameter.declared_bounds().len();
         if bound_index >= count {
             return Err(AnalysisProofInputFailure::UnknownDeclaredBound {
@@ -33,7 +53,8 @@ impl AnalysisBoundInputs {
         let ticket = accounting.admit_with_work(
             consumer,
             allowance_ticks,
-            Self::preparation_work(parameter.id(), count),
+            additional
+                .and_then(|work| Self::preparation_work(parameter.id(), count)?.checked_add(work)),
         )?;
         let parameter = {
             #[cfg(test)]
@@ -71,6 +92,10 @@ impl AnalysisBoundInputs {
         self.tickets.len()
     }
 
+    pub(super) const fn anchor_ticket(&self) -> &AnalysisRootTicket {
+        &self.anchor
+    }
+
     /// Only a missing original slot invokes the allowance policy.
     pub fn bound_ticket(
         &mut self,
@@ -78,9 +103,19 @@ impl AnalysisBoundInputs {
         index: usize,
         allowance: impl FnOnce() -> u64,
     ) -> Result<AnalysisRootTicket, AnalysisProofInputFailure> {
+        self.bound_ticket_with_work(accounting, index, allowance, no_work())
+    }
+
+    pub(super) fn bound_ticket_with_work(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        index: usize,
+        allowance: impl FnOnce() -> u64,
+        additional: AnalysisWork,
+    ) -> Result<AnalysisRootTicket, AnalysisProofInputFailure> {
         self.validate(accounting, index)?;
         if let Some(ticket) = &self.tickets[index] {
-            accounting.claim(ticket)?.precharge(ticket_work())?;
+            charge_ticket_retrieval(accounting, ticket, additional)?;
             return Ok(ticket.clone());
         }
 
@@ -91,11 +126,13 @@ impl AnalysisBoundInputs {
         let ticket = accounting.admit_with_work(
             self.anchor.identity().consumer(),
             allowance(),
-            ticket_work().checked_add(AnalysisWork {
-                steps: 1,
-                inspected_bytes: 0,
-                transferred_bytes: size_of::<Option<AnalysisRootTicket>>() as u64,
-                reserved_bytes: 0,
+            ticket_work().checked_add(additional).and_then(|work| {
+                work.checked_add(AnalysisWork {
+                    steps: 1,
+                    inspected_bytes: 0,
+                    transferred_bytes: size_of::<Option<AnalysisRootTicket>>() as u64,
+                    reserved_bytes: 0,
+                })
             }),
         )?;
         self.tickets[index] = Some(ticket.clone());
@@ -108,6 +145,15 @@ impl AnalysisBoundInputs {
         accounting: &mut AnalysisWorkAccounting,
         index: usize,
     ) -> Result<AnalysisRootTicket, AnalysisProofInputFailure> {
+        self.existing_ticket_with_work(accounting, index, no_work())
+    }
+
+    pub(super) fn existing_ticket_with_work(
+        &self,
+        accounting: &mut AnalysisWorkAccounting,
+        index: usize,
+        additional: AnalysisWork,
+    ) -> Result<AnalysisRootTicket, AnalysisProofInputFailure> {
         self.validate(accounting, index)?;
         let ticket =
             self.tickets[index]
@@ -116,7 +162,7 @@ impl AnalysisBoundInputs {
                     site: self.site,
                     index,
                 })?;
-        accounting.claim(ticket)?.precharge(ticket_work())?;
+        charge_ticket_retrieval(accounting, ticket, additional)?;
         Ok(ticket.clone())
     }
 

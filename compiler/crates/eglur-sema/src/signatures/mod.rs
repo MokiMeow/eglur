@@ -13,7 +13,7 @@ mod work;
 
 pub use error::SignatureResolutionError;
 pub use execution::{InterruptedSignatures, SignatureExecution, SignatureResolutionPrefix};
-pub use generics::GenericParameterSignature;
+pub use generics::{GenericParameterRecord, GenericParameterRecordId, GenericParameterSignature};
 pub use inherent::*;
 pub use model::*;
 pub use resolver::{
@@ -24,4 +24,4 @@ pub use trusted::*;
 pub use work::SignatureAnalysisWork;
 
 pub(crate) use applications::{TypeApplication, TypeApplicationRegion, TypeApplicationSite};
-pub(crate) use generics::InstantiatedParameterBound;
+pub(crate) use generics::{GenericParameterRecords, InstantiatedParameterBound};

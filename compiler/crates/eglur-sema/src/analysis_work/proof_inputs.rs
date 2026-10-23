@@ -10,9 +10,11 @@ use super::{
 
 mod bounds;
 mod dispatch;
+mod registry;
 
 pub use bounds::AnalysisBoundInputs;
 pub use dispatch::AnalysisDispatchInputs;
+pub use registry::{AnalysisProofInputRegistry, AnalysisProofRegistryFailure};
 
 /// Invalid original proof custody, distinct from negative semantic evidence.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,6 +55,27 @@ const fn ticket_work() -> AnalysisWork {
         inspected_bytes: size_of::<Option<AnalysisRootTicket>>() as u64,
         transferred_bytes: size_of::<AnalysisRootTicket>() as u64,
         reserved_bytes: 0,
+    }
+}
+
+const fn no_work() -> AnalysisWork {
+    AnalysisWork {
+        steps: 0,
+        inspected_bytes: 0,
+        transferred_bytes: 0,
+        reserved_bytes: 0,
+    }
+}
+
+fn charge_ticket_retrieval(
+    accounting: &mut AnalysisWorkAccounting,
+    ticket: &AnalysisRootTicket,
+    additional: AnalysisWork,
+) -> Result<(), AnalysisWorkFailure> {
+    let mut scope = accounting.claim(ticket)?;
+    match ticket_work().checked_add(additional) {
+        Ok(work) => scope.precharge(work),
+        Err(overflow) => Err(scope.stop_unrepresentable(overflow)),
     }
 }
 

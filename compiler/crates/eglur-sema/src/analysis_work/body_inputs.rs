@@ -3,9 +3,53 @@ use std::collections::BTreeMap;
 use eglur_hir::HirFile;
 use eglur_source::FileId;
 
-use crate::{ModuleAddress, ModuleDeclarations, ModuleId, SemanticSource};
+use crate::{
+    ExpressionKey, GenericParameterRecord, GenericParameterRecordId, MethodDispatchSite,
+    ModuleAddress, ModuleDeclarations, ModuleId, SemanticSource,
+};
 
 use super::*;
+
+/// Failure to bind original call or proof registries to a compilation attempt.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AnalysisBodyInputFailure {
+    Call(AnalysisCallRegistryFailure),
+    Proof(AnalysisProofRegistryFailure),
+}
+
+impl From<AnalysisCallRegistryFailure> for AnalysisBodyInputFailure {
+    fn from(failure: AnalysisCallRegistryFailure) -> Self {
+        Self::Call(failure)
+    }
+}
+
+impl From<AnalysisProofRegistryFailure> for AnalysisBodyInputFailure {
+    fn from(failure: AnalysisProofRegistryFailure) -> Self {
+        Self::Proof(failure)
+    }
+}
+
+impl From<AnalysisWorkFailure> for AnalysisBodyInputFailure {
+    fn from(failure: AnalysisWorkFailure) -> Self {
+        Self::Call(failure.into())
+    }
+}
+
+impl std::fmt::Display for AnalysisBodyInputFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Call(failure) => failure.fmt(formatter),
+            Self::Proof(failure) => failure.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for AnalysisBodyInputFailure {}
+
+struct BodyInputs<'hir> {
+    calls: AnalysisCallInputRegistry<'hir>,
+    proofs: AnalysisProofInputRegistry<'hir>,
+}
 
 struct ModuleInputs<'hir> {
     file: FileId,
@@ -13,10 +57,10 @@ struct ModuleInputs<'hir> {
     hir: &'hir HirFile,
     consumer: usize,
     attempt: std::sync::Arc<()>,
-    bodies: Vec<AnalysisCallInputRegistry<'hir>>,
+    bodies: Vec<BodyInputs<'hir>>,
 }
 
-/// Caller-retained call registries for the original bodies of one attempt.
+/// Caller-retained call and proof registries for the original bodies of one attempt.
 ///
 /// Setup indexes normalized input HIR without root admission or alias expansion.
 /// Retain this set across passes; reconstruction is not replay. Setup is not
@@ -35,7 +79,7 @@ impl<'hir> AnalysisBodyInputs<'hir> {
                 &'source SemanticSource<'hir>,
             ),
         >,
-    ) -> Result<Self, AnalysisCallRegistryFailure>
+    ) -> Result<Self, AnalysisBodyInputFailure>
     where
         'hir: 'source,
     {
@@ -43,25 +87,39 @@ impl<'hir> AnalysisBodyInputs<'hir> {
         for (consumer, module, source) in inputs {
             let attempt = accounting.bind_input_consumer(consumer)?;
             if modules.contains_key(&module.id()) {
-                return Err(AnalysisCallRegistryFailure::DuplicateModule(module.id()));
+                return Err(AnalysisCallRegistryFailure::DuplicateModule(module.id()).into());
             }
             if module.file() != source.file() || module.address() != source.module() {
                 return Err(AnalysisCallRegistryFailure::SourceMismatch {
                     module: module.id(),
                     file: source.file(),
-                });
+                }
+                .into());
             }
             let hir = source
                 .hir()
                 .ok_or(AnalysisCallRegistryFailure::MissingHir(source.file()))?;
-            std::alloc::Layout::array::<AnalysisCallInputRegistry<'hir>>(hir.bodies().len())
+            std::alloc::Layout::array::<BodyInputs<'hir>>(hir.bodies().len())
                 .map_err(AnalysisCallRegistryFailure::Layout)?;
             let bodies = hir
                 .bodies()
                 .map(|(_, body)| {
-                    AnalysisCallInputRegistry::new(accounting, consumer, module.id(), body)
+                    Ok(BodyInputs {
+                        calls: AnalysisCallInputRegistry::new(
+                            accounting,
+                            consumer,
+                            module.id(),
+                            body,
+                        )?,
+                        proofs: AnalysisProofInputRegistry::new(
+                            accounting,
+                            consumer,
+                            module.id(),
+                            body,
+                        )?,
+                    })
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, AnalysisBodyInputFailure>>()?;
             modules.insert(
                 module.id(),
                 ModuleInputs {
@@ -138,6 +196,13 @@ impl<'hir> AnalysisBodyInputs<'hir> {
         &mut self,
         site: ExpressionKey,
     ) -> Result<&mut AnalysisCallInputRegistry<'hir>, AnalysisCallRegistryFailure> {
+        Ok(&mut self.body(site)?.calls)
+    }
+
+    fn body(
+        &mut self,
+        site: ExpressionKey,
+    ) -> Result<&mut BodyInputs<'hir>, AnalysisCallRegistryFailure> {
         self.modules
             .get_mut(&site.module())
             .ok_or(AnalysisCallRegistryFailure::MissingModule(site.module()))?
@@ -147,5 +212,55 @@ impl<'hir> AnalysisBodyInputs<'hir> {
                 module: site.module(),
                 body: site.expression().body(),
             })
+    }
+
+    pub fn bound_ticket(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        site: ExpressionKey,
+        parameter: &GenericParameterRecord,
+        index: usize,
+        allowance: impl FnOnce() -> u64,
+    ) -> Result<AnalysisRootTicket, AnalysisBodyInputFailure> {
+        Ok(self
+            .body(site)?
+            .proofs
+            .bound_ticket(accounting, site, parameter, index, allowance)?)
+    }
+
+    pub fn existing_bound_ticket(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        site: ExpressionKey,
+        parameter: GenericParameterRecordId,
+        index: usize,
+    ) -> Result<AnalysisRootTicket, AnalysisBodyInputFailure> {
+        Ok(self
+            .body(site)?
+            .proofs
+            .existing_bound_ticket(accounting, site, parameter, index)?)
+    }
+
+    pub fn dispatch_ticket(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        site: MethodDispatchSite,
+        allowance: impl FnOnce() -> u64,
+    ) -> Result<AnalysisRootTicket, AnalysisBodyInputFailure> {
+        Ok(self
+            .body(site.key())?
+            .proofs
+            .dispatch_ticket(accounting, site, allowance)?)
+    }
+
+    pub fn existing_dispatch_ticket(
+        &mut self,
+        accounting: &mut AnalysisWorkAccounting,
+        site: MethodDispatchSite,
+    ) -> Result<AnalysisRootTicket, AnalysisBodyInputFailure> {
+        Ok(self
+            .body(site.key())?
+            .proofs
+            .existing_dispatch_ticket(accounting, site)?)
     }
 }

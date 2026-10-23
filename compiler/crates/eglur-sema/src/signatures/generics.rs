@@ -4,6 +4,11 @@ use crate::{
     CanonicalTypeStore, GenericParameterId, TraitObligation, TraitRef, TypeId, TypeStoreError,
 };
 
+mod records;
+
+pub(crate) use records::GenericParameterRecords;
+pub use records::{GenericParameterRecord, GenericParameterRecordId};
+
 /// Resolved parameter bounds with distinct declaration and semantic orders.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GenericParameterSignature {

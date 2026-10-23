@@ -4,7 +4,10 @@ use eglur_diagnostics::Poison;
 use eglur_hir::{BodyId, OriginId, PatternId, TypeRefId};
 use eglur_source::FileId;
 
-use super::{ConcreteOwnerHead, GenericParameterSignature, InherentMethodInventory};
+use super::{
+    ConcreteOwnerHead, GenericParameterRecord, GenericParameterRecords, GenericParameterSignature,
+    InherentMethodInventory,
+};
 use crate::type_rendering::{DiagnosticTypeFacts, DiagnosticTypeNames};
 use crate::{
     CallableSignatureId, CanonicalTarget, CanonicalTypeStore, DefId, FactState, FactTable,
@@ -476,7 +479,7 @@ pub struct DeclarationSignatures {
     pub(super) declarations: FactTable<CanonicalTarget, DeclarationSignature>,
     pub(super) enum_variant_names: HashMap<CanonicalTarget, SemanticFact<HashSet<NameKey>>>,
     pub(super) overload_family_poisons: BTreeMap<DefId, Poison>,
-    pub(super) generic_parameters: FactTable<GenericParameterId, GenericParameterSignature>,
+    pub(super) generic_parameters: GenericParameterRecords,
     pub(super) occurrences: FactTable<TypeOccurrenceId, ResolvedTypeOccurrence>,
     pub(super) callables: Box<[CallableSignature]>,
     pub(super) impl_headers: FactTable<CanonicalTarget, TraitImplHeader>,
@@ -559,6 +562,20 @@ impl DeclarationSignatures {
         &self,
         parameter: &GenericParameterId,
     ) -> FactState<'_, GenericParameterSignature> {
+        match self.generic_parameter_record(parameter) {
+            FactState::Known(record) => FactState::Known(record.signature()),
+            FactState::Poisoned(poison) => FactState::Poisoned(poison),
+            FactState::NotApplicable => FactState::NotApplicable,
+            FactState::Unperformed => FactState::Unperformed,
+        }
+    }
+
+    /// Retains original definition identity under the same effective poison as semantic queries.
+    #[must_use]
+    pub fn generic_parameter_record(
+        &self,
+        parameter: &GenericParameterId,
+    ) -> FactState<'_, GenericParameterRecord> {
         if let GenericParameterId::Source(parameter) = parameter
             && let Some(poison) = self
                 .application_poison(&CanonicalTarget::Source(*parameter))
@@ -569,7 +586,7 @@ impl DeclarationSignatures {
         {
             return FactState::Poisoned(poison);
         }
-        self.generic_parameters.state(parameter)
+        self.generic_parameters.record(parameter)
     }
 
     #[must_use]

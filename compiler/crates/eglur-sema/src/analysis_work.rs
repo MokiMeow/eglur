@@ -2,6 +2,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 
 mod accounting;
+mod body_inputs;
 mod call_inputs;
 mod proof_inputs;
 mod source_inputs;
@@ -14,12 +15,16 @@ pub use accounting::{
     AnalysisRootStopReason, AnalysisRootTicket, AnalysisWorkAccounting, AnalysisWorkFailure,
     AnalysisWorkIncomplete,
 };
+pub use body_inputs::{AnalysisBodyInputFailure, AnalysisBodyInputs};
 pub(crate) use call_inputs::original_call;
 pub use call_inputs::{
-    AnalysisBodyInputs, AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
+    AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
     AnalysisCallRegistryFailure,
 };
-pub use proof_inputs::{AnalysisBoundInputs, AnalysisDispatchInputs, AnalysisProofInputFailure};
+pub use proof_inputs::{
+    AnalysisBoundInputs, AnalysisDispatchInputs, AnalysisProofInputFailure,
+    AnalysisProofInputRegistry, AnalysisProofRegistryFailure,
+};
 pub use source_inputs::{
     AnalysisSourceInputFailure, AnalysisSourceInputRegistry, AnalysisSourceInputs,
 };

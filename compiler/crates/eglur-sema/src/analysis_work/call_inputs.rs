@@ -11,9 +11,7 @@ use super::{
 };
 
 mod registry;
-mod set;
 pub use registry::{AnalysisCallInputRegistry, AnalysisCallRegistryFailure};
-pub use set::AnalysisBodyInputs;
 
 fn is_original_call(call: &CallExpr) -> bool {
     !call.partial_application

@@ -5,7 +5,7 @@ use crate::{AnalysisRootClaimError, AnalysisWorkPricing, FactState};
 use super::*;
 
 #[path = "test_support.rs"]
-mod test_support;
+pub(super) mod test_support;
 use test_support::{Fixture, fixture};
 
 const TEXT: &str = "trait Alpha {}\ntrait Zulu {}\nfn pick[T: Zulu+Alpha, U: Zulu+Alpha](x: T, y: U) -> Unit = ()\nfn inspect[T: Zulu+Alpha, U: Zulu+Alpha](x: T, y: U) -> Unit = pick(x, y)";

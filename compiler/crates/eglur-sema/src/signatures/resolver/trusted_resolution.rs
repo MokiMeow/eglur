@@ -45,7 +45,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             enum_variant_names: HashMap::new(),
             source_enum_variants: enum_variants::SourceEnumVariantIndex::default(),
             overload_family_poisons: BTreeMap::new(),
-            generic_parameters: FactTable::new(),
+            generic_parameters: GenericParameterRecords::new(),
             occurrences: FactTable::new(),
             callables: Vec::new(),
             trait_methods: BTreeMap::new(),

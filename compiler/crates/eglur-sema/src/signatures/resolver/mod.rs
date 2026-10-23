@@ -329,7 +329,7 @@ struct SignatureResolver<'input, 'hir> {
     enum_variant_names: HashMap<CanonicalTarget, SemanticFact<HashSet<NameKey>>>,
     source_enum_variants: enum_variants::SourceEnumVariantIndex<'hir>,
     overload_family_poisons: BTreeMap<DefId, Poison>,
-    generic_parameters: FactTable<GenericParameterId, GenericParameterSignature>,
+    generic_parameters: GenericParameterRecords,
     occurrences: FactTable<TypeOccurrenceId, ResolvedTypeOccurrence>,
     callables: Vec<CallableSignature>,
     trait_methods: BTreeMap<CanonicalTarget, Box<[TraitMethodSignature]>>,

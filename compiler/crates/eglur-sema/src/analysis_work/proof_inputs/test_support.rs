@@ -4,10 +4,11 @@ use eglur_source::{FileId, LineIndex, SourceFile};
 
 use crate::*;
 
-pub(super) struct Fixture {
-    pub(super) signatures: DeclarationSignatures,
-    pub(super) parameters: Vec<GenericParameterId>,
-    pub(super) site: ExpressionKey,
+pub(crate) struct Fixture {
+    pub(crate) signatures: DeclarationSignatures,
+    pub(crate) parameters: Vec<GenericParameterId>,
+    pub(crate) site: ExpressionKey,
+    pub(crate) hir: HirFile,
 }
 
 struct Support;
@@ -25,7 +26,7 @@ fn performed<T>(phase: PhaseAnalysis<T>) -> T {
     product
 }
 
-pub(super) fn fixture(text: &str, trusted_owner: Option<&str>) -> Fixture {
+pub(crate) fn fixture(text: &str, trusted_owner: Option<&str>) -> Fixture {
     let input = SourceFile::new(FileId::new(0), text.as_bytes().to_vec());
     let validated = input.validate().unwrap();
     let lines = LineIndex::new(validated);
@@ -140,6 +141,7 @@ pub(super) fn fixture(text: &str, trusted_owner: Option<&str>) -> Fixture {
         signatures,
         parameters,
         site,
+        hir,
     }
 }
 
