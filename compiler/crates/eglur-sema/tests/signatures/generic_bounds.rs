@@ -108,17 +108,43 @@ fn every_primed_declaring_bound_participates_in_ambiguity() {
 #[test]
 fn a_late_declaring_bound_cannot_be_accepted_after_an_earlier_use() {
     let external = empty_external();
-    let analysis = analyze(
-        "trait HasItem { type Item }\n\
+    let text = "trait HasItem { type Item }\n\
          trait Other[A] { type Item }\n\
          trait Uses[A] {}\n\
-         fn drive[T:Uses[T::Item]+Other[T::Item]+HasItem]()->Unit=()\n",
-        &CapabilitySet::signatures(),
-        Some(&external),
-        None,
-    );
-    assert_eq!(
-        diagnostic_codes(&analysis.diagnostics),
-        ["ASSOCIATED_TYPE_PROJECTION_INVALID"]
-    );
+         fn drive[T:Uses[T::Item]+Other[T::Item]+HasItem]()->Unit=()\n";
+    let analysis = analyze(text, &CapabilitySet::signatures(), Some(&external), None);
+    let diagnostics = analysis.diagnostics.diagnostics();
+    for diagnostic in diagnostics {
+        assert_eq!(
+            diagnostic.code().as_str(),
+            "ASSOCIATED_TYPE_PROJECTION_INVALID"
+        );
+        assert_eq!(
+            diagnostic.data()["reason"].to_string(),
+            "ambiguous declaring bounds"
+        );
+    }
+    let actual = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            diagnostic
+                .primary_span()
+                .as_source()
+                .unwrap()
+                .file_span()
+                .range()
+                .start()
+                .as_usize()
+        })
+        .collect::<BTreeSet<_>>();
+    let expected = text
+        .match_indices("T::Item")
+        .map(|(offset, _)| offset)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(actual, expected);
+    let function = source_def(&analysis.declarations, "drive", DeclarationKind::Function);
+    assert!(matches!(
+        analysis.signatures.unwrap().source_declaration(function),
+        FactState::Poisoned(_)
+    ));
 }

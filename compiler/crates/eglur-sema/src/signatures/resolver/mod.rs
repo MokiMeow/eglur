@@ -54,6 +54,7 @@ mod execution;
 mod generic_names;
 mod generic_redeclarations;
 mod impl_headers;
+mod source_bounds;
 mod source_types;
 #[cfg(test)]
 mod tests;
@@ -347,6 +348,7 @@ struct SignatureResolver<'input, 'hir> {
     source_generic_bound_seeds: BTreeMap<(DefId, TypeRefId), Resolution<TraitRef>>,
     source_generic_states: BTreeMap<DefId, SourceGenericState>,
     source_generic_stack: Vec<DefId>,
+    source_bounds: source_bounds::SourceBoundConstruction,
     trait_info: BTreeMap<CanonicalTarget, TraitInfo>,
     alias_arities: BTreeMap<DefId, usize>,
     alias_states: BTreeMap<DefId, AliasState>,
@@ -400,45 +402,6 @@ fn item_generic_parameters(kind: &ItemKind) -> Option<&[GenericParameter]> {
         ItemKind::TypeAlias(value) => Some(&value.generic_parameters),
         _ => None,
     }
-}
-
-fn type_ref_contains_generic_projection(
-    hir: &HirFile,
-    root: TypeRefId,
-    generics: &generic_names::SourceGenericNames,
-) -> bool {
-    let mut pending = vec![root];
-    let mut seen = BTreeSet::new();
-    while let Some(current) = pending.pop() {
-        if !seen.insert(current) {
-            continue;
-        }
-        match hir.type_ref(current).kind() {
-            TypeRefKind::Reference { referent, .. }
-            | TypeRefKind::Pointer { referent, .. }
-            | TypeRefKind::Group(referent)
-            | TypeRefKind::Dynamic {
-                trait_ref: referent,
-            } => pending.push(*referent),
-            TypeRefKind::Path { path, arguments } => {
-                if path.segments().len() > 1
-                    && path.segments()[0]
-                        .text()
-                        .is_some_and(|base| generics.contains_key(base))
-                {
-                    return true;
-                }
-                pending.extend(arguments.iter().copied());
-            }
-            TypeRefKind::Tuple(elements) => pending.extend(elements.iter().copied()),
-            TypeRefKind::Function { parameters, result } => {
-                pending.extend(parameters.iter().copied());
-                pending.push(*result);
-            }
-            TypeRefKind::Invalid => {}
-        }
-    }
-    false
 }
 
 fn item_declaration_name(kind: &ItemKind) -> Option<&Name> {

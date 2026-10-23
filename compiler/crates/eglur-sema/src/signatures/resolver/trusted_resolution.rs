@@ -63,6 +63,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             source_generic_bound_seeds: BTreeMap::new(),
             source_generic_states: BTreeMap::new(),
             source_generic_stack: Vec::new(),
+            source_bounds: source_bounds::SourceBoundConstruction::default(),
             trait_info: BTreeMap::new(),
             alias_arities: BTreeMap::new(),
             alias_states: BTreeMap::new(),

@@ -71,7 +71,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 (result, written)
             }
         };
-        self.record_type_occurrence(source, request.type_ref, origin, written, result)
+        if request.site.construction.is_some() {
+            Ok(result)
+        } else {
+            self.record_type_occurrence(source, request.type_ref, origin, written, result)
+        }
     }
 
     pub(super) fn prepare_type_plan(
@@ -169,6 +173,43 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let origin = hir.type_ref(frame.parent.type_ref).origin();
         let position = frame.parent.position;
         match (frame.continuation, complete) {
+            (
+                TypeContinuation::Projection {
+                    base,
+                    associated,
+                    argument_count,
+                },
+                Completed::Cohort(result),
+            ) => self.complete_projection_construction(
+                &frame.parent,
+                base,
+                associated,
+                argument_count,
+                result,
+            ),
+            (continuation, Completed::Blocked(poison)) => {
+                let mut continuation = continuation;
+                match &mut continuation {
+                    TypeContinuation::Tuple(children)
+                    | TypeContinuation::Function(children)
+                    | TypeContinuation::Intrinsic(_, children)
+                    | TypeContinuation::Union(children)
+                    | TypeContinuation::Nominal { children, .. }
+                    | TypeContinuation::ConstructionAliasArguments { children, .. }
+                    | TypeContinuation::AliasArguments { children, .. } => {
+                        children.blocked = true;
+                        if let Some(poison) = poison {
+                            children.poison.include(&poison)?;
+                        }
+                        children.next += 1;
+                        self.advance_type_children(&frame.parent, continuation)
+                    }
+                    _ => Ok(TypePlan::Blocked(poison)),
+                }
+            }
+            (TypeContinuation::ConstructionAliasTemplate { alias }, Completed::Alias(template)) => {
+                self.construct_alias_arguments(&frame.parent, alias, template)
+            }
             (TypeContinuation::Reference(mutability), Completed::Type(result)) => {
                 Ok(Self::position_type(
                     result
@@ -251,6 +292,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     | TypeContinuation::Intrinsic(_, children)
                     | TypeContinuation::Union(children)
                     | TypeContinuation::Nominal { children, .. }
+                    | TypeContinuation::ConstructionAliasArguments { children, .. }
                     | TypeContinuation::AliasArguments { children, .. } => {
                         children.accept(result)?
                     }
@@ -273,16 +315,48 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             | TypeContinuation::Intrinsic(_, children)
             | TypeContinuation::Union(children)
             | TypeContinuation::Nominal { children, .. }
+            | TypeContinuation::ConstructionAliasArguments { children, .. }
             | TypeContinuation::AliasArguments { children, .. } => children,
             _ => unreachable!("only type-child families advance"),
         };
         if let Some(child) = children.next() {
             return Ok(Self::await_type(child, continuation));
         }
+        if children.blocked {
+            let poison = match continuation {
+                TypeContinuation::Tuple(children)
+                | TypeContinuation::Function(children)
+                | TypeContinuation::Intrinsic(_, children)
+                | TypeContinuation::Union(children)
+                | TypeContinuation::Nominal { children, .. }
+                | TypeContinuation::ConstructionAliasArguments { children, .. }
+                | TypeContinuation::AliasArguments { children, .. } => children.poison.finish(),
+                _ => unreachable!("blocked children belong to a type aggregate"),
+            };
+            return Ok(TypePlan::Blocked(poison));
+        }
         let source = self.sources[&parent.site.file];
         let hir = self.source_hir(parent.site.file)?;
         let origin = hir.type_ref(parent.type_ref).origin();
         match continuation {
+            TypeContinuation::ConstructionAliasArguments {
+                template,
+                parameters,
+                children,
+            } => {
+                let result = children
+                    .finish()
+                    .map(|arguments| {
+                        let replacements = parameters
+                            .iter()
+                            .map(|(_, parameter)| parameter.clone())
+                            .zip(arguments)
+                            .collect();
+                        self.types.substitute(template.value, &replacements)
+                    })
+                    .transpose()?;
+                Ok(Self::position_type(result, None))
+            }
             TypeContinuation::Tuple(children) => Ok(Self::position_type(
                 children
                     .finish()
@@ -338,14 +412,16 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             TypeContinuation::Nominal { target, children } => {
                 let result = match children.finish() {
                     Resolution::Known(arguments) => {
-                        self.retain_source_application(
-                            parent.site.owner,
-                            source,
-                            parent.type_ref,
-                            target.clone(),
-                            arguments.clone(),
-                            &parent.site.context,
-                        );
+                        if parent.site.construction.is_none() {
+                            self.retain_source_application(
+                                parent.site.owner,
+                                source,
+                                parent.type_ref,
+                                target.clone(),
+                                arguments.clone(),
+                                &parent.site.context,
+                            );
+                        }
                         let ty = self
                             .types
                             .nominal(NominalHead::Declaration(target.clone()), arguments)?;
@@ -400,6 +476,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         custody: AliasCustody::Inherited(
                             self.inherited_source_custody(parent.site.file, &parent.site.custody)?,
                         ),
+                        construction: None,
                     }),
                     continuation: TypeContinuation::AliasTemplate { alias, arguments },
                 })

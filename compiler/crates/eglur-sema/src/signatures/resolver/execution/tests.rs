@@ -507,11 +507,12 @@ fn foreign_checkpoint_custody_is_internal_and_does_not_stop_analysis() {
 
 #[test]
 fn every_checkpoint_stop_refuses_completion_and_preserves_a_diagnostic_subset() {
-    with_resolver(
-        &[
-            "type MissingFirst = Missing\ntrait Tr[A] {}\nstruct Host {}\nimpl Tr[i32] for Host {}\ntype Pair[T] = (T, T)\nfn inspect(x: Pair[(i32, Bool)]) -> Pair[i32] = x",
-        ],
-        |resolver, sources| {
+    for text in [
+        "type MissingFirst = Missing\ntrait Tr[A] {}\nstruct Host {}\nimpl Tr[i32] for Host {}\ntype Pair[T] = (T, T)\nfn inspect(x: Pair[(i32, Bool)]) -> Pair[i32] = x",
+        "trait Has[A] { type Item }\ntrait Uses[A] {}\ntype Erase[A] = i64\nfn inspect[T:Uses[U::Item],U:Has[Erase[U::Item]]]() -> Unit = ()",
+        "trait Has[A] { type Item }\nfn inspect[T:Has[(T::Item,Missing)]]() -> Unit = ()",
+    ] {
+        with_resolver(&[text], |resolver, sources| {
             let (mut full_work, ticket) = accounting();
             let probe = ProbeScope::new(&ticket, None, None, Fault::Exhaustion);
             let mut full_diagnostics = DiagnosticStore::new();
@@ -538,8 +539,8 @@ fn every_checkpoint_stop_refuses_completion_and_preserves_a_diagnostic_subset() 
                     );
                 }
             }
-        },
-    );
+        });
+    }
 }
 
 #[test]

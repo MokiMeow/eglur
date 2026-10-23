@@ -25,6 +25,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .is_some_and(|name| context.generics.contains_key(name))
             && !self.has_known_module_prefix(site.owner.module(), path);
         if segments.len() > 1 && (segments[0].text() == Some("Self") || generic_projection) {
+            if site.construction.is_some() && generic_projection {
+                return self.prepare_projection_construction(request, path, arguments, origin);
+            }
             let (result, written) =
                 self.resolve_source_projection(source, origin, path, arguments, context)?;
             return Ok(Self::position_type(result, written));
@@ -239,6 +242,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         )?),
                         Some(CanonicalTarget::Source(alias)),
                     ));
+                }
+                if site.construction.is_some() {
+                    return self.prepare_construction_alias(request, alias, origin);
                 }
                 let children = Self::type_children(request, arguments, position.nested());
                 self.advance_type_children(

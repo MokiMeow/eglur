@@ -10,14 +10,51 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let source = self.sources[&request.site.file];
         let hir = self.source_hir(request.site.file)?;
         let origin = hir.type_ref(request.type_ref).origin();
-        self.record_trait_occurrence(source, request.type_ref, origin, written, result)
+        if request.site.construction.is_some() {
+            Ok(result)
+        } else {
+            self.record_trait_occurrence(source, request.type_ref, origin, written, result)
+        }
     }
 
     pub(super) fn prepare_trait_plan(
         &mut self,
         request: &TraitRequest,
     ) -> Result<TraitPlan, SignatureFlow> {
+        let target = match self.prepare_trait_head(request)? {
+            Resolution::Known(target) => target,
+            Resolution::Poisoned(poison) => {
+                return Ok(TraitPlan::complete(Resolution::Poisoned(poison), None));
+            }
+            Resolution::Unperformed => {
+                return Ok(TraitPlan::complete(Resolution::Unperformed, None));
+            }
+        };
+        let hir = self.source_hir(request.site.file)?;
+        let TypeRefKind::Path { arguments, .. } = hir.type_ref(request.type_ref).kind() else {
+            unreachable!("prepared trait head is a path");
+        };
+        let parent = TypeRequest {
+            site: Rc::clone(&request.site),
+            type_ref: request.type_ref,
+            position: TypePosition::Ordinary,
+        };
+        let children = Self::type_children(&parent, arguments, TypePosition::Ordinary);
+        self.advance_trait_children(request, TraitContinuation::Arguments { target, children })
+    }
+
+    pub(super) fn prepare_trait_head(
+        &mut self,
+        request: &TraitRequest,
+    ) -> Result<Resolution<CanonicalTarget>, SignatureFlow> {
         let site = &request.site;
+        if let Some(result) = self
+            .source_bounds
+            .head_results
+            .get(&(site.file, request.type_ref))
+        {
+            return Ok(result.clone());
+        }
         let source = self.sources[&site.file];
         let hir = self.source_hir(site.file)?;
         let occurrence = hir.type_ref(request.type_ref);
@@ -36,15 +73,15 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     )]),
                 )?)
             };
-            return Ok(TraitPlan::complete(result, None));
+            return Ok(result);
         };
         let target = match self.lookup_type_target(site.owner.module(), source, path)? {
             Resolution::Known(target) => target,
             Resolution::Poisoned(poison) => {
-                return Ok(TraitPlan::complete(Resolution::Poisoned(poison), None));
+                return Ok(Resolution::Poisoned(poison));
             }
             Resolution::Unperformed => {
-                return Ok(TraitPlan::complete(Resolution::Unperformed, None));
+                return Ok(Resolution::Unperformed);
             }
         };
         if self.target_kind(&target)? != DeclarationKind::Trait {
@@ -58,25 +95,20 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     DiagnosticDataValue::from("not_trait"),
                 )]),
             )?;
-            return Ok(TraitPlan::complete(Resolution::Poisoned(poison), None));
+            return Ok(Resolution::Poisoned(poison));
         }
         match self.source_head_state(&target)? {
             Resolution::Known(()) => {}
             Resolution::Poisoned(poison) => {
-                return Ok(TraitPlan::complete(
-                    Resolution::Poisoned(poison),
-                    Some(target),
-                ));
+                return Ok(Resolution::Poisoned(poison));
             }
             Resolution::Unperformed => {
-                return Ok(TraitPlan::complete(Resolution::Unperformed, Some(target)));
+                return Ok(Resolution::Unperformed);
             }
         }
-        let Some(info) = self.trait_info.get(&target).cloned() else {
+        let Some(info) = self.trait_info.get(&target) else {
             return match &target {
-                CanonicalTarget::External(_) => {
-                    Ok(TraitPlan::complete(Resolution::Unperformed, Some(target)))
-                }
+                CanonicalTarget::External(_) => Ok(Resolution::Unperformed),
                 CanonicalTarget::Primitive(primitive) => Err(SignatureFlow::Internal(
                     SignatureResolutionError::UnexpectedPrimitiveTarget {
                         primitive: *primitive,
@@ -97,28 +129,32 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         if arguments.len() != info.arity {
             let poison =
                 self.record_arity_error(source, occurrence.origin(), info.arity, arguments.len())?;
-            return Ok(TraitPlan::complete(Resolution::Poisoned(poison), None));
+            return Ok(Resolution::Poisoned(poison));
         }
-        let parent = TypeRequest {
-            site: Rc::clone(&request.site),
-            type_ref: request.type_ref,
-            position: TypePosition::Ordinary,
-        };
-        let children = Self::type_children(&parent, arguments, TypePosition::Ordinary);
-        self.advance_trait_children(request, TraitContinuation::Arguments { target, children })
+        Ok(Resolution::Known(target))
     }
 
     pub(super) fn continue_trait_plan(
         &mut self,
         frame: TraitFrame,
-        result: Resolution<TypeId>,
+        result: Completed,
     ) -> Result<TraitPlan, SignatureFlow> {
         match frame.continuation {
             TraitContinuation::Arguments {
                 target,
                 mut children,
             } => {
-                children.accept(result)?;
+                match result {
+                    Completed::Type(result) => children.accept(result)?,
+                    Completed::Blocked(poison) => {
+                        children.blocked = true;
+                        if let Some(poison) = poison {
+                            children.poison.include(&poison)?;
+                        }
+                        children.next += 1;
+                    }
+                    _ => unreachable!("trait argument completes as a type"),
+                }
                 self.advance_trait_children(
                     &frame.parent,
                     TraitContinuation::Arguments { target, children },
@@ -139,6 +175,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 TraitContinuation::Arguments { target, children },
             ));
         }
+        if children.blocked {
+            return Ok(TraitPlan::Blocked(children.poison.finish()));
+        }
         let source = self.sources[&parent.site.file];
         let hir = self.source_hir(parent.site.file)?;
         let origin = hir.type_ref(parent.type_ref).origin();
@@ -150,14 +189,16 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 parent.site.context.structure_validation,
             )? {
                 Resolution::Known(arguments) => {
-                    self.retain_source_application(
-                        parent.site.owner,
-                        source,
-                        parent.type_ref,
-                        target.clone(),
-                        arguments.clone(),
-                        &parent.site.context,
-                    );
+                    if parent.site.construction.is_none() {
+                        self.retain_source_application(
+                            parent.site.owner,
+                            source,
+                            parent.type_ref,
+                            target.clone(),
+                            arguments.clone(),
+                            &parent.site.context,
+                        );
+                    }
                     let substitution = self.types.intern_substitution(arguments)?;
                     Resolution::Known(TraitRef::new(target.clone(), substitution))
                 }

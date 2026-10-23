@@ -392,6 +392,14 @@ fn foreign_bound_error_retains_attempt_state_and_unpublished_facts() {
                 let Err(error) = resolver.resolve_source_generic(id) else {
                     panic!("foreign bound provenance is rejected");
                 };
+                let foreign_bound = parameter.bounds[usize::from(!foreign_first)];
+                let (file, _) = resolver.source_generic_parameter(id).unwrap();
+                assert!(matches!(
+                    resolver
+                        .occurrences
+                        .state(&TypeOccurrenceId::new(file, foreign_bound)),
+                    FactState::Unperformed
+                ));
                 assert_eq!(
                     error,
                     SignatureFlow::Internal(SignatureResolutionError::DiagnosticStore(
@@ -401,7 +409,7 @@ fn foreign_bound_error_retains_attempt_state_and_unpublished_facts() {
                 assert_eq!(
                     WORK.get(),
                     Work {
-                        inputs: 2,
+                        inputs: if foreign_first { 1 } else { 2 },
                         completed: 0
                     }
                 );
@@ -427,7 +435,7 @@ fn foreign_bound_error_retains_attempt_state_and_unpublished_facts() {
                 assert_eq!(
                     WORK.get(),
                     Work {
-                        inputs: 2,
+                        inputs: if foreign_first { 1 } else { 2 },
                         completed: 0
                     }
                 );
@@ -435,4 +443,37 @@ fn foreign_bound_error_retains_attempt_state_and_unpublished_facts() {
             },
         );
     }
+}
+
+#[test]
+fn a_single_foreign_bound_seed_cannot_supply_the_accumulators_store() {
+    with_parameter(
+        "trait Tr {}\nfn bad[T:Tr]() -> Unit = ()",
+        |resolver, source, id| {
+            let bound = resolver.source_generic_parameter(id).unwrap().1.bounds[0];
+            let mut foreign_store = DiagnosticStore::new();
+            let foreign = roots(&mut foreign_store, 1).pop().unwrap();
+            resolver
+                .source_generic_bound_seeds
+                .insert((id, bound), Resolution::Poisoned(foreign));
+            assert!(matches!(
+                resolver.resolve_source_generic(id),
+                Err(SignatureFlow::Internal(
+                    SignatureResolutionError::DiagnosticStore(DiagnosticStoreError::ForeignPoison)
+                ))
+            ));
+            assert!(matches!(
+                resolver
+                    .occurrences
+                    .state(&TypeOccurrenceId::new(source.file(), bound)),
+                FactState::Unperformed
+            ));
+            assert!(matches!(
+                resolver
+                    .generic_parameters
+                    .state(&GenericParameterId::Source(id)),
+                FactState::Unperformed
+            ));
+        },
+    );
 }

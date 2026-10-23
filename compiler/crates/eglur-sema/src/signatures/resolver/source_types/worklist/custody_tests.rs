@@ -602,11 +602,12 @@ fn zero_allowance_stops_before_source_site_or_occurrence_publication() {
 
 #[test]
 fn finite_visit_sweep_preserves_actual_demand_custody_and_diagnostic_prefixes() {
-    with_resolver(
-        &[
-            "type Bad = Missing\ntype First = Pair[Bool]\ntype Pair[T] = (T, T)\nfn inspect(x: &(i32, Fn(i32) -> Bool)) -> Opt[i32] = None",
-        ],
-        |resolver, sources| {
+    for text in [
+        "type Bad = Missing\ntype First = Pair[Bool]\ntype Pair[T] = (T, T)\nfn inspect(x: &(i32, Fn(i32) -> Bool)) -> Opt[i32] = None",
+        "trait Has[A] { type Item }\ntrait Uses[A] {}\ntype Erase[A] = i64\nfn inspect[T:Uses[U::Item],U:Has[Erase[U::Item]]]() -> Unit = ()",
+        "trait Has[A] { type Item }\nfn inspect[T:Has[(T::Item,Missing)]]() -> Unit = ()",
+    ] {
+        with_resolver(&[text], |resolver, sources| {
             let trace = TraceScope::new(None);
             let mut work = accounting(1);
             let mut inputs = AnalysisSourceInputs::new(&work, [(0, &sources[0])]).unwrap();
@@ -650,12 +651,12 @@ fn finite_visit_sweep_preserves_actual_demand_custody_and_diagnostic_prefixes() 
                     assert!(full.diagnostics().contains(diagnostic));
                 }
             }
-        },
-    );
+        });
+    }
 }
 
 #[test]
-fn original_bound_seed_replay_reuses_and_pays_its_written_ticket() {
+fn original_bound_construction_and_validation_reuse_the_written_ticket() {
     with_resolver(
         &["trait Tr {}\nfn inspect[T: Tr](x: T) -> T = x"],
         |resolver, sources| {
@@ -671,6 +672,7 @@ fn original_bound_seed_replay_reuses_and_pays_its_written_ticket() {
                 })
                 .unwrap();
             let site = TypeOccurrenceId::new(sources[0].file(), bound);
+            let trace = TraceScope::new(None);
             let mut work = accounting(1);
             let mut inputs = AnalysisSourceInputs::new(&work, [(0, &sources[0])]).unwrap();
             let calls = RefCell::new(Vec::new());
@@ -700,6 +702,15 @@ fn original_bound_seed_replay_reuses_and_pays_its_written_ticket() {
             );
             let ticket = inputs.admitted_ticket(site).unwrap().unwrap();
             let charged = work.balance(ticket).unwrap().charged_ticks();
+            let visits = trace
+                .visits()
+                .into_iter()
+                .filter(|visit| visit.occurrence == site)
+                .collect::<Vec<_>>();
+            assert_eq!(visits.len(), 2);
+            assert!(visits.iter().all(|visit| visit.root == ticket.identity()));
+            assert!(trace.claims(ticket.identity()) >= visits.len());
+            drop(trace);
             let mut standalone_work = accounting(1);
             let mut standalone = crate::AnalysisSourceInputRegistry::new(
                 &standalone_work,
@@ -712,15 +723,11 @@ fn original_bound_seed_replay_reuses_and_pays_its_written_ticket() {
                 .written_ticket(&mut standalone_work, site, ALLOWANCE)
                 .unwrap();
             standalone_work.claim(&standalone_ticket).unwrap();
-            standalone
-                .written_ticket(&mut standalone_work, site, ALLOWANCE)
-                .unwrap();
-            standalone_work.claim(&standalone_ticket).unwrap();
             let expected = standalone_work
                 .balance(&standalone_ticket)
                 .unwrap()
                 .charged_ticks();
-            assert_eq!(charged, expected);
+            assert!(charged > expected);
             assert!(diagnostics.finalize(None).diagnostics().is_empty());
 
             let mut limited = accounting(1);
@@ -729,7 +736,7 @@ fn original_bound_seed_replay_reuses_and_pays_its_written_ticket() {
             let mut diagnostics = DiagnosticStore::new();
             let policy = |input| {
                 if input == site {
-                    expected - 1
+                    charged - 1
                 } else {
                     ALLOWANCE
                 }

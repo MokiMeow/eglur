@@ -34,6 +34,39 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         self.claim_source_custody(&custody)?;
         #[cfg(test)]
         super::custody_tests::observe(self, TypeOccurrenceId::new(file, value), &custody)?;
+        if let Some(id) = request.construction {
+            use crate::signatures::resolver::source_bounds::{
+                ConstructedReference, ConstructionState,
+            };
+            match self.source_bounds.state(id).clone() {
+                ConstructionState::Complete(result) => {
+                    return Ok(AliasPlan::Complete(result.map(|value| match value {
+                        ConstructedReference::Alias(template) => template,
+                        _ => unreachable!("alias construction stores an alias template"),
+                    })));
+                }
+                ConstructionState::Active => return Ok(AliasPlan::Blocked(None)),
+                ConstructionState::Blocked(poison) => return Ok(AliasPlan::Blocked(poison)),
+                ConstructionState::Pending => {
+                    self.source_bounds.set_state(id, ConstructionState::Active)
+                }
+            }
+            let context = self.source_context(alias, false)?;
+            return Ok(AliasPlan::Body {
+                request: TypeRequest {
+                    site: Rc::new(SourceSite {
+                        owner: alias,
+                        file,
+                        context,
+                        custody,
+                        construction: Some(id),
+                    }),
+                    type_ref: value,
+                    position: TypePosition::Ordinary,
+                },
+                generic_parameters: self.direct_generic_ids(alias),
+            });
+        }
         if let Some(state) = self.alias_states.get(&alias).cloned() {
             let result = match state {
                 AliasState::Resolving => {
@@ -77,6 +110,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             file,
             context,
             custody,
+            construction: None,
         });
         Ok(AliasPlan::Body {
             request: TypeRequest {

@@ -3,6 +3,7 @@ use eglur_driver::{
     CompileAttempt, CompileDisposition, CompilerSession, FileSetRequest, SessionOptions,
     SupportProfile, TrustedCatalog,
 };
+use eglur_sema::{DeclarationKind, FactState};
 
 fn compile(source: &str) -> (DiagnosticSnapshot, CompileDisposition) {
     let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
@@ -137,4 +138,246 @@ fn dependent_bounds_use_the_complete_argument_vector_in_both_directions() {
         "fn take() -> Bool = pick(true, 1)\n",
     );
     assert_failed_bound(source, "Link[i64]", "pick(true, 1)");
+}
+
+fn assert_source_bound_result(source: &str, code: Option<&str>) {
+    let (snapshot, disposition) = compile(source);
+    let diagnostics = snapshot.diagnostics();
+    if let Some(code) = code {
+        assert_eq!(disposition, CompileDisposition::Rejected, "{source}");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code().as_str() == code),
+            "{source}: {diagnostics:?}"
+        );
+    } else {
+        assert!(diagnostics.is_empty(), "{source}: {diagnostics:?}");
+        assert_eq!(disposition, CompileDisposition::Succeeded, "{source}");
+    }
+}
+
+#[test]
+fn source_projection_uses_the_complete_bound_set_in_every_order() {
+    for bounds in [
+        "Uses[T::Item]+More[T::Item]+HasItem",
+        "More[T::Item]+Uses[T::Item]+HasItem",
+        "Uses[T::Item]+HasItem+More[T::Item]",
+        "More[T::Item]+HasItem+Uses[T::Item]",
+        "HasItem+Uses[T::Item]+More[T::Item]",
+        "HasItem+More[T::Item]+Uses[T::Item]",
+    ] {
+        assert_source_bound_result(
+            &format!(
+                "trait HasItem {{ type Item }}\ntrait Uses[A] {{}}\ntrait More[A] {{}}\nfn valid[T:{bounds}]() -> Unit = ()\n"
+            ),
+            None,
+        );
+    }
+}
+
+#[test]
+fn projected_declaring_references_support_forward_parameters_and_bound_order() {
+    for bounds in ["Has[U::Item]+Uses[T::Item]", "Uses[T::Item]+Has[U::Item]"] {
+        for parameters in [
+            format!("T:{bounds},U:Other[i64]"),
+            format!("U:Other[i64],T:{bounds}"),
+        ] {
+            assert_source_bound_result(
+                &format!(
+                    "trait Has[A] {{ type Item }}\ntrait Other[A] {{ type Item }}\ntrait Uses[A] {{}}\nfn valid[{parameters}]() -> Unit = ()\n"
+                ),
+                None,
+            );
+        }
+    }
+}
+
+#[test]
+fn complete_declaring_references_distinguish_ambiguity_from_duplicates() {
+    for bounds in [
+        "Has[i32]+Has[i64]+Uses[T::Item]",
+        "Uses[T::Item]+Has[i32]+Has[i64]",
+        "Has[i32]+Uses[T::Item]+Other[i64]",
+        "Other[i64]+Uses[T::Item]+Has[i32]",
+    ] {
+        assert_source_bound_result(
+            &format!(
+                "trait Has[A] {{ type Item }}\ntrait Other[A] {{ type Item }}\ntrait Uses[A] {{}}\nfn bad[T:{bounds}]() -> Unit = ()\n"
+            ),
+            Some("ASSOCIATED_TYPE_PROJECTION_INVALID"),
+        );
+    }
+    for bounds in [
+        "Has[i64]+Has[Alias]+Uses[T::Item]",
+        "Uses[T::Item]+Has[Alias]+Has[i64]",
+    ] {
+        assert_source_bound_result(
+            &format!(
+                "trait Has[A] {{ type Item }}\ntrait Uses[A] {{}}\ntype Alias = i64\nfn bad[T:{bounds}]() -> Unit = ()\n"
+            ),
+            Some("TRAIT_BOUND_INVALID"),
+        );
+    }
+}
+
+#[test]
+fn bound_reference_cycles_select_the_first_participating_projection() {
+    for (prefix, parameters, primary) in [
+        ("", "T:Has[T::Item]", "T::Item"),
+        ("", "T:Has[U::Item],U:Has[T::Item]", "U::Item"),
+        ("", "U:Has[T::Item],T:Has[U::Item]", "T::Item"),
+        (
+            "struct Wrap[A] { field value: A }\n",
+            "T:Has[Wrap[T::Item]]",
+            "T::Item",
+        ),
+        (
+            "type Identity[A] = A\n",
+            "T:Has[Identity[T::Item]]",
+            "T::Item",
+        ),
+        (
+            "type Identity[A] = A\ntype Nested[A] = Identity[A]\n",
+            "T:Has[Nested[T::Item]]",
+            "T::Item",
+        ),
+    ] {
+        let source =
+            format!("trait Has[A] {{ type Item }}\n{prefix}fn bad[{parameters}]() -> Unit = ()\n");
+        let (snapshot, disposition) = compile(&source);
+        assert_eq!(disposition, CompileDisposition::Rejected, "{source}");
+        let diagnostics = snapshot.diagnostics();
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        assert_eq!(
+            diagnostics[0].code().as_str(),
+            "GENERIC_BOUND_REFERENCE_CYCLE",
+            "{source}"
+        );
+        let range = diagnostics[0]
+            .primary_span()
+            .as_source()
+            .unwrap()
+            .file_span()
+            .range();
+        assert_eq!(
+            &source[range.start().as_usize()..range.end().as_usize()],
+            primary,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn finite_mutual_bounds_and_completed_projection_sharing_are_not_cycles() {
+    for parameters in [
+        "T:Has[U],U:Has[T]",
+        "T:Has[Wrap[T]]",
+        "T:Has[i64]+Uses[(T::Item,T::Item)]",
+        "T:Has[U::Item],U:Has[i64]",
+    ] {
+        assert_source_bound_result(
+            &format!(
+                "trait Has[A] {{ type Item }}\ntrait Uses[A] {{}}\nstruct Wrap[A] {{ field value: A }}\nfn valid[{parameters}]() -> Unit = ()\n"
+            ),
+            None,
+        );
+    }
+}
+
+#[test]
+fn alias_erasure_removes_only_construction_dependencies_not_source_validation() {
+    for aliases in [
+        "type Erase[A] = i64",
+        "type Drop[A] = i64\ntype Erase[A] = Drop[A]",
+    ] {
+        let prelude = format!("trait Has[A] {{ type Item }}\n{aliases}\n");
+        assert_source_bound_result(
+            &format!("{prelude}fn valid[T:Has[Erase[T::Item]]]() -> Unit = ()\n"),
+            None,
+        );
+        for (argument, code) in [
+            ("Missing", "NAME_NOT_FOUND"),
+            ("&i64", "REFERENCE_TYPE_POSITION_FORBIDDEN"),
+            ("T::Missing", "ASSOCIATED_TYPE_PROJECTION_INVALID"),
+            ("T::Item::Next", "ASSOCIATED_TYPE_PROJECTION_INVALID"),
+            ("Erase[i64,i64]", "TYPE_ARG_ARITY_MISMATCH"),
+        ] {
+            assert_source_bound_result(
+                &format!("{prelude}fn bad[T:Has[Erase[{argument}]]]() -> Unit = ()\n"),
+                Some(code),
+            );
+        }
+    }
+    assert_source_bound_result(
+        "trait Has[A] { type Item }\ntrait Marker {}\ntype Erase[A:Marker] = i64\nfn bad[T:Has[Erase[T::Item]]]() -> Unit = ()\n",
+        Some("TRAIT_BOUND_NOT_SATISFIED"),
+    );
+}
+
+#[test]
+fn alias_projection_templates_keep_their_own_declaring_references() {
+    assert_source_bound_result(
+        "trait Has[A] { type Item }\ntrait Uses[A] {}\ntype Projected[A:Has[i64]] = A::Item\nfn valid[T:Uses[Projected[T]]+Has[i64]]() -> Unit = ()\n",
+        None,
+    );
+    assert_source_bound_result(
+        "trait Has[A] { type Item }\ntype First[A] = Second[A]\ntype Second[A] = First[A]\nfn bad[T:Has[First[i64]]]() -> Unit = ()\n",
+        Some("TYPE_ALIAS_CYCLE"),
+    );
+    assert_source_bound_result(
+        "trait Has[A] { type Item }\ntrait Uses[A] {}\ntype Projected[A,B:Has[A]] = B::Item\nfn valid[X,Y:Has[X]+Uses[Projected[X,Y]]]() -> Unit = ()\n",
+        None,
+    );
+    assert_source_bound_result(
+        "trait Has[A] { type Item }\ntype Second[A,B] = B\nfn valid[T:Has[Second[T::Item,i64]]]() -> Unit = ()\n",
+        None,
+    );
+}
+
+#[test]
+fn invalid_complete_bounds_do_not_publish_the_function_and_preserve_later_functions() {
+    for declaration in [
+        "fn bad[T:Has[T::Item]]() -> Unit = ()",
+        "fn bad[T:Other[T::Item]+Has[i64]]() -> Unit = ()",
+        "fn bad[T:Uses[U::Item],U:Has[Erase[Missing]]]() -> Unit = ()",
+        "fn bad[U:Has[Erase[Missing]],T:Uses[U::Item]]() -> Unit = ()",
+    ] {
+        let source = format!(
+            "trait Has[A] {{ type Item }}\ntrait Other[A] {{ type Item }}\ntrait Uses[A] {{}}\ntype Erase[A] = i64\n{declaration}\nfn after() -> Unit = ()"
+        );
+        let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
+        let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
+        let catalog = TrustedCatalog::first_slice().unwrap();
+        let analysis = session
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        assert!(!analysis.trace().has_missing(), "{source}");
+        let resolution = analysis.resolution().unwrap();
+        for declaration in resolution
+            .declarations()
+            .modules()
+            .flat_map(|module| module.declarations())
+            .filter(|declaration| declaration.kind() == DeclarationKind::Function)
+        {
+            let name = declaration.name().unwrap().text();
+            let state = resolution.signatures().source_declaration(declaration.id());
+            if name == "bad" {
+                assert!(
+                    matches!(state, FactState::Poisoned(_)),
+                    "{source}: {state:?}"
+                );
+            }
+            if name == "after" {
+                assert!(matches!(state, FactState::Known(_)), "{source}: {state:?}");
+            }
+        }
+        let sealed = session.seal(None).unwrap();
+        assert_eq!(
+            CompileAttempt::finalize(sealed, None)
+                .unwrap()
+                .disposition(),
+            CompileDisposition::Rejected
+        );
+    }
 }
