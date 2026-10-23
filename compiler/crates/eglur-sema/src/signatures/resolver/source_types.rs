@@ -127,7 +127,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     _ => Ok((Resolution::Unperformed, None)),
                 };
             };
-            (base, bounds.to_vec())
+            (base, bounds.iter().cloned().collect::<Vec<_>>())
         };
         let mut candidates = Vec::new();
         for trait_ref in trait_refs {

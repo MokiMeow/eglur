@@ -339,7 +339,7 @@ struct SignatureResolver<'input, 'hir> {
     trusted_inherent_owners: BTreeMap<ConcreteOwnerHead, InherentMethodInventory>,
     prelude_traits: BTreeSet<PreludeTraitSignature>,
     generic_types: BTreeMap<GenericParameterId, TypeId>,
-    generic_bounds: BTreeMap<GenericParameterId, Box<[TraitRef]>>,
+    generic_bounds: BTreeMap<GenericParameterId, BTreeSet<TraitRef>>,
     source_generic_redeclarations: BTreeSet<DefId>,
     source_generic_names: std::rc::Rc<generic_names::SourceGenericNameIndex>,
     frozen_source_generic_scopes: Option<BTreeMap<DefId, Resolution<()>>>,

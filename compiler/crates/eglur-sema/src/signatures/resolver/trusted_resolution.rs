@@ -868,7 +868,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             let signature =
                 GenericParameterSignature::new(id.clone(), parameter.name.clone(), bounds);
             self.generic_bounds
-                .insert(id.clone(), signature.bounds().into());
+                .insert(id.clone(), signature.bounds().iter().cloned().collect());
             self.generic_parameters
                 .insert(id, SemanticFact::Known(signature))?;
         }

@@ -233,7 +233,10 @@ fn known_bounds_preserve_declaration_and_canonical_orders_without_completion() {
             canonical.sort();
             assert_eq!(signature.bounds(), canonical);
             assert_eq!(
-                resolver.generic_bounds[&GenericParameterId::Source(id)].as_ref(),
+                resolver.generic_bounds[&GenericParameterId::Source(id)]
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>(),
                 canonical
             );
             assert!(resolver.source_generic_stack.is_empty());
