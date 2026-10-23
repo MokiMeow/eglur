@@ -1296,6 +1296,24 @@ codes:
       - name
       conditional_required: []
       exact_value_keys: []
+  GENERIC_BOUND_REFERENCE_CYCLE:
+    severity: error
+    message:
+      all_of:
+      - generic
+      - bound
+      - reference
+      - cycle
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required: []
+      required_if_emitted:
+      - parameter
+      - cycle
+      conditional_required: []
+      exact_value_keys: []
   GENERIC_PARAMETER_REDECLARATION:
     severity: error
     message:

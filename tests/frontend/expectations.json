@@ -20689,6 +20689,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-traits",
+        "test_id": "TRT-completed-bound-projections-can-be-shared"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\ntrait Uses[A] {}\nfn valid[T: Has[i64] + Uses[(T::Item, T::Item)]]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
         "test_id": "TRT-concrete-alias-does-not-qualify-trait-impl-method"
       },
       "public_examples": [],
@@ -20869,6 +20887,60 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-traits",
+        "test_id": "TRT-erased-bound-argument-still-requires-name-resolution"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\ntype Erase[A] = i64\nfn bad[T: Has[Erase[Missing]]]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-erased-bound-argument-still-requires-reference-free-validation"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\ntype Erase[A] = i64\nfn bad[T: Has[Erase[&i64]]]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-erasing-alias-removes-canonical-bound-dependency"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\ntype Erase[A] = i64\nfn valid[T: Has[Erase[T::Item]]]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
         "test_id": "TRT-explicit-bounds-and-associated-types-preserve-carrier-and-result-types"
       },
       "public_examples": [],
@@ -20941,12 +21013,102 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-traits",
+        "test_id": "TRT-finite-mutual-bounds-are-not-construction-cycles"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\nfn valid[T: Has[U], U: Has[T]]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-finite-projected-bound-dependency-is-permitted"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\nfn valid[T: Has[U::Item], U: Has[i64]]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
         "test_id": "TRT-foo-and-foo-are-distinct-names"
       },
       "public_examples": [],
       "source": {
         "kind": "utf8",
         "text": "trait A { fn foo(self: &Self) -> i64 = 1 }\ntrait B { fn foo!(self: &mut Self) -> Unit {} }\n\nstruct C {}\nimpl A for C {}\nimpl B for C {}\n\nfn main!() -> Res[Str, Str] { yield Ok(to_str(A.foo(&C{}))) }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-generic-bound-rejects-direct-reference-construction-cycle"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\nfn bad[T: Has[T::Item]]() -> Unit = () // @primary direct-bound-cycle\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-generic-bound-rejects-mutual-reference-cycle"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\nfn bad[\n  T: Has[U::Item], // @primary mutual-bound-cycle\n  U: Has[T::Item],\n]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-generic-bound-rejects-mutual-reference-cycle-reordered"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\nfn bad[\n  U: Has[T::Item], // @primary mutual-bound-cycle\n  T: Has[U::Item],\n]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
       }
     },
     {
@@ -21055,6 +21217,24 @@
       "source": {
         "kind": "utf8",
         "text": "trait Loop[A] {}\nimpl[A, T: Loop[Opt[A]]] Loop[A] for T {}\nfn bounded[T: Loop[i64]](value: T) -> T = value\nfn forward[T: Loop[Opt[Opt[i64]]]](value: T) -> T = bounded(value)\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-identity-alias-does-not-hide-bound-reference-cycle"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\ntype Identity[A] = A\nfn bad[T: Has[Identity[T::Item]]]() -> Unit = () // @primary aliased-bound-cycle\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
       }
     },
     {
@@ -21463,6 +21643,42 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-traits",
+        "test_id": "TRT-nominal-f-bound-is-not-reference-construction-cycle"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\nstruct Wrap[A] { field value: A }\nfn valid[T: Has[Wrap[T]]]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-nominal-wrapper-does-not-break-bound-reference-cycle"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\nstruct Wrap[A] { field value: A }\nfn bad[T: Has[Wrap[T::Item]]]() -> Unit = () // @primary wrapped-bound-cycle\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
         "test_id": "TRT-orphan-rule-rejects-impl-when-both-trait-and-type-are-non-local"
       },
       "public_examples": [],
@@ -21667,6 +21883,24 @@
       "source": {
         "kind": "utf8",
         "text": "struct Priority {\n  field rank: i64\n}\n\nimpl Eq for Priority {\n  fn eq(self: &Self, other: &Self) -> Bool = self.rank == other.rank\n}\n\nimpl Ord for Priority {\n  fn cmp(self: &Self, other: &Self) -> Ordering =\n    Ord.cmp(&other.rank, &self.rank)\n}\n\nfn main!() -> Res[Str, Str] {\n  let high = Priority{ rank: 10 }\n  let low = Priority{ rank: 1 }\n  let same = Priority{ rank: 10 }\n  yield Ok(to_str((high < low) && (high <= same) && (low > high)))\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
+        "test_id": "TRT-projected-declaring-bound-remains-available-after-its-use"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Has[A] { type Item }\ntrait Other[A] { type Item }\ntrait Uses[A] {}\nfn valid[T: Uses[T::Item] + Has[U::Item], U: Other[i64]]() -> Unit = ()\n\nfn main!() -> Res[Str, Str] { yield Ok(\"x\") }\n"
       }
     },
     {
@@ -39587,6 +39821,6 @@
       }
     }
   ],
-  "input_digest": "sha256:3ebf85cb06b64382fe7f6a62f28925d8ba64a2ca0eeae9cec69b8d5d940befdb",
+  "input_digest": "sha256:8bdc9165dc3aecbbdb0011bd3958fe7a53c28a7b8472bbf0e6dab33d6c9ddb09",
   "schema_version": "0.1"
 }

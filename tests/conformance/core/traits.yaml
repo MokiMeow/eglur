@@ -1607,6 +1607,219 @@ tests:
       - projection
       - invalid
       data_keys: []
+- id: TRT-generic-bound-rejects-direct-reference-construction-cycle
+  category: traits
+  title: Generic bound rejects direct reference construction cycle
+  code: |
+    trait Has[A] { type Item }
+    fn bad[T: Has[T::Item]]() -> Unit = () // @primary direct-bound-cycle
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: GENERIC_BOUND_REFERENCE_CYCLE
+      message_contains:
+      - generic
+      - bound
+      - reference
+      - cycle
+      data_keys: []
+      primary_span:
+        marker: direct-bound-cycle
+- id: TRT-generic-bound-rejects-mutual-reference-cycle
+  category: traits
+  title: Generic bound rejects mutual reference cycle
+  code: |
+    trait Has[A] { type Item }
+    fn bad[
+      T: Has[U::Item], // @primary mutual-bound-cycle
+      U: Has[T::Item],
+    ]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: GENERIC_BOUND_REFERENCE_CYCLE
+      message_contains:
+      - generic
+      - bound
+      - reference
+      - cycle
+      data_keys: []
+      primary_span:
+        marker: mutual-bound-cycle
+- id: TRT-generic-bound-rejects-mutual-reference-cycle-reordered
+  category: traits
+  title: Generic bound rejects mutual reference cycle after reordering
+  code: |
+    trait Has[A] { type Item }
+    fn bad[
+      U: Has[T::Item], // @primary mutual-bound-cycle
+      T: Has[U::Item],
+    ]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: GENERIC_BOUND_REFERENCE_CYCLE
+      message_contains:
+      - generic
+      - bound
+      - reference
+      - cycle
+      data_keys: []
+      primary_span:
+        marker: mutual-bound-cycle
+- id: TRT-nominal-wrapper-does-not-break-bound-reference-cycle
+  category: traits
+  title: Nominal wrapper does not break bound reference cycle
+  code: |
+    trait Has[A] { type Item }
+    struct Wrap[A] { field value: A }
+    fn bad[T: Has[Wrap[T::Item]]]() -> Unit = () // @primary wrapped-bound-cycle
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: GENERIC_BOUND_REFERENCE_CYCLE
+      message_contains:
+      - generic
+      - bound
+      - reference
+      - cycle
+      data_keys: []
+      primary_span:
+        marker: wrapped-bound-cycle
+- id: TRT-identity-alias-does-not-hide-bound-reference-cycle
+  category: traits
+  title: Identity alias does not hide bound reference cycle
+  code: |
+    trait Has[A] { type Item }
+    type Identity[A] = A
+    fn bad[T: Has[Identity[T::Item]]]() -> Unit = () // @primary aliased-bound-cycle
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: GENERIC_BOUND_REFERENCE_CYCLE
+      message_contains:
+      - generic
+      - bound
+      - reference
+      - cycle
+      data_keys: []
+      primary_span:
+        marker: aliased-bound-cycle
+- id: TRT-finite-mutual-bounds-are-not-construction-cycles
+  category: traits
+  title: Finite mutual bounds are not construction cycles
+  code: |
+    trait Has[A] { type Item }
+    fn valid[T: Has[U], U: Has[T]]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-finite-projected-bound-dependency-is-permitted
+  category: traits
+  title: Finite projected bound dependency is permitted
+  code: |
+    trait Has[A] { type Item }
+    fn valid[T: Has[U::Item], U: Has[i64]]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-projected-declaring-bound-remains-available-after-its-use
+  category: traits
+  title: Projected declaring bound remains available after its use
+  code: |
+    trait Has[A] { type Item }
+    trait Other[A] { type Item }
+    trait Uses[A] {}
+    fn valid[T: Uses[T::Item] + Has[U::Item], U: Other[i64]]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-completed-bound-projections-can-be-shared
+  category: traits
+  title: Completed bound projections can be shared
+  code: |
+    trait Has[A] { type Item }
+    trait Uses[A] {}
+    fn valid[T: Has[i64] + Uses[(T::Item, T::Item)]]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-nominal-f-bound-is-not-reference-construction-cycle
+  category: traits
+  title: Nominal F-bound is not reference construction cycle
+  code: |
+    trait Has[A] { type Item }
+    struct Wrap[A] { field value: A }
+    fn valid[T: Has[Wrap[T]]]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-erasing-alias-removes-canonical-bound-dependency
+  category: traits
+  title: Erasing alias removes canonical bound dependency
+  code: |
+    trait Has[A] { type Item }
+    type Erase[A] = i64
+    fn valid[T: Has[Erase[T::Item]]]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    value:
+      kind: Ok
+      repr: '"x"'
+- id: TRT-erased-bound-argument-still-requires-name-resolution
+  category: traits
+  title: Erased bound argument still requires name resolution
+  code: |
+    trait Has[A] { type Item }
+    type Erase[A] = i64
+    fn bad[T: Has[Erase[Missing]]]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: NAME_NOT_FOUND
+      message_contains:
+      - name
+      - not found
+      data_keys: []
+- id: TRT-erased-bound-argument-still-requires-reference-free-validation
+  category: traits
+  title: Erased bound argument still requires reference-free validation
+  code: |
+    trait Has[A] { type Item }
+    type Erase[A] = i64
+    fn bad[T: Has[Erase[&i64]]]() -> Unit = ()
+
+    fn main!() -> Res[Str, Str] { yield Ok("x") }
+  expect:
+    compile_error:
+      code: REFERENCE_TYPE_POSITION_FORBIDDEN
+      message_contains:
+      - reference
+      - type position
+      - forbidden
+      data_keys: []
 - id: TRT-associated-type-bindings-must-not-form-a-cycle
   category: traits
   title: associated type bindings must not form a cycle

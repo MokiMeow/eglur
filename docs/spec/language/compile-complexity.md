@@ -14,6 +14,7 @@ To preserve fast compilation, the v0.1.0 core:
    those sets MUST NOT introduce region inference or lifetime solving.
 6. Trait-bound checking MUST remain first-order nominal obligation resolution over declared impl heads and inline bounds. It MUST terminate through a finite normalized-obligation worklist, memoization, or an equivalent cycle-safe strategy.
    Building that environment and validating dependent bound arguments are finite two-pass declaration checks. Exact environment lookup is local assumption matching, not global proof search.
+   Source bound-reference construction MUST use a finite memoized dependency representation rather than repeatedly expanding every declaring reference. Once that representation has been constructed, cycle checking MUST be `O(V + E)` in its vertices and edges. Representation construction, alias normalization, argument validation, and key/payload work are separate costs; this does not establish a source-linear bound for the whole compiler. A completed dependency MUST NOT be mistaken for an active construction cycle.
    Trait default-body checking MUST collect the finite member-signature set once,
    add only the exact symbolic current-trait obligation and its fixed
    compiler-known prerequisites, and check each body once against abstract
