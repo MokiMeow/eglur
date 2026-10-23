@@ -34,6 +34,9 @@ mod grouped_calls;
 #[path = "body_types/invocation_traversal.rs"]
 mod invocation_traversal;
 
+#[path = "body_types/inference_inputs.rs"]
+mod inference_inputs;
+
 #[path = "body_types/numeric_traversal.rs"]
 mod numeric_traversal;
 

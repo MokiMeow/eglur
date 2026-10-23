@@ -43,6 +43,7 @@ pub(super) fn sources() -> Vec<(&'static str, String, bool)> {
         ("explicit", format!("{id}\nfn inspect(x: i32) -> i32 = id::[i32](x)"), true),
         ("probe", format!("{id}\nfn inspect(x: i32) -> Unit {{\nlet out = id(x)\n}}"), true),
         ("function-value", format!("{id}\nfn inspect(x: i32) -> i32 {{\nlet f: Fn(i32) -> i32 = id\nyield f(x)\n}}"), true),
+        ("wide-callable-value", "struct S {}\noverload fn choose[T](x: S, seed: T, tag: Bool) -> T = seed\noverload fn choose[T, U](x: T, seed: U, tag: i32) -> U = seed\nfn inspect() -> Unit {\nlet value: Fn((i32, i32, i32, i32), i32, i32) -> i32 = choose\nyield ()\n}".into(), true),
         ("branches", "fn inspect(flag: Bool, x: i32, y: i32) -> i32 {\nlet v: i32 = if flag { yield x } else { yield y }\nyield match v { _ if flag => x, _ => y }\n}".into(), true),
         ("pattern-bindings", format!("{id}\nfn inspect(input: ((i32, i32), (i32, i32))) -> i32 = match input {{ ((first, second), (third, fourth)) if true => id(first), ((a, b), (c, d)) => id(d) }}"), true),
         ("tuple-rest", format!("type Wide = (i32, Bool, i32, Bool, i32, Bool, i32, Bool)\n{id}\nfn inspect(input: Wide) -> i32 = match input {{ (first, ..) if true => id(first), (last, ..) => id(last) }}"), true),

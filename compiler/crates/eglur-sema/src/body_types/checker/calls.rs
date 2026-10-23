@@ -2,6 +2,9 @@ use super::application::ApplicationPlan;
 use super::invocation::InvocationFrame;
 use super::*;
 
+#[cfg(test)]
+mod inference_tests;
+
 impl QualifiedMethodOwner {
     pub(super) fn matches_subject(
         &self,
@@ -1232,21 +1235,23 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         parameters: &BTreeSet<GenericParameterId>,
         replacements: &mut BTreeMap<GenericParameterId, TypeId>,
     ) -> Result<ConstraintOutcome, BodyFlow> {
-        let template_kind = self.signatures.types().kind(template)?.clone();
+        #[cfg(test)]
+        inference_tests::observe_visit();
+        let template_kind = self.signatures.types().kind(template)?;
         if let TypeKind::GenericParameter(parameter) = template_kind {
-            if !parameters.contains(&parameter) {
+            if !parameters.contains(parameter) {
                 return Ok(ConstraintOutcome::NoEvidence);
             }
-            if let Some(&existing) = replacements.get(&parameter) {
+            if let Some(&existing) = replacements.get(parameter) {
                 if actual == self.signatures.types().never() || existing == actual {
                     return Ok(ConstraintOutcome::Evidence);
                 }
                 return Ok(ConstraintOutcome::Conflict);
             }
-            replacements.insert(parameter, actual);
+            replacements.insert(parameter.clone(), actual);
             return Ok(ConstraintOutcome::Evidence);
         }
-        let actual_kind = self.signatures.types().kind(actual)?.clone();
+        let actual_kind = self.signatures.types().kind(actual)?;
         let pairs = match (template_kind, actual_kind) {
             (
                 TypeKind::Nominal {
@@ -1260,13 +1265,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ) if template_head == actual_head => self
                 .signatures
                 .types()
-                .substitution(template_substitution)?
+                .substitution(*template_substitution)?
                 .iter()
                 .copied()
                 .zip(
                     self.signatures
                         .types()
-                        .substitution(actual_substitution)?
+                        .substitution(*actual_substitution)?
                         .iter()
                         .copied(),
                 )
@@ -1293,7 +1298,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .iter()
                 .copied()
                 .zip(actual_parameters.iter().copied())
-                .chain([(template_result, actual_result)])
+                .chain([(*template_result, *actual_result)])
                 .collect(),
             (
                 TypeKind::Reference {
@@ -1305,10 +1310,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     referent: actual_referent,
                 },
             ) if template_mutability == actual_mutability
-                || (template_mutability == ReferenceMutability::Shared
-                    && actual_mutability == ReferenceMutability::Mutable) =>
+                || (*template_mutability == ReferenceMutability::Shared
+                    && *actual_mutability == ReferenceMutability::Mutable) =>
             {
-                vec![(template_referent, actual_referent)]
+                vec![(*template_referent, *actual_referent)]
             }
             (
                 TypeKind::RawPointer {
@@ -1320,13 +1325,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     referent: actual_referent,
                 },
             ) if template_mutability == actual_mutability
-                || (template_mutability == RawPointerMutability::Const
-                    && actual_mutability == RawPointerMutability::Mutable) =>
+                || (*template_mutability == RawPointerMutability::Const
+                    && *actual_mutability == RawPointerMutability::Mutable) =>
             {
-                vec![(template_referent, actual_referent)]
+                vec![(*template_referent, *actual_referent)]
             }
             _ => return Ok(ConstraintOutcome::NoEvidence),
         };
+        #[cfg(test)]
+        inference_tests::observe_pairs(pairs.len());
         let mut outcome = ConstraintOutcome::NoEvidence;
         for (template, actual) in pairs {
             match self.infer_constraints(template, actual, parameters, replacements)? {
