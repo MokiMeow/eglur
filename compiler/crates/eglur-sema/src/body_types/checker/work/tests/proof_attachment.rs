@@ -282,6 +282,41 @@ fn empty_metered_packets_still_reject_foreign_accounting() {
 }
 
 #[test]
+fn evidence_work_refuses_an_unmetered_body_packet() {
+    with_inputs("fn inspect() -> Unit = ()", |mut inputs, external| {
+        let mut accounting = accounting();
+        let (mut sources, mut bodies) = analysis_inputs(&accounting, &inputs);
+        let BodyExecution::Completed(packet) = run(
+            &mut inputs,
+            external,
+            BodyAnalysisWork::new(&mut accounting, &mut sources, &mut bodies, &|_| ALLOWANCE),
+        )
+        .unwrap() else {
+            panic!("body missing")
+        };
+        let (phase, _) = packet.into_parts();
+        let unmetered =
+            crate::CompletedBodyExecution::new(phase, BodyProofInputs::Unmetered).unwrap();
+        assert!(matches!(
+            crate::resolve_trait_evidence_with_work(
+                inputs.collection,
+                inputs.sources,
+                &Support,
+                inputs.declarations.signatures_mut(),
+                inputs.trait_environment,
+                &unmetered,
+                inputs.diagnostics,
+                &mut accounting,
+            ),
+            Err(crate::TraitEvidenceError::InvalidProofCustody(
+                "unmetered body packet"
+            ))
+        ));
+        assert!(!inputs.diagnostics.has_errors());
+    });
+}
+
+#[test]
 fn trusted_bound_contracts_keep_their_declared_order_and_original_tickets() {
     use crate::{
         ExternalDeclaration, ExternalDefId, InherentMemberForm, ModuleAddress,

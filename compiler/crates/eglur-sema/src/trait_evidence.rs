@@ -21,8 +21,15 @@ use crate::{
     TraitImplEvidence, TraitObligation, TraitProof, TraitRef, TypeId, WitnessSlotId,
 };
 
+mod execution;
 mod proof;
 mod route;
+mod work;
+
+pub use execution::{
+    InterruptedTraitEvidence, TraitEvidenceExecution, TraitEvidencePrefix,
+    resolve_trait_evidence_with_work,
+};
 
 #[cfg(test)]
 mod record_growth_tests;
@@ -289,12 +296,43 @@ pub fn resolve_trait_evidence(
     body_types: &BodyTypes,
     diagnostics: &mut DiagnosticStore,
 ) -> Result<PhaseAnalysis<TraitEvidence>, TraitEvidenceError> {
+    match execution::execute(
+        collection,
+        sources,
+        support,
+        signatures,
+        trait_environment,
+        Some(body_types),
+        diagnostics,
+        work::EvidenceInputs::Unmetered,
+    )? {
+        TraitEvidenceExecution::Completed(phase) => Ok(*phase),
+        TraitEvidenceExecution::Interrupted(_) => {
+            Err(TraitEvidenceError::UnexpectedUnmeteredInterruption)
+        }
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "evidence traversal coordinates independent phase, storage and work owners"
+)]
+fn traverse_evidence(
+    collection: &DeclarationCollection,
+    sources: &[SemanticSource<'_>],
+    signatures: &mut DeclarationSignatures,
+    trait_environment: &mut TraitEnvironment,
+    body_types: &BodyTypes,
+    diagnostics: &mut DiagnosticStore,
+    recorder: &mut DemandRecorder<'_>,
+    state: &mut execution::EvidenceState,
+    work: &mut work::EvidenceInputs<'_>,
+) -> Result<execution::EvidenceTraversal, execution::EvidenceFlow> {
     let source_map = sources
         .iter()
         .map(|source| (source.file(), source))
         .collect::<BTreeMap<_, _>>();
     let invocations = body_types.invocations().collect::<Vec<_>>();
-    let mut recorder = DemandRecorder::new(support);
     let capability = CompileCapability::Typecheck(TypecheckCapability::ResolveTraitEvidence);
     let mut supported = true;
     for (key, _) in &invocations {
@@ -310,36 +348,40 @@ pub fn resolve_trait_evidence(
         );
     }
     if !supported {
-        return Ok(recorder.finish(PhaseProduct::Unperformed));
+        return Ok(execution::EvidenceTraversal::Unperformed);
     }
 
     let mut obligations = BTreeMap::<ExpressionKey, Vec<_>>::new();
-    for obligation in body_types.obligations() {
+    for (index, obligation) in body_types.obligations().iter().enumerate() {
         obligations
             .entry(obligation.site())
             .or_default()
-            .push(obligation);
+            .push(index);
     }
     let mut invocation_dispatches = BTreeMap::new();
     let mut callable_dispatches = BTreeMap::new();
-    for dispatch in body_types.method_dispatches() {
+    for (index, dispatch) in body_types.method_dispatches().iter().enumerate() {
         let site = dispatch.site();
         let target = match site {
             MethodDispatchSite::Invocation(_) => &mut invocation_dispatches,
             MethodDispatchSite::CallableValue(_) => &mut callable_dispatches,
         };
-        if target.insert(site.key(), dispatch).is_some() {
-            return Err(TraitEvidenceError::DuplicateMethodDispatch(site.key()));
+        if target.insert(site.key(), index).is_some() {
+            return Err(TraitEvidenceError::DuplicateMethodDispatch(site.key()).into());
         }
     }
-    let mut checked = FactTable::new();
-    let mut environments = Vec::new();
-    let mut environment_ids = BTreeMap::<Box<[EvidenceEntry]>, EvidenceEnvironmentId>::new();
-    let mut proofs = ProofArena::default();
+    let execution::EvidenceState {
+        invocations: checked,
+        callable_values,
+        environments,
+        environment_ids,
+        proofs,
+        method_routes,
+    } = state;
     for (key, invocation) in invocations {
         if let InvocationTarget::CallableValue { callee, ty } = invocation.target() {
             if obligations.contains_key(&key) || invocation_dispatches.contains_key(&key) {
-                return Err(TraitEvidenceError::UnexpectedIndirectEvidence(key));
+                return Err(TraitEvidenceError::UnexpectedIndirectEvidence(key).into());
             }
             checked.insert(
                 key,
@@ -356,8 +398,10 @@ pub fn resolve_trait_evidence(
             signatures,
             trait_environment,
             diagnostics,
-            &mut proofs,
+            proofs,
+            body_types,
             obligations.get(&key).map_or(&[][..], Vec::as_slice),
+            work,
         )? {
             ObligationResolution::Known(entries) => entries,
             ObligationResolution::Poisoned(poison) => {
@@ -365,7 +409,9 @@ pub fn resolve_trait_evidence(
                 continue;
             }
         };
-        let dispatch = if let Some(pending) = invocation_dispatches.get(&key) {
+        let dispatch = if let Some(&index) = invocation_dispatches.get(&key) {
+            let pending = &body_types.method_dispatches()[index];
+            let mut request_work = work.dispatch(index, pending)?;
             match resolve_method_dispatch(
                 pending,
                 collection,
@@ -373,7 +419,8 @@ pub fn resolve_trait_evidence(
                 signatures,
                 trait_environment,
                 diagnostics,
-                &mut proofs,
+                proofs,
+                &mut request_work,
             )? {
                 Ok(dispatch) => dispatch,
                 Err(poison) => {
@@ -384,11 +431,8 @@ pub fn resolve_trait_evidence(
         } else {
             direct_dispatch(invocation, body_types, signatures)?
         };
-        let environment = intern_environment(
-            entries.into_boxed_slice(),
-            &mut environments,
-            &mut environment_ids,
-        )?;
+        let environment =
+            intern_environment(entries.into_boxed_slice(), environments, environment_ids)?;
         checked.insert(
             key,
             SemanticFact::Known(CheckedInvocation::Static {
@@ -398,7 +442,6 @@ pub fn resolve_trait_evidence(
         )?;
     }
 
-    let mut callable_values = FactTable::new();
     for (key, instance) in body_types.callable_values() {
         let entries = match resolve_obligations(
             collection,
@@ -406,8 +449,10 @@ pub fn resolve_trait_evidence(
             signatures,
             trait_environment,
             diagnostics,
-            &mut proofs,
+            proofs,
+            body_types,
             obligations.get(&key).map_or(&[][..], Vec::as_slice),
+            work,
         )? {
             ObligationResolution::Known(entries) => entries,
             ObligationResolution::Poisoned(poison) => {
@@ -415,7 +460,9 @@ pub fn resolve_trait_evidence(
                 continue;
             }
         };
-        let dispatch = if let Some(pending) = callable_dispatches.get(&key) {
+        let dispatch = if let Some(&index) = callable_dispatches.get(&key) {
+            let pending = &body_types.method_dispatches()[index];
+            let mut request_work = work.dispatch(index, pending)?;
             match resolve_method_dispatch(
                 pending,
                 collection,
@@ -423,7 +470,8 @@ pub fn resolve_trait_evidence(
                 signatures,
                 trait_environment,
                 diagnostics,
-                &mut proofs,
+                proofs,
+                &mut request_work,
             )? {
                 Ok(dispatch) => dispatch,
                 Err(poison) => {
@@ -434,11 +482,8 @@ pub fn resolve_trait_evidence(
         } else {
             CheckedDispatch::Direct(callable_declaration(instance, body_types, signatures)?)
         };
-        let environment = intern_environment(
-            entries.into_boxed_slice(),
-            &mut environments,
-            &mut environment_ids,
-        )?;
+        let environment =
+            intern_environment(entries.into_boxed_slice(), environments, environment_ids)?;
         callable_values.insert(
             key,
             SemanticFact::Known(CheckedCallableValue {
@@ -448,14 +493,9 @@ pub fn resolve_trait_evidence(
         )?;
     }
 
-    let method_routes = build_method_routes(collection, signatures, trait_environment)?;
-    Ok(recorder.finish(PhaseProduct::Performed(TraitEvidence {
-        invocations: checked,
-        callable_values,
-        environments: environments.into_boxed_slice(),
-        proofs: proofs.into_nodes(),
-        method_routes,
-    })))
+    work.validate()?;
+    *method_routes = build_method_routes(collection, signatures, trait_environment)?;
+    Ok(execution::EvidenceTraversal::Performed)
 }
 
 enum ObligationResolution {
@@ -474,10 +514,15 @@ fn resolve_obligations(
     trait_environment: &mut TraitEnvironment,
     diagnostics: &mut DiagnosticStore,
     proofs: &mut ProofArena,
-    pending: &[&PendingTraitObligation],
-) -> Result<ObligationResolution, TraitEvidenceError> {
-    let mut entries = Vec::with_capacity(pending.len());
-    for pending in pending {
+    body_types: &BodyTypes,
+    pending: &[usize],
+    work: &mut work::EvidenceInputs<'_>,
+) -> Result<ObligationResolution, execution::EvidenceFlow> {
+    let mut entries = Vec::new();
+    for &index in pending {
+        let pending = &body_types.obligations()[index];
+        let mut request_work = work.bound(index, pending, signatures)?;
+        request_work.checkpoint()?;
         let obligation = TraitObligation::new(pending.subject(), pending.trait_ref().clone());
         match trait_environment.prove_for_owner(pending.owner(), signatures, obligation.clone())? {
             selected @ (TraitProof::Bound(_) | TraitProof::Implementation(_)) => {
@@ -487,6 +532,7 @@ fn resolve_obligations(
                     selected,
                     signatures,
                     trait_environment,
+                    &mut request_work,
                 )?;
                 entries.push(EvidenceEntry {
                     parameter: pending.parameter().clone(),
@@ -556,7 +602,9 @@ fn resolve_method_dispatch(
     trait_environment: &mut TraitEnvironment,
     diagnostics: &mut DiagnosticStore,
     proofs: &mut ProofArena,
-) -> Result<Result<CheckedDispatch, Poison>, TraitEvidenceError> {
+    work: &mut work::ProofWork<'_>,
+) -> Result<Result<CheckedDispatch, Poison>, execution::EvidenceFlow> {
+    work.checkpoint()?;
     let obligation = TraitObligation::new(pending.subject(), pending.trait_ref().clone());
     Ok(
         match trait_environment.prove_for_owner(pending.owner(), signatures, obligation.clone())? {
@@ -571,6 +619,7 @@ fn resolve_method_dispatch(
                     TraitProof::Implementation(evidence.clone()),
                     signatures,
                     trait_environment,
+                    work,
                 )?;
                 Ok(checked_impl_dispatch(
                     trait_environment,
@@ -758,6 +807,10 @@ fn record_invalid_impl_argument(
 /// Trait-evidence infrastructure failure; source failures are diagnostics.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TraitEvidenceError {
+    AnalysisRootClaim(crate::AnalysisRootClaimError),
+    InvalidProofCustody(&'static str),
+    MissingAnalysisStop,
+    UnexpectedUnmeteredInterruption,
     UnknownModule(crate::ModuleId),
     MissingSource(FileId),
     MissingOrigin(FileId),
@@ -790,6 +843,18 @@ pub enum TraitEvidenceError {
 impl fmt::Display for TraitEvidenceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AnalysisRootClaim(error) => {
+                write!(formatter, "invalid analysis root claim: {error:?}")
+            }
+            Self::InvalidProofCustody(reason) => {
+                write!(formatter, "invalid proof custody: {reason}")
+            }
+            Self::MissingAnalysisStop => {
+                formatter.write_str("evidence interruption lacks an accounting stop")
+            }
+            Self::UnexpectedUnmeteredInterruption => {
+                formatter.write_str("unmetered evidence execution interrupted")
+            }
             Self::UnknownModule(module) => write!(formatter, "unknown module {module:?}"),
             Self::MissingSource(file) => write!(formatter, "missing semantic source {file:?}"),
             Self::MissingOrigin(file) => {

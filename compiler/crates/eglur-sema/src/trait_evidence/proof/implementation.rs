@@ -6,6 +6,7 @@ use crate::{
     signatures::InstantiatedParameterBound,
 };
 
+use super::{EvidenceFlow, ProofWork};
 use super::{EvidenceSource, TraitEvidenceError};
 
 pub(super) enum ImplementationStep {
@@ -42,7 +43,11 @@ impl ImplementationFrame {
         selected: TraitImplEvidence,
         signatures: &DeclarationSignatures,
         environment: &TraitEnvironment,
-    ) -> Result<Self, TraitEvidenceError> {
+        work: &mut ProofWork<'_>,
+    ) -> Result<Self, EvidenceFlow> {
+        #[cfg(test)]
+        work.observe(super::super::execution::tests::ProofStage::Implementation);
+        work.checkpoint()?;
         let (header, _) = environment
             .checked_implementation_contract(selected.implementation())
             .ok_or_else(|| {
@@ -57,7 +62,8 @@ impl ImplementationFrame {
         if header.generic_parameters().len() != arguments.len() {
             return Err(TraitEvidenceError::InvalidCheckedProof(
                 "implementation substitution arity",
-            ));
+            )
+            .into());
         }
         let replacements = header
             .generic_parameters()
@@ -85,14 +91,17 @@ impl ImplementationFrame {
     pub(super) fn advance(
         &mut self,
         signatures: &mut DeclarationSignatures,
-    ) -> Result<ImplementationStep, TraitEvidenceError> {
+        work: &mut ProofWork<'_>,
+    ) -> Result<ImplementationStep, EvidenceFlow> {
         loop {
+            work.checkpoint()?;
             match &mut self.phase {
                 BoundPhase::Implementation(cursor) => {
                     if let Some(obligation) = cursor.next(
                         self.header.generic_parameters(),
                         &self.replacements,
                         signatures,
+                        work,
                     )? {
                         return Ok(ImplementationStep::Prerequisite(obligation));
                     }
@@ -105,7 +114,9 @@ impl ImplementationFrame {
                     replacements,
                     cursor,
                 } => {
-                    if let Some(obligation) = cursor.next(parameters, replacements, signatures)? {
+                    if let Some(obligation) =
+                        cursor.next(parameters, replacements, signatures, work)?
+                    {
                         return Ok(ImplementationStep::Prerequisite(obligation));
                     }
                     return Ok(ImplementationStep::Complete(
@@ -171,8 +182,12 @@ impl BoundCursor {
         parameters: &[GenericParameterId],
         replacements: &BTreeMap<GenericParameterId, TypeId>,
         signatures: &mut DeclarationSignatures,
-    ) -> Result<Option<TraitObligation>, TraitEvidenceError> {
+        work: &mut ProofWork<'_>,
+    ) -> Result<Option<TraitObligation>, EvidenceFlow> {
         loop {
+            #[cfg(test)]
+            work.observe(super::super::execution::tests::ProofStage::ParameterCursor);
+            work.checkpoint()?;
             if let Some(bound) = self.pending.next() {
                 return Ok(Some(bound.into_obligation()));
             }
@@ -181,7 +196,9 @@ impl BoundCursor {
             };
             let signature = match signatures.generic_parameter(parameter) {
                 FactState::Known(signature) => signature.clone(),
-                _ => return Err(TraitEvidenceError::InvalidCheckedProof("generic signature")),
+                _ => {
+                    return Err(TraitEvidenceError::InvalidCheckedProof("generic signature").into());
+                }
             };
             self.pending = signature
                 .instantiate_bounds(signatures.types_mut(), replacements)

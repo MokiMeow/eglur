@@ -6,6 +6,7 @@ use crate::{
 };
 
 use super::{EvidenceSource, TraitEvidenceError};
+use super::{execution::EvidenceFlow, work::ProofWork};
 
 mod implementation;
 
@@ -30,6 +31,10 @@ impl ProofArena {
         self.nodes.into_boxed_slice()
     }
 
+    pub(super) fn into_completed_nodes(self) -> Vec<EvidenceSource> {
+        self.nodes
+    }
+
     pub(super) fn materialize(
         &mut self,
         owner: DefId,
@@ -37,18 +42,22 @@ impl ProofArena {
         selected: TraitProof,
         signatures: &mut DeclarationSignatures,
         environment: &mut TraitEnvironment,
-    ) -> Result<EvidenceProofId, TraitEvidenceError> {
+        work: &mut ProofWork<'_>,
+    ) -> Result<EvidenceProofId, EvidenceFlow> {
         let mut pending = Some((obligation, selected));
         let mut completed = None;
         let mut frames: Vec<(TraitObligation, ImplementationFrame)> = Vec::new();
 
         loop {
+            #[cfg(test)]
+            work.observe(super::execution::tests::ProofStage::Materialization);
+            work.checkpoint()?;
             if let Some((obligation, selected)) = pending.take() {
                 if let Some(&id) = self.by_obligation.get(&(owner, obligation.clone())) {
                     completed = Some(id);
                 } else {
                     if !self.active.insert((owner, obligation.clone())) {
-                        return Err(TraitEvidenceError::CyclicCheckedProof(obligation));
+                        return Err(TraitEvidenceError::CyclicCheckedProof(obligation).into());
                     }
 
                     match selected {
@@ -61,7 +70,7 @@ impl ProofArena {
                         }
                         TraitProof::Implementation(evidence) => frames.push((
                             obligation,
-                            ImplementationFrame::new(evidence, signatures, environment)?,
+                            ImplementationFrame::new(evidence, signatures, environment, work)?,
                         )),
                         TraitProof::Poisoned(_)
                         | TraitProof::InvalidArgument(_)
@@ -69,7 +78,8 @@ impl ProofArena {
                         | TraitProof::Ambiguous(_) => {
                             return Err(TraitEvidenceError::UnmaterializablePrerequisite(
                                 obligation,
-                            ));
+                            )
+                            .into());
                         }
                     }
                 }
@@ -86,7 +96,7 @@ impl ProofArena {
                 .last_mut()
                 .expect("an unfinished implementation has a frame")
                 .1
-                .advance(signatures)?
+                .advance(signatures, work)?
             {
                 ImplementationStep::Prerequisite(obligation) => {
                     let selected =
