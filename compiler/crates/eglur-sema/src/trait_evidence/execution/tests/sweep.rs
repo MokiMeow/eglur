@@ -77,7 +77,7 @@ fn run(text: &str, cut: Option<(BodyAnalysisInput, u64)>) -> Run {
     result.unwrap()
 }
 
-fn validate_backing(prefix: &TraitEvidencePrefix, signatures: &DeclarationSignatures) {
+pub(super) fn validate_backing(prefix: &TraitEvidencePrefix, signatures: &DeclarationSignatures) {
     let dispatch = |dispatch: &CheckedDispatch| {
         if let CheckedDispatch::ImplTemplate { proof, .. } = dispatch {
             assert!(prefix.proof(*proof).is_some());

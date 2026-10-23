@@ -8,6 +8,7 @@ use crate::{
     ExternalNameEnvironment, SemanticFingerprints, typecheck_bodies_with_work,
 };
 
+mod crossings;
 mod fixture;
 mod inputs;
 mod sweep;
@@ -35,7 +36,32 @@ pub(in crate::trait_evidence) enum ProofStage {
     ParameterCursor,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::trait_evidence) enum ProofRequest {
+    Bound(usize),
+    Dispatch(usize),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::trait_evidence) enum EvidencePublication {
+    Proof(EvidenceProofId),
+    ProofBinding(EvidenceProofId),
+    Environment(EvidenceEnvironmentId),
+    Invocation(ExpressionKey),
+    CallableValue(ExpressionKey),
+    MethodRoutes,
+}
+
+pub(in crate::trait_evidence) fn observe_request(request: ProofRequest) {
+    crossings::observe_request(request);
+}
+
+pub(in crate::trait_evidence) fn observe_publication(publication: EvidencePublication) {
+    crossings::observe_publication(publication);
+}
+
 pub(in crate::trait_evidence) fn observe_proof_work(stage: ProofStage, metered: bool) {
+    crossings::observe_stage(stage);
     PROOF_STAGES.with_borrow_mut(|stages| {
         if let Some(stages) = stages {
             assert!(metered, "original budget lost at {stage:?}");
@@ -243,6 +269,15 @@ fn fingerprint(
     body: &BodyTypes,
     evidence: &PhaseProduct<TraitEvidence>,
 ) -> SemanticFingerprints {
+    fingerprint_with_effects(fixture, body, evidence, None)
+}
+
+fn fingerprint_with_effects(
+    fixture: &mut Fixture<'_, '_>,
+    body: &BodyTypes,
+    evidence: &PhaseProduct<TraitEvidence>,
+    trusted_effects: Option<&crate::TrustedEffectEnvironment>,
+) -> SemanticFingerprints {
     let PhaseProduct::Performed(checked) = evidence else {
         panic!("evidence missing")
     };
@@ -254,7 +289,7 @@ fn fingerprint(
         fixture.declarations.signatures(),
         body,
         checked,
-        None,
+        trusted_effects,
         fixture.diagnostics,
     )
     .unwrap();

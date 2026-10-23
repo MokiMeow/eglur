@@ -390,6 +390,10 @@ fn traverse_evidence(
                     ty: *ty,
                 }),
             )?;
+            #[cfg(test)]
+            execution::tests::observe_publication(
+                execution::tests::EvidencePublication::Invocation(key),
+            );
             continue;
         }
         let entries = match resolve_obligations(
@@ -406,6 +410,10 @@ fn traverse_evidence(
             ObligationResolution::Known(entries) => entries,
             ObligationResolution::Poisoned(poison) => {
                 checked.insert(key, SemanticFact::Poisoned(poison))?;
+                #[cfg(test)]
+                execution::tests::observe_publication(
+                    execution::tests::EvidencePublication::Invocation(key),
+                );
                 continue;
             }
         };
@@ -425,6 +433,10 @@ fn traverse_evidence(
                 Ok(dispatch) => dispatch,
                 Err(poison) => {
                     checked.insert(key, SemanticFact::Poisoned(poison))?;
+                    #[cfg(test)]
+                    execution::tests::observe_publication(
+                        execution::tests::EvidencePublication::Invocation(key),
+                    );
                     continue;
                 }
             }
@@ -440,6 +452,10 @@ fn traverse_evidence(
                 evidence_environment: environment,
             }),
         )?;
+        #[cfg(test)]
+        execution::tests::observe_publication(execution::tests::EvidencePublication::Invocation(
+            key,
+        ));
     }
 
     for (key, instance) in body_types.callable_values() {
@@ -457,6 +473,10 @@ fn traverse_evidence(
             ObligationResolution::Known(entries) => entries,
             ObligationResolution::Poisoned(poison) => {
                 callable_values.insert(key, SemanticFact::Poisoned(poison))?;
+                #[cfg(test)]
+                execution::tests::observe_publication(
+                    execution::tests::EvidencePublication::CallableValue(key),
+                );
                 continue;
             }
         };
@@ -476,6 +496,10 @@ fn traverse_evidence(
                 Ok(dispatch) => dispatch,
                 Err(poison) => {
                     callable_values.insert(key, SemanticFact::Poisoned(poison))?;
+                    #[cfg(test)]
+                    execution::tests::observe_publication(
+                        execution::tests::EvidencePublication::CallableValue(key),
+                    );
                     continue;
                 }
             }
@@ -491,10 +515,16 @@ fn traverse_evidence(
                 evidence_environment: environment,
             }),
         )?;
+        #[cfg(test)]
+        execution::tests::observe_publication(
+            execution::tests::EvidencePublication::CallableValue(key),
+        );
     }
 
     work.validate()?;
     *method_routes = build_method_routes(collection, signatures, trait_environment)?;
+    #[cfg(test)]
+    execution::tests::observe_publication(execution::tests::EvidencePublication::MethodRoutes);
     Ok(execution::EvidenceTraversal::Performed)
 }
 
@@ -664,6 +694,8 @@ fn intern_environment(
 
     ids.insert(entries.clone(), id);
     environments.push(EvidenceEnvironment { id, entries });
+    #[cfg(test)]
+    execution::tests::observe_publication(execution::tests::EvidencePublication::Environment(id));
     Ok(id)
 }
 

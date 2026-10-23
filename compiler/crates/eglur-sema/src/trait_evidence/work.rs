@@ -46,6 +46,10 @@ impl EvidenceInputs<'_> {
         match self {
             Self::Unmetered => Ok(ProofWork::Unmetered),
             Self::Metered { accounting, inputs } => {
+                #[cfg(test)]
+                super::execution::tests::observe_request(
+                    super::execution::tests::ProofRequest::Bound(index),
+                );
                 let connection =
                     inputs
                         .bounds()
@@ -85,6 +89,10 @@ impl EvidenceInputs<'_> {
         match self {
             Self::Unmetered => Ok(ProofWork::Unmetered),
             Self::Metered { accounting, inputs } => {
+                #[cfg(test)]
+                super::execution::tests::observe_request(
+                    super::execution::tests::ProofRequest::Dispatch(index),
+                );
                 let connection = inputs.dispatches().get(index).ok_or(
                     TraitEvidenceError::InvalidProofCustody("missing original dispatch"),
                 )?;

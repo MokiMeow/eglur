@@ -32,6 +32,17 @@ impl ProofArena {
     }
 
     pub(super) fn into_completed_nodes(self) -> Vec<EvidenceSource> {
+        #[cfg(test)]
+        for (key, proof) in &self.by_obligation {
+            assert!(
+                !self.active.contains(key),
+                "unfinished obligation has a completed cache claim"
+            );
+            assert!(
+                self.nodes.get(proof.index()).is_some(),
+                "completed cache claim lacks backing"
+            );
+        }
         self.nodes
     }
 
@@ -120,6 +131,10 @@ impl ProofArena {
         self.active.remove(&(owner, obligation.clone()));
         let id = self.intern(node)?;
         self.by_obligation.insert((owner, obligation), id);
+        #[cfg(test)]
+        super::execution::tests::observe_publication(
+            super::execution::tests::EvidencePublication::ProofBinding(id),
+        );
         Ok(id)
     }
 
@@ -133,6 +148,10 @@ impl ProofArena {
 
         self.ids.insert(node.clone(), id);
         self.nodes.push(node);
+        #[cfg(test)]
+        super::execution::tests::observe_publication(
+            super::execution::tests::EvidencePublication::Proof(id),
+        );
         Ok(id)
     }
 }
