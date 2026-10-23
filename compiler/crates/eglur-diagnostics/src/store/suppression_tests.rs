@@ -68,16 +68,16 @@ fn all_producers_preserve_sorted_membership_independent_of_source_order() {
         .unwrap();
 
     for poison in [&inputs[4], &merged, &accumulated, &discovered] {
-        assert!(poison.roots.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(poison.roots().windows(2).all(|pair| pair[0] < pair[1]));
         for root in 0..11 {
             COMPARISONS.set(0);
-            assert_eq!(poison.contains_root(&root), poison.roots.contains(&root));
+            assert_eq!(poison.contains_root(&root), poison.roots().contains(&root));
             assert!(COMPARISONS.get() > 0);
-            assert!(COMPARISONS.get() <= comparison_bound(poison.roots.len()));
+            assert!(COMPARISONS.get() <= comparison_bound(poison.roots().len()));
         }
     }
-    assert_eq!(merged.roots, accumulated.roots);
-    assert_eq!(merged.roots, discovered.roots);
+    assert_eq!(merged.roots(), accumulated.roots());
+    assert_eq!(merged.roots(), discovered.roots());
 }
 
 #[test]
@@ -112,14 +112,15 @@ fn every_small_subset_pair_suppresses_only_later_minus_preceding() {
             let selected = |mask| (0..5).filter(move |index| mask & (1 << index) != 0);
             let preceding = aggregate(&inputs, selected(preceding_mask).rev());
             let later = aggregate(&inputs, selected(later_mask));
-            let before = (preceding.roots.clone(), later.roots.clone());
+            let before = (preceding.roots().to_vec(), later.roots().to_vec());
             let expected = selected(later_mask)
                 .filter(|index| preceding_mask & (1 << index) == 0)
                 .collect::<HashSet<_>>();
 
             store.select_preceding_roots(&preceding, &later).unwrap();
             assert_eq!(store.superseded, expected);
-            assert_eq!((preceding.roots, later.roots), before);
+            assert_eq!(preceding.roots(), before.0);
+            assert_eq!(later.roots(), before.1);
 
             let DiagnosticSnapshot::Rejected(snapshot) = store.finalize(None) else {
                 panic!("preceding roots remain retained");
@@ -169,8 +170,8 @@ fn partial_expiry_preserves_shared_membership_and_complete_expiry_is_atomic() {
         let derivative = store
             .record_failure(DiagnosticFailure::Derivative(preceding.clone()))
             .unwrap();
-        assert_eq!(derivative.roots, preceding.roots);
-        assert_eq!(preceding.roots.as_ref(), [0, 1, 2, 3]);
+        assert_eq!(derivative.roots(), preceding.roots());
+        assert_eq!(preceding.roots(), [0, 1, 2, 3]);
         assert!(
             store
                 .roots_since_within(&checkpoint, &span(0, 11))
@@ -230,7 +231,7 @@ fn suppression_preserves_checkpoint_discovery_and_limited_snapshot_order() {
         .roots_since_within(&checkpoint, &span(0, 11))
         .unwrap()
         .unwrap();
-    assert_eq!(discovered.roots.as_ref(), (0..9).collect::<Vec<_>>());
+    assert_eq!(discovered.roots(), (0..9).collect::<Vec<_>>());
     let DiagnosticSnapshot::Rejected(snapshot) = store.finalize(ErrorLimit::new(2)) else {
         panic!("preceding roots remain retained");
     };

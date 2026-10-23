@@ -1,7 +1,7 @@
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use crate::root::RootIdentity;
 use crate::{
@@ -19,23 +19,69 @@ pub struct DiagnosticCheckpoint {
     next_root: usize,
 }
 
+struct SharedRootSnapshot {
+    roots: Box<[usize]>,
+}
+
+#[derive(Clone)]
+enum RootSnapshot {
+    Single(usize),
+    Shared(Arc<SharedRootSnapshot>),
+}
+
+impl RootSnapshot {
+    fn roots(&self) -> &[usize] {
+        match self {
+            Self::Single(root) => std::slice::from_ref(root),
+            Self::Shared(snapshot) => &snapshot.roots,
+        }
+    }
+
+    fn same_snapshot(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Single(left), Self::Single(right)) => left == right,
+            (Self::Shared(left), Self::Shared(right)) => Arc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
+}
+
 /// Non-empty opaque provenance for facts unavailable after retained roots.
 #[derive(Clone)]
 pub struct Poison {
     store: Arc<StoreIdentity>,
-    roots: Box<[usize]>,
+    snapshot: RootSnapshot,
 }
 
 impl Poison {
+    fn from_roots(store: Arc<StoreIdentity>, roots: Box<[usize]>) -> Self {
+        #[cfg(test)]
+        poison_tests::observe(poison_tests::Step::Snapshot(roots.len()));
+
+        let snapshot = match roots.as_ref() {
+            [root] => RootSnapshot::Single(*root),
+            _ => RootSnapshot::Shared(Arc::new(SharedRootSnapshot { roots })),
+        };
+
+        Self { store, snapshot }
+    }
+
     fn single(store: Arc<StoreIdentity>, root: usize) -> Self {
+        #[cfg(test)]
+        poison_tests::observe(poison_tests::Step::Snapshot(1));
+
         Self {
             store,
-            roots: Box::new([root]),
+            snapshot: RootSnapshot::Single(root),
         }
     }
 
+    fn roots(&self) -> &[usize] {
+        self.snapshot.roots()
+    }
+
     fn contains_root(&self, root: &usize) -> bool {
-        self.roots
+        self.roots()
             .binary_search_by(|candidate| {
                 #[cfg(test)]
                 suppression_tests::observe_comparison();
@@ -51,32 +97,36 @@ impl Poison {
             return Err(DiagnosticStoreError::ForeignPoison);
         }
 
-        let mut roots = Vec::with_capacity(self.roots.len() + other.roots.len());
+        if self.snapshot.same_snapshot(&other.snapshot) {
+            return Ok(self.clone());
+        }
+
+        let mut roots = Vec::with_capacity(self.roots().len() + other.roots().len());
         let (mut left, mut right) = (0, 0);
-        while left < self.roots.len() && right < other.roots.len() {
-            match self.roots[left].cmp(&other.roots[right]) {
+        while left < self.roots().len() && right < other.roots().len() {
+            match self.roots()[left].cmp(&other.roots()[right]) {
                 std::cmp::Ordering::Less => {
-                    roots.push(self.roots[left]);
+                    roots.push(self.roots()[left]);
                     left += 1;
                 }
                 std::cmp::Ordering::Greater => {
-                    roots.push(other.roots[right]);
+                    roots.push(other.roots()[right]);
                     right += 1;
                 }
                 std::cmp::Ordering::Equal => {
-                    roots.push(self.roots[left]);
+                    roots.push(self.roots()[left]);
                     left += 1;
                     right += 1;
                 }
             }
         }
-        roots.extend_from_slice(&self.roots[left..]);
-        roots.extend_from_slice(&other.roots[right..]);
+        roots.extend_from_slice(&self.roots()[left..]);
+        roots.extend_from_slice(&other.roots()[right..]);
 
-        Ok(Self {
-            store: Arc::clone(&self.store),
-            roots: roots.into_boxed_slice(),
-        })
+        Ok(Self::from_roots(
+            Arc::clone(&self.store),
+            roots.into_boxed_slice(),
+        ))
     }
 }
 
@@ -84,16 +134,28 @@ impl fmt::Debug for Poison {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("Poison")
-            .field("root_count", &self.roots.len())
+            .field("root_count", &self.roots().len())
             .finish_non_exhaustive()
     }
 }
 
-/// Accumulates provenance without materializing a complete set after each input.
+#[derive(Default)]
+enum PendingRoots {
+    #[default]
+    Empty,
+    Shared(Poison),
+    Union {
+        store: Arc<StoreIdentity>,
+        roots: BTreeSet<usize>,
+        seen: BTreeMap<usize, Weak<SharedRootSnapshot>>,
+    },
+}
+
+/// Accumulates provenance, sharing repeated inputs without copying their roots.
+/// Independently produced unions are not interned across accumulators.
 #[derive(Default)]
 pub struct PoisonAccumulator {
-    store: Option<Arc<StoreIdentity>>,
-    roots: BTreeSet<usize>,
+    pending: PendingRoots,
 }
 
 impl PoisonAccumulator {
@@ -107,7 +169,12 @@ impl PoisonAccumulator {
         #[cfg(test)]
         poison_tests::observe(poison_tests::Step::Input);
 
-        if let Some(store) = &self.store {
+        let store = match &self.pending {
+            PendingRoots::Empty => None,
+            PendingRoots::Shared(first) => Some(&first.store),
+            PendingRoots::Union { store, .. } => Some(store),
+        };
+        if let Some(store) = store {
             #[cfg(test)]
             poison_tests::observe(poison_tests::Step::PoolCheck);
 
@@ -117,35 +184,77 @@ impl PoisonAccumulator {
 
                 return Err(DiagnosticStoreError::ForeignPoison);
             }
-        } else {
-            self.store = Some(Arc::clone(&poison.store));
         }
 
-        for &root in &poison.roots {
-            #[cfg(test)]
-            poison_tests::observe(poison_tests::Step::Root);
-
-            self.roots.insert(root);
+        match &mut self.pending {
+            PendingRoots::Empty => self.pending = PendingRoots::Shared(poison.clone()),
+            PendingRoots::Shared(first) if first.snapshot.same_snapshot(&poison.snapshot) => {}
+            PendingRoots::Shared(first) => {
+                let mut roots = BTreeSet::new();
+                let mut seen = BTreeMap::new();
+                Self::include_snapshot(&mut roots, &mut seen, first);
+                Self::include_snapshot(&mut roots, &mut seen, poison);
+                self.pending = PendingRoots::Union {
+                    store: Arc::clone(&first.store),
+                    roots,
+                    seen,
+                };
+            }
+            PendingRoots::Union { roots, seen, .. } => Self::include_snapshot(roots, seen, poison),
         }
+
         Ok(())
+    }
+
+    fn include_snapshot(
+        roots: &mut BTreeSet<usize>,
+        seen: &mut BTreeMap<usize, Weak<SharedRootSnapshot>>,
+        poison: &Poison,
+    ) {
+        match &poison.snapshot {
+            RootSnapshot::Single(root) => {
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Root);
+
+                roots.insert(*root);
+            }
+            RootSnapshot::Shared(snapshot) => {
+                let id = Arc::as_ptr(snapshot).addr();
+                if let std::collections::btree_map::Entry::Vacant(entry) = seen.entry(id) {
+                    // The weak header prevents address reuse without retaining the boxed roots.
+                    entry.insert(Arc::downgrade(snapshot));
+                    for &root in &snapshot.roots {
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Root);
+
+                        roots.insert(root);
+                    }
+                }
+            }
+        }
     }
 
     /// Freezes one sorted union, or returns `None` when no input was included.
     #[must_use]
     pub fn finish(self) -> Option<Poison> {
-        let store = self.store?;
+        match self.pending {
+            PendingRoots::Empty => None,
+            PendingRoots::Shared(poison) => {
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Finish(0));
 
-        #[cfg(test)]
-        poison_tests::observe(poison_tests::Step::Finish(self.roots.len()));
+                Some(poison)
+            }
+            PendingRoots::Union { store, roots, .. } => {
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Finish(roots.len()));
 
-        Some(Poison {
-            store,
-            roots: self
-                .roots
-                .into_iter()
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-        })
+                Some(Poison::from_roots(
+                    store,
+                    roots.into_iter().collect::<Vec<_>>().into_boxed_slice(),
+                ))
+            }
+        }
     }
 }
 
@@ -299,10 +408,8 @@ impl DiagnosticStore {
                 .then_some(checkpoint.next_root + offset)
             })
             .collect::<Vec<_>>();
-        Ok((!roots.is_empty()).then(|| Poison {
-            store: Arc::clone(&self.identity),
-            roots: roots.into_boxed_slice(),
-        }))
+        Ok((!roots.is_empty())
+            .then(|| Poison::from_roots(Arc::clone(&self.identity), roots.into_boxed_slice())))
     }
 
     /// Suppresses the specified later roots when an earlier root remains retained.
@@ -314,14 +421,14 @@ impl DiagnosticStore {
         self.validate_poison(preceding)?;
         self.validate_poison(later)?;
         if preceding
-            .roots
+            .roots()
             .iter()
             .all(|root| self.superseded.contains(root))
         {
             return Err(DiagnosticStoreError::NoPrecedingRoot);
         }
         for root in later
-            .roots
+            .roots()
             .iter()
             .filter(|root| !preceding.contains_root(root))
         {
