@@ -240,7 +240,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .pattern(pattern_id)
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?
             .origin();
-        let TypeKind::Tuple(types) = self.signatures.types().kind(expected)?.clone() else {
+        let TypeKind::Tuple(types) = self.signatures.types().kind(expected)? else {
             return self
                 .pattern_type_mismatch(source, origin, "tuple", expected, None)
                 .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
@@ -278,12 +278,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 PatternCheck::irrefutable(),
             )));
         };
+        let types = types[..explicit].to_vec();
+
+        #[cfg(test)]
+        super::tuple_tests::observe_copy(types.len());
+
         Ok(PatternPlan::Child {
             pattern,
             expected: types[type_index],
             continuation: PatternContinuation::Tuple {
                 cursor,
-                types: types.into_vec(),
+                types,
                 check: PatternCheck::irrefutable(),
             },
         })

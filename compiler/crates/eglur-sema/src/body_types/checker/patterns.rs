@@ -5,6 +5,9 @@ mod matching;
 #[cfg(test)]
 mod poison_tests;
 
+#[cfg(test)]
+mod tuple_tests;
+
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn bind_match_local(
         &mut self,
