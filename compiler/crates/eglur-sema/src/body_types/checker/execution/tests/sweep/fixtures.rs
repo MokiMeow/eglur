@@ -75,5 +75,10 @@ pub(super) fn sources() -> Vec<(&'static str, String, bool)> {
     ] {
         sources.push(("checked", format!("{id}\nfn inspect(x: i32, y: i32) -> Unit {{\nlet out = id(checked {{ yield {expression} }})\n}}"), true));
     }
+    sources.extend(
+        crate::body_types::checker::work::tests::proof_attachment::sources()
+            .into_iter()
+            .map(|source| ("proof-custody", source, true)),
+    );
     sources
 }

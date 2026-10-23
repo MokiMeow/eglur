@@ -576,17 +576,28 @@ impl DeclarationSignatures {
         &self,
         parameter: &GenericParameterId,
     ) -> FactState<'_, GenericParameterRecord> {
-        if let GenericParameterId::Source(parameter) = parameter
-            && let Some(poison) = self
-                .application_poison(&CanonicalTarget::Source(*parameter))
-                .or_else(|| {
-                    self.public_contract_poisons
-                        .get(&CanonicalTarget::Source(*parameter))
-                })
-        {
-            return FactState::Poisoned(poison);
-        }
-        self.generic_parameters.record(parameter)
+        effective_generic_parameter_record(
+            &self.generic_parameters,
+            &self.type_applications,
+            &self.public_contract_poisons,
+            parameter,
+        )
+    }
+
+    pub(crate) fn generic_parameter_record_with_types(
+        &mut self,
+        parameter: &GenericParameterId,
+    ) -> (
+        FactState<'_, GenericParameterRecord>,
+        &mut CanonicalTypeStore,
+    ) {
+        let record = effective_generic_parameter_record(
+            &self.generic_parameters,
+            &self.type_applications,
+            &self.public_contract_poisons,
+            parameter,
+        );
+        (record, &mut self.types)
     }
 
     #[must_use]
@@ -777,4 +788,22 @@ impl ResolvedDeclarationSemantics {
     pub fn into_parts(self) -> (DeclarationSignatures, InhabitanceFacts) {
         (self.signatures, self.inhabitance)
     }
+}
+
+fn effective_generic_parameter_record<'a>(
+    records: &'a GenericParameterRecords,
+    applications: &'a super::applications::TypeApplicationFacts,
+    public_contract_poisons: &'a BTreeMap<CanonicalTarget, Poison>,
+    parameter: &GenericParameterId,
+) -> FactState<'a, GenericParameterRecord> {
+    if let GenericParameterId::Source(parameter) = parameter {
+        let target = CanonicalTarget::Source(*parameter);
+        if let Some(poison) = applications
+            .poison(&target)
+            .or_else(|| public_contract_poisons.get(&target))
+        {
+            return FactState::Poisoned(poison);
+        }
+    }
+    records.record(parameter)
 }

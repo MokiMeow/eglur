@@ -1,11 +1,57 @@
 use super::*;
 use crate::{AnalysisWorkIncomplete, CapabilityDemand, PhaseAnalysis};
 
+mod proof_inputs;
+
+pub use proof_inputs::{
+    BodyProofInputs, BoundProofInput, DispatchProofInput, MeteredBodyProofInputs,
+};
+
 /// Terminal body analysis; interruption is not a source or infrastructure error.
 #[must_use]
 pub enum BodyExecution {
-    Completed(Box<PhaseAnalysis<BodyTypes>>),
+    Completed(Box<CompletedBodyExecution>),
     Interrupted(Box<InterruptedBody>),
+}
+
+/// Completed semantic facts paired with their execution-only proof connections.
+pub struct CompletedBodyExecution {
+    analysis: PhaseAnalysis<BodyTypes>,
+    proof_inputs: BodyProofInputs,
+}
+
+impl CompletedBodyExecution {
+    pub(super) fn new(
+        analysis: PhaseAnalysis<BodyTypes>,
+        proof_inputs: BodyProofInputs,
+    ) -> Result<Self, BodyTypingError> {
+        let (bounds, dispatches) = match analysis.product() {
+            crate::PhaseProduct::Performed(bodies) => {
+                (bodies.obligations().len(), bodies.method_dispatches().len())
+            }
+            crate::PhaseProduct::Unperformed => (0, 0),
+        };
+        proof_inputs.validate_lengths(bounds, dispatches)?;
+        Ok(Self {
+            analysis,
+            proof_inputs,
+        })
+    }
+
+    #[must_use]
+    pub const fn analysis(&self) -> &PhaseAnalysis<BodyTypes> {
+        &self.analysis
+    }
+
+    #[must_use]
+    pub const fn proof_inputs(&self) -> &BodyProofInputs {
+        &self.proof_inputs
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (PhaseAnalysis<BodyTypes>, BodyProofInputs) {
+        (self.analysis, self.proof_inputs)
+    }
 }
 
 /// Completed local facts retained without claiming completion of the body phase.
@@ -111,9 +157,15 @@ pub struct InterruptedBody {
     pub(super) prefix: BodyTypingPrefix,
     pub(super) demands: Vec<CapabilityDemand>,
     pub(super) internal_failures: Vec<BodyTypingError>,
+    pub(super) proof_inputs: BodyProofInputs,
 }
 
 impl InterruptedBody {
+    #[must_use]
+    pub const fn proof_inputs(&self) -> &BodyProofInputs {
+        &self.proof_inputs
+    }
+
     #[must_use]
     pub const fn stop(&self) -> AnalysisWorkIncomplete {
         self.stop

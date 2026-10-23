@@ -261,8 +261,11 @@ impl<'hir> AnalysisProofInputRegistry<'hir> {
             .expect("validated occurrence");
         if matches!(
             expression.kind(),
-            ExprKind::Name(_) | ExprKind::Member { .. }
-        ) || crate::analysis_work::original_call(self.body, site).is_ok()
+            ExprKind::Name(_)
+                | ExprKind::Member { .. }
+                | ExprKind::StructLiteral { .. }
+                | ExprKind::VariantConstructor { .. }
+        ) || self.invocation_occurrence(site)
         {
             return Ok(occurrence);
         }
@@ -275,9 +278,7 @@ impl<'hir> AnalysisProofInputRegistry<'hir> {
     ) -> Result<(usize, usize), AnalysisProofRegistryFailure> {
         let occurrence = self.occurrence(site.key())?;
         let valid = match site {
-            MethodDispatchSite::Invocation(key) => {
-                crate::analysis_work::original_call(self.body, key).is_ok()
-            }
+            MethodDispatchSite::Invocation(key) => self.invocation_occurrence(key),
             MethodDispatchSite::CallableValue(key) => matches!(
                 self.body
                     .expression(key.expression())
@@ -304,6 +305,18 @@ impl<'hir> AnalysisProofInputRegistry<'hir> {
                 + size_of::<AnalysisBoundInputs>() as u64,
             transferred_bytes: size_of::<AnalysisRootTicket>() as u64,
             reserved_bytes: 0,
+        }
+    }
+
+    fn invocation_occurrence(&self, site: ExpressionKey) -> bool {
+        match self
+            .body
+            .expression(site.expression())
+            .map(|value| value.kind())
+        {
+            Some(ExprKind::Call(call)) => !call.partial_application,
+            Some(ExprKind::ReduceByCandidate(_)) => true,
+            _ => false,
         }
     }
 

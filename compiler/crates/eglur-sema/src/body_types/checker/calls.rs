@@ -1495,24 +1495,48 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         parameters: &[GenericParameterId],
         replacements: &BTreeMap<GenericParameterId, TypeId>,
+        preparation: Option<&crate::AnalysisRootTicket>,
     ) -> Result<(), BodyFlow> {
+        if parameters.is_empty() {
+            return Ok(());
+        }
+        if self.analysis_work.is_some() && preparation.is_none() {
+            return Err(BodyTypingError::MissingProofPreparation(site).into());
+        }
+        self.expectation_work(source.file(), ExpectationCustody::Caller, preparation)?;
         let owner = self
             .current_owner
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
         for parameter in parameters {
-            let signature = match self.signatures.generic_parameter(parameter) {
-                FactState::Known(signature) => signature.clone(),
+            let (record, types) = self
+                .signatures
+                .generic_parameter_record_with_types(parameter);
+            let record = match record {
+                FactState::Known(record) => record,
                 FactState::Unperformed | FactState::Poisoned(_) | FactState::NotApplicable => {
                     return Err(BodyFlow::Internal(
                         BodyTypingError::UnavailableGenericParameter(parameter.clone()),
                     ));
                 }
             };
-            for (bound_index, bound) in signature
-                .instantiate_bounds(self.signatures.types_mut(), replacements)?
-                .into_iter()
-                .enumerate()
-            {
+            for bound_index in 0..record.signature().declared_bounds().len() {
+                let ticket = match &mut self.analysis_work {
+                    Some(work) => Some(work.bound_ticket(site, record, bound_index)?),
+                    None => None,
+                };
+                #[cfg(test)]
+                work::tests::proof_attachment::before_bound_preparation(
+                    site,
+                    record.id(),
+                    bound_index,
+                );
+                let declared = record.signature().declared_bounds()[bound_index].clone();
+                let bound = crate::signatures::InstantiatedParameterBound::instantiate(
+                    declared,
+                    replacements[parameter],
+                    types,
+                    replacements,
+                )?;
                 let destination = match parameter {
                     GenericParameterId::Source(declaration) => {
                         let owner = self
@@ -1520,10 +1544,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             .declaration(*declaration)
                             .and_then(|declaration| declaration.parent())
                             .ok_or(BodyTypingError::MissingDeclarationParent(*declaration))?;
-                        let subject = self
-                            .signatures
-                            .types_mut()
-                            .generic_parameter(parameter.clone())?;
+                        let subject = types.generic_parameter(parameter.clone())?;
                         Some(
                             self.trait_environment
                                 .declared_witness_for_obligation(
@@ -1538,6 +1559,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     GenericParameterId::Trusted { .. } => None,
                 };
                 let obligation = bound.into_obligation();
+                if let Some(ticket) = ticket {
+                    let work = self
+                        .analysis_work
+                        .as_mut()
+                        .expect("ticket requires explicit work");
+                    let BodyProofInputs::Metered(inputs) = &mut self.proof_inputs else {
+                        return Err(BodyTypingError::ProofInputModeMismatch.into());
+                    };
+                    inputs.push_bound(work.accounting, site, record.id(), bound_index, ticket)?;
+                }
                 self.obligations.push(PendingTraitObligation {
                     site,
                     owner,

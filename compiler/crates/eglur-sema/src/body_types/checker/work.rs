@@ -8,6 +8,7 @@ use crate::{
 pub(super) struct CallTypingRequest {
     pub(super) expected: TypeRequest,
     pub(super) selection: Option<AnalysisRootTicket>,
+    // Only source-written argument slots use this origin; generated slots have none.
     pub(super) original: Option<ExpressionKey>,
 }
 
@@ -76,7 +77,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 pub enum BodyAnalysisInput {
     WrittenType(TypeOccurrenceId),
     CallSelection(ExpressionKey),
-    CallArgument { call: ExpressionKey, index: usize },
+    CallArgument {
+        call: ExpressionKey,
+        index: usize,
+    },
+    ParameterBound {
+        site: ExpressionKey,
+        parameter: crate::GenericParameterRecordId,
+        index: usize,
+    },
+    MethodDispatch(crate::MethodDispatchSite),
 }
 
 /// Borrowed execution custody; the caller retains both input sets across phases.
@@ -149,6 +159,38 @@ impl<'work, 'hir> BodyAnalysisWork<'work, 'hir> {
             .inherited_ticket(self.accounting, file, upstream)
     }
 
+    pub(super) fn bound_ticket(
+        &mut self,
+        site: ExpressionKey,
+        parameter: &crate::GenericParameterRecord,
+        index: usize,
+    ) -> Result<AnalysisRootTicket, crate::AnalysisBodyInputFailure> {
+        self.bodies
+            .bound_ticket(self.accounting, site, parameter, index, || {
+                (self.allowance)(BodyAnalysisInput::ParameterBound {
+                    site,
+                    parameter: parameter.id(),
+                    index,
+                })
+            })
+    }
+
+    fn dispatch_ticket(
+        &mut self,
+        site: crate::MethodDispatchSite,
+    ) -> Result<AnalysisRootTicket, crate::AnalysisBodyInputFailure> {
+        self.bodies.dispatch_ticket(self.accounting, site, || {
+            (self.allowance)(BodyAnalysisInput::MethodDispatch(site))
+        })
+    }
+
+    fn existing_dispatch_ticket(
+        &mut self,
+        site: crate::MethodDispatchSite,
+    ) -> Result<AnalysisRootTicket, crate::AnalysisBodyInputFailure> {
+        self.bodies.existing_dispatch_ticket(self.accounting, site)
+    }
+
     pub(super) fn validate_source(
         &self,
         module: &crate::ModuleDeclarations,
@@ -160,6 +202,44 @@ impl<'work, 'hir> BodyAnalysisWork<'work, 'hir> {
         self.bodies
             .validate_source(self.accounting, module, source)
             .map_err(BodyTypingError::CallInputs)
+    }
+}
+
+impl BodyChecker<'_, '_, '_> {
+    pub(super) fn prepare_dispatch_work(
+        &mut self,
+        site: crate::MethodDispatchSite,
+    ) -> Result<(), BodyFlow> {
+        if let Some(work) = &mut self.analysis_work {
+            work.dispatch_ticket(site)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn existing_dispatch_work(
+        &mut self,
+        site: crate::MethodDispatchSite,
+    ) -> Result<Option<AnalysisRootTicket>, BodyFlow> {
+        match &mut self.analysis_work {
+            Some(work) => Ok(Some(work.existing_dispatch_ticket(site)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub(super) fn record_method_dispatch(
+        &mut self,
+        pending: PendingMethodDispatch,
+        ticket: Option<AnalysisRootTicket>,
+    ) -> Result<(), BodyFlow> {
+        if let Some(work) = &mut self.analysis_work {
+            let ticket = ticket.ok_or(BodyTypingError::ProofInputModeMismatch)?;
+            let BodyProofInputs::Metered(inputs) = &mut self.proof_inputs else {
+                return Err(BodyTypingError::ProofInputModeMismatch.into());
+            };
+            inputs.push_dispatch(work.accounting, pending.site(), ticket)?;
+        }
+        self.method_dispatches.push(pending);
+        Ok(())
     }
 }
 

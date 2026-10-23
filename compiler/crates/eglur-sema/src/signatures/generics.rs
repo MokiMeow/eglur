@@ -65,19 +65,12 @@ impl GenericParameterSignature {
         self.declared_bounds
             .iter()
             .map(|declared| {
-                let arguments = types.substitution(declared.substitution())?.to_vec();
-                let arguments = arguments
-                    .into_iter()
-                    .map(|argument| types.substitute(argument, replacements))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let substitution = types.intern_substitution(arguments)?;
-                Ok(InstantiatedParameterBound {
-                    declared: declared.clone(),
-                    obligation: TraitObligation::new(
-                        subject,
-                        TraitRef::new(declared.declaration().clone(), substitution),
-                    ),
-                })
+                InstantiatedParameterBound::instantiate(
+                    declared.clone(),
+                    subject,
+                    types,
+                    replacements,
+                )
             })
             .collect()
     }
@@ -90,6 +83,25 @@ pub(crate) struct InstantiatedParameterBound {
 }
 
 impl InstantiatedParameterBound {
+    pub(crate) fn instantiate(
+        declared: TraitRef,
+        subject: TypeId,
+        types: &mut CanonicalTypeStore,
+        replacements: &BTreeMap<GenericParameterId, TypeId>,
+    ) -> Result<Self, TypeStoreError> {
+        let arguments = types.substitution(declared.substitution())?.to_vec();
+        let arguments = arguments
+            .into_iter()
+            .map(|argument| types.substitute(argument, replacements))
+            .collect::<Result<Vec<_>, _>>()?;
+        let substitution = types.intern_substitution(arguments)?;
+        let trait_ref = TraitRef::new(declared.declaration().clone(), substitution);
+        Ok(Self {
+            declared,
+            obligation: TraitObligation::new(subject, trait_ref),
+        })
+    }
+
     pub(crate) const fn declared(&self) -> &TraitRef {
         &self.declared
     }

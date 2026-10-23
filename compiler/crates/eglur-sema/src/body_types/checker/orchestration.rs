@@ -4,7 +4,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn finish(
         mut self,
         _: execution::CompletedBodyTraversal,
-    ) -> PhaseAnalysis<BodyTypes> {
+    ) -> Result<CompletedBodyExecution, BodyTypingError> {
         #[cfg(test)]
         execution::tests::sweep_support::finished();
         self.transfers.sort();
@@ -15,7 +15,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         debug_assert_eq!(self.question_floors, [0]);
         debug_assert!(self.checked_contexts.is_empty());
         debug_assert!(self.control_path_barriers.is_empty());
-        self.recorder.finish(PhaseProduct::Performed(BodyTypes {
+        let analysis = self.recorder.finish(PhaseProduct::Performed(BodyTypes {
             expressions: self.expressions,
             locals: self.locals,
             members: self.members,
@@ -30,7 +30,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             callable_instances: self.callable_instances.into_boxed_slice(),
             obligations: self.obligations.into_boxed_slice(),
             method_dispatches: self.method_dispatches.into_boxed_slice(),
-        }))
+        }));
+        CompletedBodyExecution::new(analysis, self.proof_inputs)
     }
 
     pub(super) fn check_all(&mut self) -> Result<(), BodyFlow> {

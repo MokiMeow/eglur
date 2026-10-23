@@ -337,7 +337,7 @@ fn accounting_entry_and_unmetered_entry_have_identical_completed_products() {
                     )
                     .unwrap()
                     {
-                        BodyExecution::Completed(phase) => *phase,
+                        BodyExecution::Completed(packet) => packet.into_parts().0,
                         BodyExecution::Interrupted(_) => panic!("no stop was requested"),
                     }
                 }

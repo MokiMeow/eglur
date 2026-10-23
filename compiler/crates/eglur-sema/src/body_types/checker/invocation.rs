@@ -775,6 +775,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             frame.origin,
             &parameters,
             &application.replacements,
+            frame.work.as_ref(),
         )?;
         let target = match &frame.contract {
             InvocationContract::Callable { callable, .. } => InvocationTarget::Callable(
@@ -823,18 +824,22 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 method,
             } = &candidate.dispatch
         {
+            let ticket = self.existing_dispatch_work(MethodDispatchSite::Invocation(key))?;
             let trait_ref = self.specialize_trait_ref(trait_ref, &application.replacements)?;
             let owner = self
                 .current_owner
                 .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
-            self.method_dispatches.push(PendingMethodDispatch {
-                site: MethodDispatchSite::Invocation(key),
-                owner,
-                location: SemanticLocation::origin(source.file(), *member_origin),
-                subject: *subject,
-                trait_ref,
-                method: method.clone(),
-            });
+            self.record_method_dispatch(
+                PendingMethodDispatch {
+                    site: MethodDispatchSite::Invocation(key),
+                    owner,
+                    location: SemanticLocation::origin(source.file(), *member_origin),
+                    subject: *subject,
+                    trait_ref,
+                    method: method.clone(),
+                },
+                ticket,
+            )?;
         }
 
         if let Some(callee) = frame.contract.callee() {

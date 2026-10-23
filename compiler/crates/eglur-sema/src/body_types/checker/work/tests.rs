@@ -10,6 +10,7 @@ use crate::{
 };
 
 mod attachment;
+pub(in crate::body_types::checker) mod proof_attachment;
 
 const TEXT: &str = "fn id[T](value: T) -> T = value\nfn inspect(x: i32) -> i32 = id(x)";
 const ALLOWANCE: u64 = 1_000_000;
@@ -61,6 +62,9 @@ pub(in crate::body_types::checker) fn checkpoint(
                 BodyAnalysisInput::CallSelection(call) => work.selection_ticket(call)?,
                 BodyAnalysisInput::CallArgument { call, index } => {
                     work.argument_ticket(call, index)?
+                }
+                BodyAnalysisInput::ParameterBound { .. } | BodyAnalysisInput::MethodDispatch(_) => {
+                    unreachable!("proof inputs are observed at their actual preparation points")
                 }
             };
             probe.tickets.push(ticket);
@@ -140,10 +144,10 @@ fn run<'hir, 'source: 'hir>(
 }
 
 fn completed(execution: BodyExecution) -> BodyTypes {
-    let BodyExecution::Completed(phase) = execution else {
+    let BodyExecution::Completed(packet) = execution else {
         panic!("unexpected interruption")
     };
-    let PhaseProduct::Performed(product) = phase.into_parts().0 else {
+    let PhaseProduct::Performed(product) = packet.into_parts().0.into_parts().0 else {
         panic!("body phase did not perform")
     };
     product

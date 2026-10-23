@@ -111,6 +111,10 @@ fn diagnostic_names_survive_both_use_site_poisons_without_reopening_bounds() {
                 signatures.generic_parameter_record(&parameter),
                 FactState::Poisoned(_)
             ));
+            assert!(matches!(
+                signatures.generic_parameter_record_with_types(&parameter).0,
+                FactState::Poisoned(_)
+            ));
             assert_eq!(
                 signatures.generic_parameter_name(&parameter),
                 Some("SourceName")

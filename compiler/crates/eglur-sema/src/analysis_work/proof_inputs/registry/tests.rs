@@ -388,13 +388,13 @@ fn source_shapes_and_dispatch_roles_are_checked_before_admission() {
             matches!(registry.bound_ticket(&mut accounting, site, parameter(&fixture, 0), 0, || panic!("foreign source")), Err(AnalysisProofRegistryFailure::NotOriginalInput(found)) if found == site)
         );
     }
-    // A written name can be a callable input, but a generated postfix call cannot.
+    // A written name can be a callable input, but a partial application cannot.
     registry
         .bound_ticket(&mut accounting, name, parameter(&fixture, 0), 0, || {
             ALLOWANCE
         })
         .unwrap();
-    let generated = fixture_fn("fn inspect() -> Unit = pick.then(pick)");
+    let generated = fixture_fn("fn inspect() -> Unit = pick(_, _)");
     let body = generated.hir.body(generated.site.expression().body());
     let mut generated_registry =
         AnalysisProofInputRegistry::new(&accounting, 0, generated.site.module(), body).unwrap();
@@ -404,7 +404,7 @@ fn source_shapes_and_dispatch_roles_are_checked_before_admission() {
             generated.site,
             parameter(&generated, 0),
             0,
-            || panic!("generated call")
+            || panic!("partial application")
         ),
         Err(AnalysisProofRegistryFailure::NotOriginalInput(_))
     ));

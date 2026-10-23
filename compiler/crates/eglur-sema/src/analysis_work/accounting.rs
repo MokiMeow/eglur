@@ -301,6 +301,23 @@ impl AnalysisWorkAccounting {
         self.incomplete
     }
 
+    pub(crate) fn attempt_binding(&self) -> Arc<()> {
+        // Interrupted results must retain identity without requiring active work.
+        Arc::clone(&self.attempt)
+    }
+
+    pub(crate) fn validate_attempt_binding(
+        &self,
+        binding: &Arc<()>,
+    ) -> Result<(), AnalysisWorkFailure> {
+        if !Arc::ptr_eq(&self.attempt, binding) {
+            return Err(AnalysisWorkFailure::Claim(
+                AnalysisRootClaimError::ForeignAttempt,
+            ));
+        }
+        self.ensure_active()
+    }
+
     pub(super) fn bind_input_consumer(
         &self,
         consumer: usize,
