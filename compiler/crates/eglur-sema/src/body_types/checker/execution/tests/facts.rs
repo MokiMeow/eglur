@@ -15,6 +15,13 @@ fn table<K: Ord + Debug, T: Debug>(facts: &FactTable<K, T>) -> BTreeMap<String, 
         .collect()
 }
 
+fn local_table(facts: &LocalTypeFacts) -> BTreeMap<String, String> {
+    facts
+        .entries()
+        .map(|(key, fact)| (format!("{key:?}"), format!("{fact:?}")))
+        .collect()
+}
+
 fn sequence<T: Debug>(values: &[T]) -> Vec<String> {
     values.iter().map(|value| format!("{value:?}")).collect()
 }
@@ -25,7 +32,7 @@ macro_rules! snapshot {
         Snapshot {
             tables: vec![
                 table(&facts.expressions),
-                table(&facts.locals),
+                local_table(&facts.locals),
                 table(&facts.members),
                 table(&facts.invocations),
                 table(&facts.callable_values),

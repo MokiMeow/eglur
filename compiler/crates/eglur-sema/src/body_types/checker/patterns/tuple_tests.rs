@@ -86,7 +86,7 @@ fn tuple_match_copies_only_written_children_and_keeps_their_types() {
                         );
                     }
                 }
-                assert_eq!(checker.locals.iter().count(), 1 + repeats * (prefix + 1));
+                assert_eq!(checker.locals.len(), 1 + repeats * (prefix + 1));
             });
         }
     }
@@ -130,7 +130,7 @@ fn tuple_match_checks_original_arity_and_kind_before_copying() {
                     },
                     "{form}/{width}"
                 );
-                assert_eq!(checker.locals.iter().count(), checker.names.locals().len());
+                assert_eq!(checker.locals.len(), checker.names.locals().len());
                 for binding in checker.names.locals() {
                     assert!(
                         match checker.locals.state(&binding.id()) {

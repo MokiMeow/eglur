@@ -81,14 +81,14 @@ fn tuple_binding_completes_each_pattern_once_and_preserves_later_locals() {
                 };
                 assert_eq!(work(), Work { inputs, completed }, "{mode}/{count}");
                 assert_eq!(
-                    checker.locals.iter().count(),
+                    checker.locals.len(),
                     match mode {
                         "known" => count,
                         "mixed" | "mut" => count / 2,
                         _ => 0,
                     }
                 );
-                for (_, fact) in checker.locals.iter() {
+                for fact in checker.locals.facts() {
                     let SemanticFact::Known(local) = fact else {
                         panic!("known local expected")
                     };
@@ -186,7 +186,7 @@ fn tuple_rest_type_and_arity_guards_reject_before_completion_or_binding() {
                 Outcome::Poisoned(_)
             ));
             assert_eq!(work(), Work::default());
-            assert_eq!(checker.locals.iter().count(), 0);
+            assert_eq!(checker.locals.len(), 0);
             checker.leave_control_region(&region).unwrap();
             let snapshot =
                 std::mem::replace(checker.diagnostics, DiagnosticStore::new()).finalize(None);

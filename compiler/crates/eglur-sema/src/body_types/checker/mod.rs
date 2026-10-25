@@ -228,7 +228,7 @@ fn typecheck_bodies_inner<'hir>(
         evaluate_constant_declarations: support.supports(CompileCapability::Typecheck(
             TypecheckCapability::EvaluateSelectedIntegerConstDeclarations,
         )),
-        locals: FactTable::new(),
+        locals: LocalTypeFacts::new(),
         members: FactTable::new(),
         invocations: FactTable::new(),
         callable_values: FactTable::new(),
@@ -274,7 +274,7 @@ struct BodyChecker<'input, 'hir, 'support> {
     const_eligibility: BTreeMap<ExpressionKey, bool>,
     preparing_numeric_tree: bool,
     evaluate_constant_declarations: bool,
-    locals: FactTable<LocalBindingId, LocalTypeFact>,
+    locals: LocalTypeFacts,
     members: FactTable<ExpressionKey, MemberAccess>,
     invocations: FactTable<ExpressionKey, InvocationFact>,
     callable_values: FactTable<ExpressionKey, CallableInstanceId>,

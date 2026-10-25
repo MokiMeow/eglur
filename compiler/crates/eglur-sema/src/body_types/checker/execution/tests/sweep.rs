@@ -260,7 +260,7 @@ fn inspect_prefix(inputs: &BodyPhaseInputs<'_, '_>, prefix: &BodyTypingPrefix, t
             region_exists(parent);
         }
     }
-    for (_, fact) in prefix.locals.iter() {
+    for fact in prefix.locals.facts() {
         if let SemanticFact::Known(local) = fact {
             region_exists(local.region());
         }

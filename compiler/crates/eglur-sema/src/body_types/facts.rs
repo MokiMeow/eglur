@@ -1,5 +1,7 @@
 use eglur_hir::{ExprId, Mutability};
 
+use super::LocalTypeFacts;
+
 use crate::{
     CallableInstanceId, CallableSignatureId, CanonicalTarget, CheckedNumericOperation,
     ControlRegion, ControlRegionKey, ControlTransfer, DefId, ExpressionKey, FactState, FactTable,
@@ -422,7 +424,7 @@ impl BodyTypeSummary {
 /// Body-owned canonical facts produced without trait search or control-flow closure.
 pub struct BodyTypes {
     pub(super) expressions: FactTable<ExpressionKey, TypedExpression>,
-    pub(super) locals: FactTable<LocalBindingId, LocalTypeFact>,
+    pub(super) locals: LocalTypeFacts,
     pub(super) members: FactTable<ExpressionKey, MemberAccess>,
     pub(super) invocations: FactTable<ExpressionKey, InvocationFact>,
     pub(super) callable_values: FactTable<ExpressionKey, CallableInstanceId>,
@@ -581,7 +583,7 @@ impl BodyTypes {
     #[must_use]
     pub fn fact_count(&self) -> usize {
         self.expressions.iter().len()
-            + self.locals.iter().len()
+            + self.locals.len()
             + self.members.iter().len()
             + self.invocations.iter().len()
             + self.callable_values.iter().len()

@@ -65,7 +65,7 @@ impl CompletedBodyExecution {
 /// ```
 pub struct BodyTypingPrefix {
     pub(super) expressions: crate::FactTable<crate::ExpressionKey, TypedExpression>,
-    pub(super) locals: crate::FactTable<crate::LocalBindingId, LocalTypeFact>,
+    pub(super) locals: LocalTypeFacts,
     pub(super) members: crate::FactTable<crate::ExpressionKey, MemberAccess>,
     pub(super) invocations: crate::FactTable<crate::ExpressionKey, InvocationFact>,
     pub(super) callable_values: crate::FactTable<crate::ExpressionKey, crate::CallableInstanceId>,
@@ -86,7 +86,7 @@ impl BodyTypingPrefix {
     pub(super) fn empty() -> Self {
         Self {
             expressions: crate::FactTable::new(),
-            locals: crate::FactTable::new(),
+            locals: LocalTypeFacts::new(),
             members: crate::FactTable::new(),
             invocations: crate::FactTable::new(),
             callable_values: crate::FactTable::new(),
@@ -135,7 +135,7 @@ impl BodyTypingPrefix {
     #[must_use]
     pub fn fact_count(&self) -> usize {
         self.expressions.iter().len()
-            + self.locals.iter().len()
+            + self.locals.len()
             + self.members.iter().len()
             + self.invocations.iter().len()
             + self.callable_values.iter().len()

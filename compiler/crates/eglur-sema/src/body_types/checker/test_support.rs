@@ -101,7 +101,7 @@ pub(super) fn with_checker_owned(
             const_eligibility: BTreeMap::new(),
             preparing_numeric_tree: false,
             evaluate_constant_declarations: true,
-            locals: FactTable::new(),
+            locals: LocalTypeFacts::new(),
             members: FactTable::new(),
             invocations: FactTable::new(),
             callable_values: FactTable::new(),

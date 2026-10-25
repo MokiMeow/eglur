@@ -71,7 +71,7 @@ fn variant_prefix_copies_follow_written_children_and_preserve_substituted_types(
                     },
                     "{width}/{prefix}"
                 );
-                assert_eq!(checker.locals.iter().count(), 1 + repeats * (prefix + 1));
+                assert_eq!(checker.locals.len(), 1 + repeats * (prefix + 1));
 
                 for row in 0..repeats {
                     for column in 0..prefix {
