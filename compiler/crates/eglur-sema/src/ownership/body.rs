@@ -234,12 +234,12 @@ pub(crate) fn analyze_body(
     }
     let ownership_local_exists = body.patterns().try_fold(
         false,
-        |found, (_, pattern)| -> Result<_, OwnershipAnalysisError> {
+        |found, (pattern_id, pattern)| -> Result<_, OwnershipAnalysisError> {
             if found {
                 return Ok(true);
             }
-            let origin = match pattern.kind() {
-                PatternKind::Binding(name) | PatternKind::Alias { name, .. } => name.origin(),
+            match pattern.kind() {
+                PatternKind::Binding(_) | PatternKind::Alias { .. } => {}
                 PatternKind::Wildcard
                 | PatternKind::Literal(_)
                 | PatternKind::Unit
@@ -249,8 +249,10 @@ pub(crate) fn analyze_body(
                 | PatternKind::Variant { .. }
                 | PatternKind::Struct { .. }
                 | PatternKind::Invalid => return Ok(false),
-            };
-            let Some(binding) = names.local_binding(module, body.id(), origin) else {
+            }
+            let Some(binding) = names.body_bindings(module, body.id()).and_then(|bindings| {
+                bindings.binding(crate::resolve::PatternBindingSite::Name(pattern_id))
+            }) else {
                 return Ok(true);
             };
             match body_types.recorded_local(binding) {

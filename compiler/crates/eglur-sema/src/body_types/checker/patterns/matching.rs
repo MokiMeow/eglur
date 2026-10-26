@@ -146,7 +146,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         FactState::Known(_) | FactState::NotApplicable => {}
                     }
                 }
-                let binding = self.local_binding(module, body.id(), name.origin())?;
+                let binding = self.pattern_binding(
+                    module,
+                    body.id(),
+                    crate::resolve::PatternBindingSite::Name(pattern_id),
+                    name.origin(),
+                )?;
                 Ok(PatternPlan::Complete(Outcome::Known(
                     PatternCheck::binding(binding, expected),
                 )))
@@ -155,7 +160,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 PatternCheck::irrefutable(),
             ))),
             PatternKind::Alias { name, pattern } => {
-                let binding = self.local_binding(module, body.id(), name.origin())?;
+                let binding = self.pattern_binding(
+                    module,
+                    body.id(),
+                    crate::resolve::PatternBindingSite::Name(pattern_id),
+                    name.origin(),
+                )?;
                 Ok(PatternPlan::Child {
                     pattern: *pattern,
                     expected,

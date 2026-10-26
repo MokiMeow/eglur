@@ -127,6 +127,7 @@ pub(in crate::resolve) fn with_resolver(
         scopes: Vec::new(),
         locals: Vec::new(),
         local_by_origin: Default::default(),
+        pattern_bindings: Default::default(),
         active_scopes: Vec::new(),
         current_owner: None,
         next_scope: Default::default(),

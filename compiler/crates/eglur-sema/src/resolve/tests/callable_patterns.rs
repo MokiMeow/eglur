@@ -350,7 +350,10 @@ fn a_foreign_pattern_root_stops_before_the_next_constructor() {
                 .activate_binding(
                     BindingIntroduction {
                         name: NameKey::from_hir(name).unwrap(),
-                        origins: vec![name.origin()],
+                        occurrences: vec![BindingOccurrence {
+                            origin: name.origin(),
+                            site: None,
+                        }],
                     },
                     BindingActivation::Poisoned(foreign),
                 )

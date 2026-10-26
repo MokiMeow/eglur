@@ -201,12 +201,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         mode: PatternBindingMode,
     ) -> Result<Outcome<()>, BodyFlow> {
         let mutability = mode.mutability();
+        let mut binding_pattern = pattern_id;
         let mut pattern = body
             .pattern(pattern_id)
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
 
         if matches!(mode, PatternBindingMode::Let(_)) {
             while let PatternKind::Group(inner) = pattern.kind() {
+                binding_pattern = *inner;
                 pattern = body
                     .pattern(*inner)
                     .ok_or(BodyTypingError::WrongBodyPattern(*inner))?;
@@ -217,7 +219,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let kind = pattern.kind().clone();
         match kind {
             PatternKind::Binding(name) => {
-                let binding = self.local_binding(module, body.id(), name.origin())?;
+                let binding = self.pattern_binding(
+                    module,
+                    body.id(),
+                    crate::resolve::PatternBindingSite::Name(binding_pattern),
+                    name.origin(),
+                )?;
                 let region = self.current_control_region()?.clone();
                 self.locals.insert(
                     binding,
@@ -393,11 +400,21 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
         match pattern.kind() {
             PatternKind::Binding(name) => {
-                let binding = self.local_binding(module, body.id(), name.origin())?;
+                let binding = self.pattern_binding(
+                    module,
+                    body.id(),
+                    crate::resolve::PatternBindingSite::Name(pattern_id),
+                    name.origin(),
+                )?;
                 self.poison_pattern_local(binding, poison)?;
             }
             PatternKind::Alias { name, pattern } => {
-                let binding = self.local_binding(module, body.id(), name.origin())?;
+                let binding = self.pattern_binding(
+                    module,
+                    body.id(),
+                    crate::resolve::PatternBindingSite::Name(pattern_id),
+                    name.origin(),
+                )?;
                 self.poison_pattern_local(binding, poison.clone())?;
                 self.bind_pattern_poison(module, body, *pattern, poison)?;
             }
@@ -417,14 +434,22 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.bind_pattern_poison(module, body, *inner, poison)?;
             }
             PatternKind::Struct { fields, .. } => {
-                for field in fields {
+                for (field_index, field) in fields.iter().enumerate() {
                     match field {
                         eglur_hir::FieldPattern::Field {
                             name,
                             pattern: None,
                             ..
                         } => {
-                            let binding = self.local_binding(module, body.id(), name.origin())?;
+                            let binding = self.pattern_binding(
+                                module,
+                                body.id(),
+                                crate::resolve::PatternBindingSite::Shorthand {
+                                    pattern: pattern_id,
+                                    field: field_index,
+                                },
+                                name.origin(),
+                            )?;
                             self.poison_pattern_local(binding, poison.clone())?;
                         }
                         eglur_hir::FieldPattern::Field {
@@ -446,15 +471,22 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     }
                 }
                 eglur_hir::PatternPayload::Named(fields) => {
-                    for field in fields {
+                    for (field_index, field) in fields.iter().enumerate() {
                         match field {
                             eglur_hir::FieldPattern::Field {
                                 name,
                                 pattern: None,
                                 ..
                             } => {
-                                let binding =
-                                    self.local_binding(module, body.id(), name.origin())?;
+                                let binding = self.pattern_binding(
+                                    module,
+                                    body.id(),
+                                    crate::resolve::PatternBindingSite::Shorthand {
+                                        pattern: pattern_id,
+                                        field: field_index,
+                                    },
+                                    name.origin(),
+                                )?;
                                 self.poison_pattern_local(binding, poison.clone())?;
                             }
                             eglur_hir::FieldPattern::Field {
