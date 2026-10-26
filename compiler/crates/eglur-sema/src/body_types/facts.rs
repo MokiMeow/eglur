@@ -4,9 +4,9 @@ use super::LocalTypeFacts;
 
 use crate::{
     CallableInstanceId, CallableSignatureId, CanonicalTarget, CheckedNumericOperation,
-    ControlRegion, ControlRegionKey, ControlTransfer, DefId, ExpressionKey, FactState, FactTable,
-    GenericParameterId, IntegerValue, LocalBindingId, NormalContinuation, ReferenceMutability,
-    SemanticFact, SemanticLocation, SubstId, TraitRef, TypeId, WitnessSlotId,
+    ControlRegion, ControlRegionKey, ControlTransfer, ControlTransferSource, DefId, ExpressionKey,
+    FactState, FactTable, GenericParameterId, IntegerValue, LocalBindingId, NormalContinuation,
+    ReferenceMutability, SemanticFact, SemanticLocation, SubstId, TraitRef, TypeId, WitnessSlotId,
 };
 
 /// Stable storage identity retained for a typed place expression.
@@ -563,6 +563,17 @@ impl BodyTypes {
     #[must_use]
     pub fn transfers(&self) -> &[ControlTransfer] {
         &self.transfers
+    }
+
+    #[must_use]
+    pub(crate) fn transfers_from(&self, source: &ControlTransferSource) -> &[ControlTransfer] {
+        // Completed transfers are published with source as their leading sort key.
+        let start = self
+            .transfers
+            .partition_point(|transfer| transfer.source() < source);
+        let remaining = &self.transfers[start..];
+        let count = remaining.partition_point(|transfer| transfer.source() == source);
+        &remaining[..count]
     }
 
     #[must_use]

@@ -622,16 +622,10 @@ impl BodyAnalyzer<'_> {
         state: &FlowState,
     ) -> Result<(), OwnershipAnalysisError> {
         let source = ControlTransferSource::Expression(key);
-        let transfers = self
-            .body_types
-            .transfers()
-            .iter()
-            .filter(|transfer| transfer.source() == &source)
-            .cloned()
-            .collect::<Vec<_>>();
-        for transfer in transfers {
+        let body_types = self.body_types;
+        for transfer in body_types.transfers_from(&source) {
             let mut exit_state = state.clone();
-            self.check_transfer(&transfer, origin, false, &mut exit_state)?;
+            self.check_transfer(transfer, origin, false, &mut exit_state)?;
             if let Some((_, exits)) = self
                 .recoverable_exits
                 .iter_mut()
@@ -651,15 +645,9 @@ impl BodyAnalyzer<'_> {
         closing_delimiter: bool,
         state: &mut FlowState,
     ) -> Result<(), OwnershipAnalysisError> {
-        let transfers = self
-            .body_types
-            .transfers()
-            .iter()
-            .filter(|transfer| transfer.source() == source)
-            .cloned()
-            .collect::<Vec<_>>();
-        for transfer in transfers {
-            self.check_transfer(&transfer, origin, closing_delimiter, state)?;
+        let body_types = self.body_types;
+        for transfer in body_types.transfers_from(source) {
+            self.check_transfer(transfer, origin, closing_delimiter, state)?;
         }
         Ok(())
     }
