@@ -54,12 +54,23 @@ enum TransferKind {
     Yield,
 }
 
+#[derive(Clone, Copy)]
+enum ProjectionReceiver {
+    LocalAlias(LocalBindingId),
+    Value,
+}
+
 enum Step<'hir> {
     Expression(ExprId, Option<ControlRegionKey>),
     Statement(StmtId),
     FinishExpression(ExpressionKey, OriginId),
     Reference(ExprId),
-    Projection(ExpressionKey, OriginId, &'hir str),
+    Projection {
+        expression: ExpressionKey,
+        origin: OriginId,
+        index: &'hir str,
+        receiver: ProjectionReceiver,
+    },
     RecoverMove(ExprId),
     Recoverable(ControlRegionKey),
     IfCondition(ExpressionKey, &'hir eglur_hir::IfExpr),
@@ -116,14 +127,26 @@ impl<'hir> BodyAnalyzer<'hir> {
                     roots.extend(self.expression_roots(value, state)?);
                     flow.provenance = ValueProvenance::direct(roots);
                 }
-                Step::Projection(key, origin, index) => {
+                Step::Projection {
+                    expression: key,
+                    origin,
+                    index,
+                    receiver,
+                } => {
                     let index = index.parse::<usize>().map_err(|_| {
                         OwnershipAnalysisError::InvalidTupleProjectionIndex {
                             expression: key,
                             index: index.into(),
                         }
                     })?;
-                    flow.provenance = flow.provenance.projected(index);
+                    flow.provenance = match receiver {
+                        ProjectionReceiver::LocalAlias(binding) => state
+                            .aliases
+                            .get(&binding)
+                            .map(|provenance| provenance.projected(index))
+                            .unwrap_or_default(),
+                        ProjectionReceiver::Value => flow.provenance.projected(index),
+                    };
                     self.use_roots(&flow.provenance.roots(), origin, state);
                 }
                 Step::RecoverMove(id) => self.recover_missing_move(id, state)?,
@@ -359,16 +382,26 @@ impl<'hir> BodyAnalyzer<'hir> {
                 }
             }
             ExprKind::TupleProjection { receiver, index } => {
-                pending.push(Step::Projection(key, origin, index));
-                if let Some(binding) = self.expression_local(*receiver)?
+                let projection_receiver = if let Some(binding) = self.expression_local(*receiver)?
                     && self.binding_contains_reference(binding)?
                 {
                     *flow = ExpressionFlow {
                         continuing: self
                             .expression_continues(ExpressionKey::new(self.module, *receiver), true),
-                        provenance: state.aliases.get(&binding).cloned().unwrap_or_default(),
+                        provenance: ValueProvenance::default(),
                     };
+                    ProjectionReceiver::LocalAlias(binding)
                 } else {
+                    ProjectionReceiver::Value
+                };
+                // Alias projections queue no receiver work before their state lookup.
+                pending.push(Step::Projection {
+                    expression: key,
+                    origin,
+                    index,
+                    receiver: projection_receiver,
+                });
+                if matches!(projection_receiver, ProjectionReceiver::Value) {
                     pending.push(Step::Expression(*receiver, None));
                 }
             }

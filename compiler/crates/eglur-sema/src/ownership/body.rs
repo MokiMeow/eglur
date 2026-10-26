@@ -1,6 +1,7 @@
 mod traversal;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Bound;
 
 use eglur_hir::{
     Body, ConstructorPayload, ExprId, ExprKind, OriginId, PatternId, PatternKind,
@@ -86,15 +87,21 @@ impl ValueProvenance {
     }
 
     fn projected(&self, index: usize) -> Self {
+        let lower = [index];
+        let upper = index.checked_add(1).map(|next| [next]);
+        let bounds = (
+            Bound::Included(lower.as_slice()),
+            upper
+                .as_ref()
+                .map_or(Bound::Unbounded, |upper| Bound::Excluded(upper.as_slice())),
+        );
         let mut projected = Self::default();
-        for (path, roots) in &self.roots_by_tuple_path {
-            if path.first() == Some(&index) {
-                projected
-                    .roots_by_tuple_path
-                    .entry(path[1..].to_vec())
-                    .or_default()
-                    .extend(roots);
-            }
+        for (path, roots) in self.roots_by_tuple_path.range::<[usize], _>(bounds) {
+            projected
+                .roots_by_tuple_path
+                .entry(path[1..].to_vec())
+                .or_default()
+                .extend(roots);
         }
         projected
     }

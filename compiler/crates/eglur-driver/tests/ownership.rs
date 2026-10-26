@@ -14,6 +14,9 @@ mod traversal;
 #[path = "ownership/unsupported.rs"]
 mod unsupported;
 
+#[path = "ownership/projection.rs"]
+mod projection;
+
 fn body_capabilities() -> [CompileCapability; 14] {
     [
         CompileCapability::Resolve(ResolveCapability::CollectDeclarations),
