@@ -147,8 +147,7 @@ impl BodyBindingView<'_> {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn root(&self, pattern: PatternId) -> Option<&[LocalBindingId]> {
+    pub(crate) fn root(&self, pattern: PatternId) -> Option<&[LocalBindingId]> {
         if pattern.body() != self.bindings.body {
             return None;
         }

@@ -509,7 +509,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         match pattern {
             Outcome::Known(pattern) => {
                 if let Some((name, duplicate_origin)) =
-                    self.first_pattern_duplicate(body, arm.pattern)?
+                    self.match_pattern_duplicate(module, body, arm.pattern)?
                 {
                     let found = self.type_error(
                         source,
@@ -524,9 +524,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     self.bind_pattern_poison(module, body, arm.pattern, found.clone())?;
                     frame.poison.include(&found)?;
                 } else {
-                    for (binding, ty) in pattern.bindings {
-                        self.bind_match_local(binding, ty)?;
-                    }
+                    self.install_match_bindings(module, arm.pattern)?;
                     frame.coverage.push((frame.next_arm, pattern.coverage));
                 }
             }

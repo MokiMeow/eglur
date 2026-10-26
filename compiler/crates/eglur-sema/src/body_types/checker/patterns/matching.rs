@@ -67,6 +67,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         pattern_id: PatternId,
         expected: TypeId,
     ) -> Result<Outcome<PatternCheck>, BodyFlow> {
+        context
+            .body
+            .pattern(pattern_id)
+            .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
+        self.pattern_bindings.begin(context.module, pattern_id);
         let mut pending = (pattern_id, expected);
         let mut continuations = Vec::new();
         loop {
@@ -152,8 +157,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     crate::resolve::PatternBindingSite::Name(pattern_id),
                     name.origin(),
                 )?;
+                self.pattern_bindings
+                    .observe(binding, pattern_id, name.origin())?;
+                self.pattern_bindings.type_binding(binding, expected)?;
                 Ok(PatternPlan::Complete(Outcome::Known(
-                    PatternCheck::binding(binding, expected),
+                    PatternCheck::irrefutable(),
                 )))
             }
             PatternKind::Wildcard => Ok(PatternPlan::Complete(Outcome::Known(
@@ -166,6 +174,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     crate::resolve::PatternBindingSite::Name(pattern_id),
                     name.origin(),
                 )?;
+                self.pattern_bindings
+                    .observe(binding, pattern_id, name.origin())?;
                 Ok(PatternPlan::Child {
                     pattern: *pattern,
                     expected,
@@ -492,9 +502,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         outcome: Outcome<PatternCheck>,
     ) -> Result<PatternPlan<'body>, BodyFlow> {
         match continuation {
-            PatternContinuation::Alias { binding, expected } => Ok(PatternPlan::Complete(
-                outcome.map(|check| check.with_binding(binding, expected)),
-            )),
+            PatternContinuation::Alias { binding, expected } => {
+                if let Outcome::Known(_) = &outcome {
+                    self.pattern_bindings.type_binding(binding, expected)?;
+                }
+                Ok(PatternPlan::Complete(outcome))
+            }
             PatternContinuation::Group => Ok(PatternPlan::Complete(outcome)),
             PatternContinuation::Tuple {
                 mut cursor,

@@ -1,8 +1,10 @@
 use super::*;
 
+mod bindings;
 mod construction;
 mod matching;
 
+pub(super) use bindings::PatternBindingScratch;
 use construction::PatternConstructorShape;
 
 #[cfg(test)]
@@ -15,6 +17,44 @@ mod poison_tests;
 mod tuple_tests;
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
+    pub(super) fn match_pattern_duplicate(
+        &self,
+        module: ModuleId,
+        body: &Body,
+        root: PatternId,
+    ) -> Result<Option<(NameKey, OriginId)>, BodyFlow> {
+        let Some(duplicate) = self.pattern_bindings.duplicate(module, root) else {
+            return Ok(None);
+        };
+        let pattern = body
+            .pattern(duplicate.pattern)
+            .ok_or(BodyTypingError::WrongBodyPattern(duplicate.pattern))?;
+        let name = match pattern.kind() {
+            PatternKind::Binding(name) | PatternKind::Alias { name, .. } => name,
+            _ => return Err(BodyTypingError::InconsistentPatternBinding(duplicate.binding).into()),
+        };
+        Ok(NameKey::from_hir(name).map(|name| (name, duplicate.origin)))
+    }
+
+    pub(super) fn install_match_bindings(
+        &mut self,
+        module: ModuleId,
+        root: PatternId,
+    ) -> Result<(), BodyFlow> {
+        let names = self.names;
+        let view = names.body_bindings(module, root.body());
+        let bindings = view.as_ref().and_then(|view| view.root(root));
+        if let Some(bindings) = bindings {
+            for &binding in bindings {
+                let ty = self.pattern_bindings.ty(binding)?;
+                self.bind_match_local(binding, ty)?;
+            }
+        } else if let Some(binding) = self.pattern_bindings.first_binding(module, root) {
+            return Err(BodyTypingError::InconsistentPatternBinding(binding).into());
+        }
+        Ok(())
+    }
+
     pub(super) fn bind_match_local(
         &mut self,
         binding: LocalBindingId,

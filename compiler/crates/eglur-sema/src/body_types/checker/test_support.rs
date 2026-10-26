@@ -102,6 +102,7 @@ pub(super) fn with_checker_owned(
             preparing_numeric_tree: false,
             evaluate_constant_declarations: true,
             locals: LocalTypeFacts::new(),
+            pattern_bindings: PatternBindingScratch::default(),
             members: FactTable::new(),
             invocations: FactTable::new(),
             callable_values: FactTable::new(),
