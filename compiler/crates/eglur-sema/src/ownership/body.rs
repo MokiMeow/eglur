@@ -205,6 +205,7 @@ pub(crate) fn analyze_body(
         signatures,
         body_types,
         roots: BTreeMap::new(),
+        locals_by_region: BTreeMap::new(),
         failures: Vec::new(),
         operation_count: 0,
         unperformed: false,
@@ -319,6 +320,7 @@ struct BodyAnalyzer<'analysis> {
     signatures: &'analysis DeclarationSignatures,
     body_types: &'analysis BodyTypes,
     roots: BTreeMap<LocalBindingId, ControlRegionKey>,
+    locals_by_region: BTreeMap<ControlRegionKey, BTreeSet<LocalBindingId>>,
     failures: Vec<OwnershipFailure>,
     operation_count: usize,
     unperformed: bool,
@@ -412,6 +414,15 @@ impl BodyAnalyzer<'_> {
         }
     }
 
+    fn record_local_region(&mut self, binding: LocalBindingId) {
+        if let FactState::Known(local) = self.body_types.local(binding) {
+            self.locals_by_region
+                .entry(local.region().clone())
+                .or_default()
+                .insert(binding);
+        }
+    }
+
     fn bind_let_pattern(
         &mut self,
         pattern: PatternId,
@@ -436,6 +447,7 @@ impl BodyAnalyzer<'_> {
             if self.binding_is_root(binding)? {
                 self.introduce_root(binding, state)?;
             } else if self.binding_contains_reference(binding)? {
+                self.record_local_region(binding);
                 state.aliases.insert(binding, flow.provenance.clone());
             }
         }
@@ -453,6 +465,7 @@ impl BodyAnalyzer<'_> {
         let FactState::Known(local) = self.body_types.local(binding) else {
             return Err(OwnershipAnalysisError::MissingLocalType(binding));
         };
+        self.record_local_region(binding);
         self.roots
             .entry(binding)
             .or_insert_with(|| local.region().clone());
@@ -463,6 +476,7 @@ impl BodyAnalyzer<'_> {
     }
 
     fn consume_root(&mut self, binding: LocalBindingId, origin: OriginId, state: &mut FlowState) {
+        self.record_local_region(binding);
         let fact = state
             .availability
             .entry(binding)
@@ -487,6 +501,7 @@ impl BodyAnalyzer<'_> {
     }
 
     fn consume_source(&mut self, binding: LocalBindingId, origin: OriginId, state: &mut FlowState) {
+        self.record_local_region(binding);
         let fact = state
             .availability
             .entry(binding)
@@ -586,7 +601,13 @@ impl BodyAnalyzer<'_> {
         Ok(())
     }
 
-    fn recover_consumed(&self, binding: LocalBindingId, origin: OriginId, state: &mut FlowState) {
+    fn recover_consumed(
+        &mut self,
+        binding: LocalBindingId,
+        origin: OriginId,
+        state: &mut FlowState,
+    ) {
+        self.record_local_region(binding);
         let fact = state
             .availability
             .entry(binding)
@@ -666,9 +687,16 @@ impl BodyAnalyzer<'_> {
         closing_delimiter: bool,
         state: &mut FlowState,
     ) -> Result<(), OwnershipAnalysisError> {
-        let exited = transfer.exited_regions().iter().collect::<BTreeSet<_>>();
-        for (&binding, region) in &self.roots {
-            if exited.contains(region)
+        // Region order must not replace binding order when several regions exit.
+        let bindings = transfer
+            .exited_regions()
+            .iter()
+            .filter_map(|region| self.locals_by_region.get(region))
+            .flatten()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        for &binding in &bindings {
+            if self.roots.contains_key(&binding)
                 && state
                     .availability
                     .get(&binding)
@@ -693,33 +721,8 @@ impl BodyAnalyzer<'_> {
                 });
             }
         }
-        let locals_to_remove = state
-            .availability
-            .keys()
-            .copied()
-            .filter(|binding| {
-                matches!(
-                    self.body_types.local(*binding),
-                    FactState::Known(local) if exited.contains(local.region())
-                )
-            })
-            .collect::<Vec<_>>();
-        for binding in locals_to_remove {
+        for binding in bindings {
             state.availability.remove(&binding);
-            state.aliases.remove(&binding);
-        }
-        let aliases_to_remove = state
-            .aliases
-            .keys()
-            .copied()
-            .filter(|binding| {
-                matches!(
-                    self.body_types.local(*binding),
-                    FactState::Known(local) if exited.contains(local.region())
-                )
-            })
-            .collect::<Vec<_>>();
-        for binding in aliases_to_remove {
             state.aliases.remove(&binding);
         }
         Ok(())

@@ -288,6 +288,7 @@ impl<'hir> BodyAnalyzer<'hir> {
                         && self.binding_contains_reference(binding)?
                         && flow.continuing
                     {
+                        self.record_local_region(binding);
                         state
                             .aliases
                             .insert(binding, std::mem::take(&mut flow.provenance));
