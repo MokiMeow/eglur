@@ -39,6 +39,7 @@ pub(super) fn with_inputs(
 pub(super) fn sources() -> Vec<(&'static str, String, bool)> {
     let id = "fn id[T](value: T) -> T = value";
     let mut sources = vec![
+        ("nested-path-barriers", "fn stop() -> Never = stop()\nfn as_bool(value: Bool) -> Bool = value\nfn inspect(x: Opt[i32]) -> Opt[i32] = if as_bool(stop()) {\nlet value: Opt[i32] = result {\nyield if as_bool(stop()) { let item = x?\nyield x } else { yield x }\n}\nyield value\n} else { yield x }".into(), true),
         ("nested", format!("{id}\nfn inspect(x: i32) -> i32 = id({{ yield (id(x), x).0 }})"), true),
         ("explicit", format!("{id}\nfn inspect(x: i32) -> i32 = id::[i32](x)"), true),
         ("probe", format!("{id}\nfn inspect(x: i32) -> Unit {{\nlet out = id(x)\n}}"), true),

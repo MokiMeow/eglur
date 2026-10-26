@@ -65,6 +65,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return None;
         }
         let floor = self.region_stack.len();
+        // Lexical cleanup keeps active barrier floors nondecreasing.
+        debug_assert!(
+            self.control_path_barriers
+                .last()
+                .is_none_or(|&active| active <= floor)
+        );
         self.control_path_barriers.push(floor);
         Some(floor)
     }
@@ -126,8 +132,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .ok_or_else(|| BodyTypingError::InactiveControlTarget(target.clone()))?;
         if self
             .control_path_barriers
-            .iter()
-            .any(|&floor| target_index < floor)
+            .last()
+            .is_some_and(|&floor| target_index < floor)
         {
             return Ok(false);
         }

@@ -184,3 +184,99 @@ fn poisoned_branches_are_retained_after_unsupported_conditions_and_guards() {
         );
     }
 }
+
+#[test]
+fn nested_control_barriers_preserve_local_yields() {
+    use eglur_sema::{ControlRegionKey, ControlTransferKind};
+
+    for absent in [false, true] {
+        for depth in [1, 8, 32] {
+            let condition = if absent { "as_bool(stop())" } else { "flag" };
+            let mut value = "()".to_owned();
+            for _ in 0..depth {
+                value = format!("if {condition} {{ yield {value} }} else {{ yield () }}");
+            }
+            let source = format!(
+                "fn stop() -> Never = stop()\n\
+                 fn as_bool(value: Bool) -> Bool = value\n\
+                 fn inspect(flag: Bool) -> Unit = {value}\n"
+            );
+            let mut session = session(&source);
+            let catalog = TrustedCatalog::first_slice().unwrap();
+            let analysis = session
+                .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+                .unwrap();
+            assert!(analysis.trace().missing().next().is_none());
+            assert!(analysis.fingerprints().is_some());
+            let yields = analysis
+                .resolution()
+                .unwrap()
+                .body_types()
+                .transfers()
+                .iter()
+                .filter(|transfer| transfer.kind() == ControlTransferKind::Yield)
+                .collect::<Vec<_>>();
+            assert_eq!(yields.len(), if absent { depth + 1 } else { 2 * depth });
+            for transfer in yields {
+                assert!(matches!(
+                    transfer.target(),
+                    ControlRegionKey::IfBranch { .. }
+                ));
+                assert_eq!(transfer.exited_regions().len(), 1);
+            }
+            let diagnostics = session.into_diagnostics(None);
+            assert!(
+                diagnostic_codes(&diagnostics).is_empty(),
+                "{source}\n{diagnostics:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_control_barriers_suppress_only_escaping_questions() {
+    use eglur_sema::{ControlRegionKey, ControlTransferKind};
+
+    for absent in [false, true] {
+        let condition = if absent { "as_bool(stop())" } else { "flag" };
+        let source = format!(
+            "fn stop() -> Never = stop()\n\
+             fn as_bool(value: Bool) -> Bool = value\n\
+             fn inspect(x: Opt[i32], flag: Bool) -> Opt[i32] =\n\
+             if {condition} {{\n\
+               let value: Opt[i32] = result {{\n\
+                 yield if {condition} {{ let item = x?\nyield x }} else {{ yield x }}\n\
+               }}\n\
+               yield value\n\
+             }} else {{ yield x }}\n"
+        );
+        let mut session = session(&source);
+        let catalog = TrustedCatalog::first_slice().unwrap();
+        let analysis = session
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        assert!(
+            analysis.trace().missing().next().is_none(),
+            "{source}\n{:?}",
+            analysis.trace().missing().collect::<Vec<_>>()
+        );
+        assert!(analysis.fingerprints().is_some());
+        let questions = analysis
+            .resolution()
+            .unwrap()
+            .body_types()
+            .transfers()
+            .iter()
+            .filter(|transfer| transfer.kind() == ControlTransferKind::QuestionShortCircuit)
+            .collect::<Vec<_>>();
+        assert_eq!(questions.len(), usize::from(!absent));
+        for transfer in questions {
+            assert!(matches!(transfer.target(), ControlRegionKey::Result(_)));
+        }
+        let diagnostics = session.into_diagnostics(None);
+        assert!(
+            diagnostic_codes(&diagnostics).is_empty(),
+            "{source}\n{diagnostics:?}"
+        );
+    }
+}
