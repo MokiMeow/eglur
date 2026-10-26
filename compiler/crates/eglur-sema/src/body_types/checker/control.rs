@@ -122,7 +122,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let target_index = self
             .region_stack
             .iter()
-            .position(|region| region == &target)
+            .rposition(|region| region == &target)
             .ok_or_else(|| BodyTypingError::InactiveControlTarget(target.clone()))?;
         if self
             .control_path_barriers
