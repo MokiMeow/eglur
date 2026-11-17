@@ -10,6 +10,36 @@ use eglur_sema::{
     ResolveCapability, TypeKind, TypecheckCapability,
 };
 
+#[path = "body_types/application.rs"]
+mod application;
+
+#[path = "body_types/branch_traversal.rs"]
+mod branch_traversal;
+
+#[path = "body_types/construction_traversal.rs"]
+mod construction_traversal;
+
+#[path = "body_types/failure_traversal.rs"]
+mod failure_traversal;
+
+#[path = "body_types/invocation_traversal.rs"]
+mod invocation_traversal;
+
+#[path = "body_types/numeric_traversal.rs"]
+mod numeric_traversal;
+
+#[path = "body_types/pattern_bindings.rs"]
+mod pattern_bindings;
+
+#[path = "body_types/statements.rs"]
+mod statements;
+
+#[path = "body_types/traversal.rs"]
+mod traversal;
+
+#[path = "body_types/value_traversal.rs"]
+mod value_traversal;
+
 fn body_capabilities() -> [CompileCapability; 14] {
     [
         CompileCapability::Resolve(ResolveCapability::CollectDeclarations),

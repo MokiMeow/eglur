@@ -1,3 +1,5 @@
+mod traversal;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -312,256 +314,6 @@ enum EffectBodyBlock {
 }
 
 impl BodyCollector<'_> {
-    fn visit_expression(
-        &mut self,
-        expression_id: ExprId,
-        state: &mut FlowState,
-    ) -> Result<(), EffectBodyError> {
-        let expression = self
-            .body
-            .expression(expression_id)
-            .ok_or(EffectBodyError::WrongBodyExpression(expression_id))?;
-        match expression.kind() {
-            ExprKind::Block { statements } => {
-                for &statement in statements.iter() {
-                    self.visit_statement(statement, state)?;
-                }
-            }
-            ExprKind::Binary { left, right, .. } => {
-                self.visit_expression(*left, state)?;
-                self.visit_expression(*right, state)?;
-            }
-            ExprKind::Unary { operand, .. }
-            | ExprKind::Reference { value: operand, .. }
-            | ExprKind::Try(operand)
-            | ExprKind::Group(operand)
-            | ExprKind::Unsafe(operand)
-            | ExprKind::Result(operand)
-            | ExprKind::Checked(operand) => self.visit_expression(*operand, state)?,
-            ExprKind::Call(call) => {
-                self.visit_expression(call.callee, state)?;
-                for argument in call.arguments.iter() {
-                    self.visit_expression(argument.value, state)?;
-                }
-                self.record_call(expression_id, expression.origin(), state)?;
-            }
-            ExprKind::CatalogCall(call) => {
-                for argument in call.arguments.iter() {
-                    self.visit_expression(argument.value, state)?;
-                }
-                self.record_call(expression_id, expression.origin(), state)?;
-            }
-            ExprKind::DTypeCall(call) => {
-                self.visit_expression(call.callee, state)?;
-                for argument in call.arguments.iter() {
-                    self.visit_expression(argument.value, state)?;
-                }
-                self.record_call(expression_id, expression.origin(), state)?;
-            }
-            ExprKind::Member { receiver, .. } | ExprKind::TupleProjection { receiver, .. } => {
-                self.visit_expression(*receiver, state)?;
-            }
-            ExprKind::ReduceByCandidate(candidate) => {
-                let key = ExpressionKey::new(self.module, expression_id);
-                match self.body_types.reduce_by_commitment(key) {
-                    FactState::Known(ReduceByCommitment::Ordinary) => {
-                        let ordinary = candidate
-                            .ordinary
-                            .as_ref()
-                            .expect("ordinary commitment retains an ordinary candidate");
-                        self.visit_expression(ordinary.call.callee, state)?;
-                        for argument in ordinary.call.arguments.iter() {
-                            self.visit_expression(argument.value, state)?;
-                        }
-                        self.record_call(expression_id, expression.origin(), state)?;
-                    }
-                    FactState::Known(ReduceByCommitment::TensorSingle) => {
-                        self.visit_expression(candidate.receiver, state)?;
-                        let single = candidate
-                            .single_reducer
-                            .as_ref()
-                            .expect("single commitment retains a reducer");
-                        let value = match single.value {
-                            ReduceBySingleValue::Expression(value)
-                            | ReduceBySingleValue::PhasePair { reducer: value, .. } => value,
-                        };
-                        self.visit_expression(value, state)?;
-                    }
-                    FactState::Known(ReduceByCommitment::TensorPhases) => {
-                        self.visit_expression(candidate.receiver, state)?;
-                        let phases = candidate
-                            .ordered_phases
-                            .as_ref()
-                            .expect("phase commitment retains ordered phases");
-                        for phase in phases.phases.iter() {
-                            self.visit_expression(phase.reducer, state)?;
-                        }
-                    }
-                    FactState::Poisoned(poison) => self.block_on_poison(poison)?,
-                    FactState::Unperformed | FactState::NotApplicable => {
-                        self.block_on_unperformed();
-                    }
-                }
-            }
-            ExprKind::Tuple(values) | ExprKind::Array(values) => {
-                for &value in values.iter() {
-                    self.visit_expression(value, state)?;
-                }
-            }
-            ExprKind::Map(entries) => {
-                for entry in entries.iter() {
-                    self.visit_expression(entry.key, state)?;
-                    self.visit_expression(entry.value, state)?;
-                }
-            }
-            ExprKind::StructLiteral { fields, .. } => {
-                for field in fields.iter() {
-                    self.visit_expression(field.value, state)?;
-                }
-            }
-            ExprKind::VariantConstructor { payload, .. } => match payload {
-                ConstructorPayload::Absent => {}
-                ConstructorPayload::Tuple(values) => {
-                    for &value in values.iter() {
-                        self.visit_expression(value, state)?;
-                    }
-                }
-                ConstructorPayload::Named(fields) => {
-                    for field in fields.iter() {
-                        self.visit_expression(field.value, state)?;
-                    }
-                }
-            },
-            ExprKind::If(value) => {
-                self.visit_expression(value.condition, state)?;
-                let entry = state.clone();
-                let mut branches = Vec::new();
-                let mut then_state = entry.clone();
-                self.visit_expression(value.then_branch, &mut then_state)?;
-                branches.push(then_state);
-                for branch in [value.else_branch, value.unknown_branch]
-                    .into_iter()
-                    .flatten()
-                {
-                    let mut branch_state = entry.clone();
-                    self.visit_expression(branch, &mut branch_state)?;
-                    branches.push(branch_state);
-                }
-                if value.else_branch.is_none() {
-                    branches.push(entry);
-                }
-                *state = FlowState::join(branches);
-            }
-            ExprKind::Match(value) => {
-                self.visit_expression(value.scrutinee, state)?;
-                let scrutinee_roots = self.expression_roots(value.scrutinee, state)?;
-                let entry = state.clone();
-                let mut branches = Vec::new();
-                for arm in value.arms.iter() {
-                    let mut branch_state = entry.clone();
-                    self.bind_aliases(arm.pattern, scrutinee_roots.clone(), &mut branch_state)?;
-                    if let Some(guard) = &arm.guard {
-                        self.visit_expression(guard.condition, &mut branch_state)?;
-                    }
-                    self.visit_expression(arm.value, &mut branch_state)?;
-                    branches.push(branch_state);
-                }
-                if !branches.is_empty() {
-                    *state = FlowState::join(branches);
-                }
-            }
-            ExprKind::Own(_)
-            | ExprKind::Move(_)
-            | ExprKind::DropOwn { .. }
-            | ExprKind::Literal(_)
-            | ExprKind::Name(_)
-            | ExprKind::Hole
-            | ExprKind::Unit
-            | ExprKind::Lambda(_)
-            | ExprKind::TensorSchema(_)
-            | ExprKind::Invalid => {}
-        }
-        Ok(())
-    }
-
-    fn visit_statement(
-        &mut self,
-        statement_id: StmtId,
-        state: &mut FlowState,
-    ) -> Result<(), EffectBodyError> {
-        let statement = self
-            .body
-            .statement(statement_id)
-            .ok_or(EffectBodyError::WrongBodyStatement(statement_id))?;
-        match statement.kind() {
-            StmtKind::Let {
-                pattern,
-                initializer,
-                ..
-            } => {
-                let roots = if let Some(initializer) = initializer {
-                    self.visit_expression(*initializer, state)?;
-                    self.expression_roots(*initializer, state)?
-                } else {
-                    BTreeSet::new()
-                };
-                self.bind_aliases(*pattern, roots, state)?;
-            }
-            StmtKind::Assign { target, value } => {
-                self.visit_expression(*target, state)?;
-                self.visit_expression(*value, state)?;
-                let target_expression = self
-                    .body
-                    .expression(*target)
-                    .ok_or(EffectBodyError::WrongBodyExpression(*target))?;
-                if !matches!(target_expression.kind(), ExprKind::Hole) {
-                    let target_roots = self.assignment_roots(*target, state)?;
-                    self.operations
-                        .push(EffectOperation::Mutation(EffectMutation {
-                            origin: statement.origin(),
-                            path: MutablePath::new(target_roots.iter().cloned()),
-                        }));
-                    if target_roots.iter().any(|root| {
-                        matches!(
-                            root,
-                            MutableRoot::Boundary(_) | MutableRoot::Nonlocal | MutableRoot::Unknown
-                        )
-                    }) {
-                        state.mark_escaping(self.expression_roots(*value, state)?);
-                    }
-                    self.update_reference_alias(*target, *value, state)?;
-                }
-            }
-            StmtKind::While { condition, body } => {
-                self.visit_expression(*condition, state)?;
-                let entry = state.clone();
-                let mut loop_state = entry.clone();
-                self.visit_expression(*body, &mut loop_state)?;
-                *state = FlowState::join([entry, loop_state]);
-            }
-            StmtKind::For { iterable, body, .. } => {
-                self.visit_expression(*iterable, state)?;
-                let entry = state.clone();
-                let mut loop_state = entry.clone();
-                self.visit_expression(*body, &mut loop_state)?;
-                *state = FlowState::join([entry, loop_state]);
-            }
-            StmtKind::Return(value) => {
-                if let Some(value) = value {
-                    self.visit_expression(*value, state)?;
-                    state.mark_escaping(self.expression_roots(*value, state)?);
-                }
-            }
-            StmtKind::Expression(value) => self.visit_expression(*value, state)?,
-            StmtKind::Yield(value) => {
-                self.visit_expression(*value, state)?;
-                state.mark_escaping(self.expression_roots(*value, state)?);
-            }
-            StmtKind::Break | StmtKind::Continue | StmtKind::Invalid => {}
-        }
-        Ok(())
-    }
-
     fn record_call(
         &mut self,
         expression: ExprId,
@@ -781,110 +533,94 @@ impl BodyCollector<'_> {
         expression: ExprId,
         state: &FlowState,
     ) -> Result<BTreeSet<MutableRoot>, EffectBodyError> {
-        let key = ExpressionKey::new(self.module, expression);
-        if let FactState::Known(typed) = self.body_types.expression(key)
-            && let Some(place) = typed.place()
-        {
-            return self.place_roots(place.kind(), state);
-        }
-        let expression = self
-            .body
-            .expression(expression)
-            .ok_or(EffectBodyError::WrongBodyExpression(expression))?;
+        let mut pending = vec![expression];
         let mut roots = BTreeSet::new();
-        match expression.kind() {
-            ExprKind::Reference { value, .. }
-            | ExprKind::Try(value)
-            | ExprKind::Group(value)
-            | ExprKind::Unsafe(value)
-            | ExprKind::Result(value)
-            | ExprKind::Checked(value) => roots.extend(self.expression_roots(*value, state)?),
-            ExprKind::Member { receiver, .. } | ExprKind::TupleProjection { receiver, .. } => {
-                roots.extend(self.expression_roots(*receiver, state)?);
-            }
-            ExprKind::Tuple(values) | ExprKind::Array(values) => {
-                for &value in values.iter() {
-                    roots.extend(self.expression_roots(value, state)?);
+        while let Some(id) = pending.pop() {
+            let key = ExpressionKey::new(self.module, id);
+            if let FactState::Known(typed) = self.body_types.expression(key)
+                && let Some(place) = typed.place()
+            {
+                match place.kind() {
+                    crate::TypedPlaceKind::Local(binding) => {
+                        if self.boundary_parameters.contains(binding) {
+                            roots.insert(MutableRoot::Boundary(*binding));
+                        } else if let Some(aliases) = state.aliases.get(binding) {
+                            roots.extend(aliases.iter().cloned());
+                        } else {
+                            roots.insert(MutableRoot::Local(*binding));
+                        }
+                    }
+                    crate::TypedPlaceKind::StoredField { receiver, .. }
+                    | crate::TypedPlaceKind::TupleElement { receiver, .. } => {
+                        pending.push(*receiver)
+                    }
+                    crate::TypedPlaceKind::Dereference { reference } => pending.push(*reference),
                 }
+                continue;
             }
-            ExprKind::Map(entries) => {
-                for entry in entries.iter() {
-                    roots.extend(self.expression_roots(entry.key, state)?);
-                    roots.extend(self.expression_roots(entry.value, state)?);
+            let expression = self
+                .body
+                .expression(id)
+                .ok_or(EffectBodyError::WrongBodyExpression(id))?;
+            match expression.kind() {
+                ExprKind::Reference { value, .. }
+                | ExprKind::Try(value)
+                | ExprKind::Group(value)
+                | ExprKind::Unsafe(value)
+                | ExprKind::Result(value)
+                | ExprKind::Checked(value) => pending.push(*value),
+                ExprKind::Member { receiver, .. } | ExprKind::TupleProjection { receiver, .. } => {
+                    pending.push(*receiver)
                 }
-            }
-            ExprKind::StructLiteral { fields, .. } => {
-                for field in fields.iter() {
-                    roots.extend(self.expression_roots(field.value, state)?);
+                ExprKind::Tuple(values) | ExprKind::Array(values) => {
+                    pending.extend(values.iter().rev().copied())
                 }
-            }
-            ExprKind::VariantConstructor { payload, .. } => match payload {
-                ConstructorPayload::Absent => {}
-                ConstructorPayload::Tuple(values) => {
-                    for &value in values.iter() {
-                        roots.extend(self.expression_roots(value, state)?);
+                ExprKind::Map(entries) => {
+                    for entry in entries.iter().rev() {
+                        pending.push(entry.value);
+                        pending.push(entry.key);
                     }
                 }
-                ConstructorPayload::Named(fields) => {
-                    for field in fields.iter() {
-                        roots.extend(self.expression_roots(field.value, state)?);
+                ExprKind::StructLiteral { fields, .. } => {
+                    pending.extend(fields.iter().rev().map(|field| field.value))
+                }
+                ExprKind::VariantConstructor { payload, .. } => match payload {
+                    ConstructorPayload::Absent => {}
+                    ConstructorPayload::Tuple(values) => {
+                        pending.extend(values.iter().rev().copied())
                     }
+                    ConstructorPayload::Named(fields) => {
+                        pending.extend(fields.iter().rev().map(|field| field.value))
+                    }
+                },
+                ExprKind::If(value) => {
+                    pending.extend(
+                        [value.then_branch]
+                            .into_iter()
+                            .chain(
+                                [value.else_branch, value.unknown_branch]
+                                    .into_iter()
+                                    .flatten(),
+                            )
+                            .rev(),
+                    );
                 }
-            },
-            ExprKind::If(value) => {
-                roots.extend(self.expression_roots(value.then_branch, state)?);
-                for branch in [value.else_branch, value.unknown_branch]
-                    .into_iter()
-                    .flatten()
-                {
-                    roots.extend(self.expression_roots(branch, state)?);
+                ExprKind::Match(value) => {
+                    pending.extend(value.arms.iter().rev().map(|arm| arm.value))
                 }
-            }
-            ExprKind::Match(value) => {
-                for arm in value.arms.iter() {
-                    roots.extend(self.expression_roots(arm.value, state)?);
-                }
-            }
-            _ => {
-                if let FactState::Known(typed) = self.body_types.expression(key)
-                    && matches!(
-                        self.signatures.types().kind(typed.ty()),
-                        Ok(TypeKind::Reference { .. })
-                    )
-                {
-                    roots.insert(MutableRoot::Unknown);
+                _ => {
+                    if let FactState::Known(typed) = self.body_types.expression(key)
+                        && matches!(
+                            self.signatures.types().kind(typed.ty()),
+                            Ok(TypeKind::Reference { .. })
+                        )
+                    {
+                        roots.insert(MutableRoot::Unknown);
+                    }
                 }
             }
         }
-        Ok(roots
-            .into_iter()
-            .map(|root| state.account_for_escape(root))
-            .collect())
-    }
-
-    fn place_roots(
-        &self,
-        place: &crate::TypedPlaceKind,
-        state: &FlowState,
-    ) -> Result<BTreeSet<MutableRoot>, EffectBodyError> {
-        let roots = match place {
-            crate::TypedPlaceKind::Local(binding) => {
-                if self.boundary_parameters.contains(binding) {
-                    BTreeSet::from([MutableRoot::Boundary(*binding)])
-                } else if let Some(aliases) = state.aliases.get(binding) {
-                    aliases.clone()
-                } else {
-                    BTreeSet::from([MutableRoot::Local(*binding)])
-                }
-            }
-            crate::TypedPlaceKind::StoredField { receiver, .. }
-            | crate::TypedPlaceKind::TupleElement { receiver, .. } => {
-                self.expression_roots(*receiver, state)?
-            }
-            crate::TypedPlaceKind::Dereference { reference } => {
-                self.expression_roots(*reference, state)?
-            }
-        };
+        // Escape projection is idempotent and this query does not mutate state.
         Ok(roots
             .into_iter()
             .map(|root| state.account_for_escape(root))

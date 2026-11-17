@@ -1,194 +1,34 @@
+use super::invocation::{InvocationFrame, InvocationPlan};
 use super::*;
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn type_member(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        receiver: ExprId,
-        member: &Name,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        if !member.is_valid() {
-            return Ok(Outcome::Poisoned(
-                source.invalid_poison(member.origin()).cloned().ok_or(
-                    BodyTypingError::MissingOriginSpan {
-                        file: source.file(),
-                        origin: member.origin(),
-                    },
-                )?,
-            ));
-        }
-        if !self.recorder.require(
-            CompileCapability::Typecheck(TypecheckCapability::ResolveMembers),
-            SemanticLocation::origin(source.file(), member.origin()),
-        ) {
-            return Ok(Outcome::Unperformed);
-        }
-        let receiver_value = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
-            receiver,
-            TypeRequest::definitive(None),
-        )?;
-        let Outcome::Known(receiver_value) = receiver_value else {
-            return Ok(receiver_value);
-        };
-        let (subject, reference_writable) = match self.signatures.types().kind(receiver_value.ty)? {
-            TypeKind::Reference {
-                mutability,
-                referent,
-            } => (*referent, Some(*mutability == ReferenceMutability::Mutable)),
-            _ => (receiver_value.ty, None),
-        };
-        let TypeKind::Nominal {
-            head: NominalHead::Declaration(owner),
-            substitution,
-        } = self.signatures.types().kind(subject)?.clone()
-        else {
-            return Ok(self.unsupported(
-                TypecheckCapability::ResolveMethods,
-                source,
-                member.origin(),
-            ));
-        };
-        let (generic_parameters, storage_fields, properties) =
-            match self.signatures.declaration(&owner) {
-                FactState::Known(DeclarationSignature::Struct {
-                    generic_parameters,
-                    storage_fields,
-                    properties,
-                }) => (
-                    generic_parameters.to_vec(),
-                    storage_fields.to_vec(),
-                    properties.to_vec(),
-                ),
-                FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
-                FactState::Unperformed => return Ok(Outcome::Unperformed),
-                FactState::Known(_) | FactState::NotApplicable => {
-                    return Ok(self.unsupported(
-                        TypecheckCapability::ResolveMethods,
-                        source,
-                        member.origin(),
-                    ));
-                }
-            };
-        let member_name = member.text().expect("valid member has text");
-        let stored = self.find_named_target(&storage_fields, member_name);
-        let property = self.find_named_target(&properties, member_name);
-        let (declaration, kind, template) = if let Some(declaration) = stored {
-            let template = match self.signatures.declaration(&declaration) {
-                FactState::Known(DeclarationSignature::Field { ty }) => *ty,
-                FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
-                FactState::Unperformed => return Ok(Outcome::Unperformed),
-                FactState::Known(_) | FactState::NotApplicable => {
-                    return Err(BodyTypingError::UnexpectedSignatureKind {
-                        target: declaration,
-                        expected: "stored field",
-                    });
-                }
-            };
-            let mutability = self.storage_field_mutability(&declaration)?;
-            (
-                declaration,
-                MemberKind::StoredField { mutability },
-                template,
-            )
-        } else if let Some(declaration) = property {
-            let template = match self.signatures.declaration(&declaration) {
-                FactState::Known(DeclarationSignature::Property { ty }) => *ty,
-                FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
-                FactState::Unperformed => return Ok(Outcome::Unperformed),
-                FactState::Known(_) | FactState::NotApplicable => {
-                    return Err(BodyTypingError::UnexpectedSignatureKind {
-                        target: declaration,
-                        expected: "property",
-                    });
-                }
-            };
-            (declaration, MemberKind::Property, template)
-        } else {
-            return Ok(self.unsupported(
-                TypecheckCapability::ResolveMethods,
-                source,
-                member.origin(),
-            ));
-        };
-        let arguments = self.signatures.types().substitution(substitution)?.to_vec();
-        let replacements = generic_parameters
-            .iter()
-            .cloned()
-            .zip(arguments)
-            .collect::<BTreeMap<_, _>>();
-        let ty = self.specialize_member_type(template, &replacements, &owner, subject)?;
-        let ty = match self.normalize_type_at(source, member.origin(), ty)? {
-            Outcome::Known(ty) => ty,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::Unperformed | Outcome::NotApplicable => return Ok(Outcome::Unperformed),
-        };
-        let place = match kind {
-            MemberKind::StoredField { mutability } => reference_writable
-                .or_else(|| receiver_value.place.as_ref().map(TypedPlace::is_writable))
-                .map(|receiver_writable| TypedPlace {
-                    kind: TypedPlaceKind::StoredField {
-                        receiver,
-                        field: declaration.clone(),
-                    },
-                    writable: receiver_writable && mutability == Mutability::Mutable,
-                }),
-            MemberKind::Property => None,
-        };
-        self.members.insert(
-            ExpressionKey::new(module, expression),
-            SemanticFact::Known(MemberAccess {
-                declaration,
-                kind,
-                ty,
-            }),
-        )?;
-        Ok(Outcome::Known(TypedExpression {
-            ty,
-            place,
-            integer_constant: None,
-            normal_continuation: self
-                .continuation_for_type(ty)
-                .strict(receiver_value.normal_continuation),
-        }))
-    }
-
-    pub(super) fn type_struct_literal(
+    pub(super) fn prepare_struct_literal(
         &mut self,
         context: BodyContext<'_, '_>,
         request: StructLiteralRequest<'_>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyTypingError> {
         let BodyContext { module, source, .. } = context;
         let expression = request.expression;
         let origin = request.origin;
         let target = match self.constructor_target(module, source, expression, origin)? {
             Outcome::Known(target) => target,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
+            Outcome::Poisoned(poison) => {
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
+            }
+            Outcome::Unperformed => return Ok(InvocationPlan::Complete(Outcome::Unperformed)),
+            Outcome::Deferred => return Ok(InvocationPlan::Complete(Outcome::Deferred)),
+            Outcome::NotApplicable => return Ok(InvocationPlan::Complete(Outcome::NotApplicable)),
         };
-        self.type_resolved_struct_literal(context, request, target)
+        self.prepare_resolved_struct_literal(context, request, target)
     }
 
-    pub(super) fn type_resolved_struct_literal(
+    pub(super) fn prepare_resolved_struct_literal(
         &mut self,
         context: BodyContext<'_, '_>,
         request: StructLiteralRequest<'_>,
         target: ConstructorTarget,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext { module, source, .. } = context;
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
         let StructLiteralRequest {
             expression,
             origin,
@@ -202,7 +42,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             &target,
             ResolvedTargetKind::Struct,
         )? {
-            return Ok(Outcome::Poisoned(poison));
+            return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
         }
         let ConstructorTarget {
             declaration: target,
@@ -227,20 +67,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             CompileCapability::Typecheck(TypecheckCapability::ResolveMembers),
             SemanticLocation::origin(source.file(), origin),
         ) {
-            return Ok(Outcome::Unperformed);
+            return Ok(InvocationPlan::Complete(Outcome::Unperformed));
         }
         let owner_name = self.target_label(&target);
         let mut initializers = BTreeMap::<CanonicalTarget, usize>::new();
         for (index, field) in fields.iter().enumerate() {
             let Some(name) = field.name.text() else {
-                return Ok(Outcome::Poisoned(
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(
                     source.invalid_poison(field.name.origin()).cloned().ok_or(
                         BodyTypingError::MissingOriginSpan {
                             file: source.file(),
                             origin: field.name.origin(),
                         },
                     )?,
-                ));
+                )));
             };
             if self.find_named_target(&properties, name).is_some() {
                 return self
@@ -252,7 +92,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         &owner_name,
                         ("property", name),
                     )
-                    .map(Outcome::Poisoned);
+                    .map(Outcome::Poisoned)
+                    .map(InvocationPlan::Complete);
             }
             let Some(declaration) = self.find_named_target(&storage_fields, name) else {
                 return self
@@ -264,7 +105,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         &owner_name,
                         ("field", name),
                     )
-                    .map(Outcome::Poisoned);
+                    .map(Outcome::Poisoned)
+                    .map(InvocationPlan::Complete);
             };
             if initializers.insert(declaration, index).is_some() {
                 return self
@@ -276,7 +118,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         &owner_name,
                         ("field", name),
                     )
-                    .map(Outcome::Poisoned);
+                    .map(Outcome::Poisoned)
+                    .map(InvocationPlan::Complete);
             }
         }
         if let Some(missing) = storage_fields
@@ -293,15 +136,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     &owner_name,
                     ("field", &name),
                 )
-                .map(Outcome::Poisoned);
+                .map(Outcome::Poisoned)
+                .map(InvocationPlan::Complete);
         }
 
         let mut slots = Vec::with_capacity(storage_fields.len());
         for field_target in &storage_fields {
             let template = match self.signatures.declaration(field_target) {
                 FactState::Known(DeclarationSignature::Field { ty }) => *ty,
-                FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
-                FactState::Unperformed => return Ok(Outcome::Unperformed),
+                FactState::Poisoned(poison) => {
+                    return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
+                }
+                FactState::Unperformed => {
+                    return Ok(InvocationPlan::Complete(Outcome::Unperformed));
+                }
                 FactState::Known(_) | FactState::NotApplicable => {
                     return Err(BodyTypingError::UnexpectedSignatureKind {
                         target: field_target.clone(),
@@ -321,8 +169,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             });
         }
         let result_template = self.nominal_template(target.clone(), &generic_parameters)?;
-        let application = match self.resolve_application(
-            context,
+        let plan = self.prepare_application(
+            source,
             ApplicationRequest {
                 origin,
                 generic_parameters: &generic_parameters,
@@ -335,41 +183,24 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 ty: request,
                 defer_underconstrained: false,
             },
-        )? {
-            Outcome::Known(application) => application,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
-        };
-        self.record_trait_obligations(
-            ExpressionKey::new(module, expression),
-            source,
-            origin,
-            &generic_parameters,
-            &application.replacements,
         )?;
-        self.invocations.insert(
-            ExpressionKey::new(module, expression),
-            SemanticFact::Known(invocation_fact(
-                InvocationTarget::Constructor {
-                    declaration: target,
-                    substitution: application.substitution,
-                },
-                &slots,
+        Ok(InvocationPlan::Application {
+            plan,
+            continuation: Box::new(InvocationFrame::construction(
+                expression,
+                origin,
+                slots,
+                target,
+                generic_parameters.into_boxed_slice(),
             )),
-        )?;
-        Ok(Outcome::Known(self.value_expression_with_continuation(
-            application.result,
-            application.normal_continuation,
-        )))
+        })
     }
 
-    pub(super) fn type_variant_constructor(
+    pub(super) fn prepare_variant_constructor(
         &mut self,
         context: BodyContext<'_, '_>,
         request: VariantConstructorRequest<'_>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyTypingError> {
         let BodyContext { module, source, .. } = context;
         let VariantConstructorRequest {
             expression,
@@ -381,15 +212,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         } = request;
         let target = match self.constructor_target(module, source, expression, origin)? {
             Outcome::Known(target) => target,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
+            Outcome::Poisoned(poison) => {
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
+            }
+            Outcome::Unperformed => return Ok(InvocationPlan::Complete(Outcome::Unperformed)),
+            Outcome::Deferred => return Ok(InvocationPlan::Complete(Outcome::Deferred)),
+            Outcome::NotApplicable => return Ok(InvocationPlan::Complete(Outcome::NotApplicable)),
         };
         if let ConstructorPayload::Named(fields) = payload
             && target.kind.is_type_namespace_target()
         {
-            return self.type_resolved_struct_literal(
+            return self.prepare_resolved_struct_literal(
                 context,
                 StructLiteralRequest {
                     expression,
@@ -407,7 +240,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             &target,
             ResolvedTargetKind::VariantConstructor,
         )? {
-            return Ok(Outcome::Poisoned(poison));
+            return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
         };
         let ConstructorTarget {
             declaration: target,
@@ -442,9 +275,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         generic_parameters, ..
                     }) => generic_parameters.to_vec(),
                     FactState::Poisoned(poison) => {
-                        return Ok(Outcome::Poisoned(poison.clone()));
+                        return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
                     }
-                    FactState::Unperformed => return Ok(Outcome::Unperformed),
+                    FactState::Unperformed => {
+                        return Ok(InvocationPlan::Complete(Outcome::Unperformed));
+                    }
                     FactState::Known(_) | FactState::NotApplicable => {
                         return Err(BodyTypingError::UnexpectedSignatureKind {
                             target: CanonicalTarget::Source(owner),
@@ -474,14 +309,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
         let slots = match self.bind_constructor_slots(source, origin, &target, &shape, payload)? {
             Outcome::Known(slots) => slots,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
+            Outcome::Poisoned(poison) => {
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
+            }
+            Outcome::Unperformed => return Ok(InvocationPlan::Complete(Outcome::Unperformed)),
+            Outcome::Deferred => return Ok(InvocationPlan::Complete(Outcome::Deferred)),
+            Outcome::NotApplicable => return Ok(InvocationPlan::Complete(Outcome::NotApplicable)),
         };
         let deferred_reserved = !qualified && self.is_reserved_constructor(&target);
-        let application = match self.resolve_application(
-            context,
+        let plan = self.prepare_application(
+            source,
             ApplicationRequest {
                 origin,
                 generic_parameters: &generic_parameters,
@@ -495,34 +332,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 ty,
                 defer_underconstrained: deferred_reserved,
             },
-        )? {
-            Outcome::Known(application) => application,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::Unperformed => return Ok(Outcome::Unperformed),
-            Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
-        };
-        self.record_trait_obligations(
-            ExpressionKey::new(module, expression),
-            source,
-            origin,
-            &generic_parameters,
-            &application.replacements,
         )?;
-        self.invocations.insert(
-            ExpressionKey::new(module, expression),
-            SemanticFact::Known(invocation_fact(
-                InvocationTarget::Constructor {
-                    declaration: target,
-                    substitution: application.substitution,
-                },
-                &slots,
+        Ok(InvocationPlan::Application {
+            plan,
+            continuation: Box::new(InvocationFrame::construction(
+                expression,
+                origin,
+                slots,
+                target,
+                generic_parameters.into_boxed_slice(),
             )),
-        )?;
-        Ok(Outcome::Known(self.value_expression_with_continuation(
-            application.result,
-            application.normal_continuation,
-        )))
+        })
     }
 
     pub(super) fn bind_constructor_slots(
@@ -1105,223 +925,5 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .signatures
             .types_mut()
             .replace_self_type(substituted, owner, receiver)?)
-    }
-
-    pub(super) fn type_tuple(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        values: &[ExprId],
-        request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let expected = match request.expected {
-            Some(expected) => match self.signatures.types().kind(expected)? {
-                TypeKind::Tuple(elements) if elements.len() == values.len() => {
-                    Some(elements.to_vec())
-                }
-                _ => None,
-            },
-            None => None,
-        };
-        let mut types = Vec::with_capacity(values.len());
-        let mut poison = None;
-        let mut unperformed = false;
-        let mut deferred = false;
-        let mut normal_continuation = NormalContinuation::Present;
-        for (index, &value) in values.iter().enumerate() {
-            let outcome = self.with_control_path(normal_continuation, |checker| {
-                checker.type_expression(
-                    module,
-                    source,
-                    hir,
-                    body,
-                    value,
-                    TypeRequest {
-                        expected: expected.as_ref().map(|elements| elements[index]),
-                        ..request
-                    },
-                )
-            })?;
-            match outcome {
-                Outcome::Known(value) => {
-                    types.push(value.ty);
-                    normal_continuation = normal_continuation.strict(value.normal_continuation);
-                }
-                Outcome::Poisoned(found) => self.merge_poison(&mut poison, &found)?,
-                Outcome::Deferred => deferred = true,
-                Outcome::Unperformed | Outcome::NotApplicable => unperformed = true,
-            }
-        }
-        if let Some(poison) = poison {
-            return Ok(Outcome::Poisoned(poison));
-        }
-        if unperformed {
-            return Ok(Outcome::Unperformed);
-        }
-        if deferred {
-            return Ok(Outcome::Deferred);
-        }
-        let ty = self.signatures.types_mut().tuple(types)?;
-        Ok(Outcome::Known(self.value_expression_with_continuation(
-            ty,
-            normal_continuation,
-        )))
-    }
-
-    pub(super) fn type_reference(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        value_id: ExprId,
-        mutability: Mutability,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let value = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
-            value_id,
-            TypeRequest::definitive(None),
-        )?;
-        let Outcome::Known(value) = value else {
-            return Ok(value);
-        };
-        let valid = value
-            .place
-            .as_ref()
-            .is_some_and(|place| mutability == Mutability::Immutable || place.writable);
-        if !valid {
-            let origin = self.expression_origin(source, value_id)?;
-            let poison = self.type_error(
-                source,
-                origin,
-                "REFERENCE_TARGET_INVALID",
-                "reference target is invalid for the requested access",
-                BTreeMap::new(),
-            )?;
-            return Ok(Outcome::Poisoned(poison));
-        }
-        let mutability = match mutability {
-            Mutability::Immutable => ReferenceMutability::Shared,
-            Mutability::Mutable => ReferenceMutability::Mutable,
-        };
-        let ty = self
-            .signatures
-            .types_mut()
-            .reference(mutability, value.ty)?;
-        Ok(Outcome::Known(self.value_expression_with_continuation(
-            ty,
-            value.normal_continuation,
-        )))
-    }
-
-    pub(super) fn type_dereference(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        operand: ExprId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let operand_value = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
-            operand,
-            TypeRequest::definitive(None),
-        )?;
-        let Outcome::Known(operand_value) = operand_value else {
-            return Ok(operand_value);
-        };
-        let TypeKind::Reference {
-            mutability,
-            referent,
-        } = self.signatures.types().kind(operand_value.ty)?
-        else {
-            return Ok(self.unsupported(
-                TypecheckCapability::CheckOperators,
-                source,
-                self.expression_origin(source, operand)?,
-            ));
-        };
-        let ty = *referent;
-        Ok(Outcome::Known(TypedExpression {
-            ty,
-            place: Some(TypedPlace {
-                kind: TypedPlaceKind::Dereference { reference: operand },
-                writable: *mutability == ReferenceMutability::Mutable,
-            }),
-            integer_constant: None,
-            normal_continuation: self
-                .continuation_for_type(ty)
-                .strict(operand_value.normal_continuation),
-        }))
-    }
-
-    pub(super) fn type_tuple_projection(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        receiver: ExprId,
-        request: TupleProjectionRequest<'_>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let receiver_value = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
-            receiver,
-            TypeRequest::definitive(None),
-        )?;
-        let Outcome::Known(receiver_value) = receiver_value else {
-            return Ok(receiver_value);
-        };
-        let TypeKind::Tuple(elements) = self.signatures.types().kind(receiver_value.ty)? else {
-            let data = BTreeMap::from([(
-                Box::<str>::from("receiver_type"),
-                DiagnosticDataValue::from(self.format_type(receiver_value.ty)?),
-            )]);
-            return self
-                .type_error(
-                    source,
-                    request.origin,
-                    "TUPLE_PROJECTION_NON_TUPLE",
-                    "tuple projection applied to a non-tuple receiver",
-                    data,
-                )
-                .map(Outcome::Poisoned);
-        };
-        let parsed = request.index.parse::<usize>().ok();
-        let Some(index) = parsed.filter(|&index| index < elements.len()) else {
-            return self
-                .type_error(
-                    source,
-                    request.origin,
-                    "TUPLE_PROJECTION_OUT_OF_BOUNDS",
-                    "tuple projection index is out of bounds",
-                    BTreeMap::new(),
-                )
-                .map(Outcome::Poisoned);
-        };
-        let place = receiver_value.place.map(|place| TypedPlace {
-            kind: TypedPlaceKind::TupleElement { receiver, index },
-            writable: place.writable,
-        });
-        let ty = elements[index];
-        Ok(Outcome::Known(TypedExpression {
-            ty,
-            place,
-            integer_constant: None,
-            normal_continuation: self
-                .continuation_for_type(ty)
-                .strict(receiver_value.normal_continuation),
-        }))
     }
 }

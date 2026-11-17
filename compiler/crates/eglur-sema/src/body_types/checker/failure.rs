@@ -1,25 +1,58 @@
 use super::*;
 
+pub(super) enum FailurePlan {
+    Complete(Outcome<TypedExpression>),
+    ResultBlock {
+        block: ExprId,
+        request: TypeRequest,
+        context: ResultContext,
+        frame: ResultFrame,
+    },
+    CheckedBlock {
+        block: ExprId,
+        request: TypeRequest,
+        context: CheckedContext,
+        frame: CheckedFrame,
+    },
+    QuestionOperand {
+        operand: ExprId,
+        request: TypeRequest,
+        frame: QuestionFrame,
+    },
+}
+
+pub(super) struct ResultFrame {
+    origin: OriginId,
+    block: ExprId,
+}
+
+pub(super) struct CheckedFrame {
+    region: ControlRegionKey,
+    block: ExprId,
+    numeric_error: TypeId,
+}
+
+pub(super) struct QuestionFrame {
+    key: ExpressionKey,
+    origin: OriginId,
+    context_index: usize,
+}
+
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn type_result(
+    pub(super) fn prepare_result(
         &mut self,
         context: BodyContext<'_, '_>,
         expression: ExprId,
         origin: OriginId,
         block: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
+    ) -> Result<FailurePlan, BodyTypingError> {
+        let BodyContext { module, source, .. } = context;
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::CheckFailureFlow),
             SemanticLocation::origin(source.file(), origin),
         ) {
-            return Ok(Outcome::Unperformed);
+            return Ok(FailurePlan::Complete(Outcome::Unperformed));
         }
 
         let expected = request
@@ -28,29 +61,36 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .transpose()?
             .flatten();
         if expected.is_none() {
-            return Ok(self.unsupported(TypecheckCapability::InferResultBlockType, source, origin));
+            return Ok(FailurePlan::Complete(self.unsupported(
+                TypecheckCapability::InferResultBlockType,
+                source,
+                origin,
+            )));
         }
         let region = ControlRegionKey::Result(ExpressionKey::new(module, expression));
-        self.enter_control_region(region.clone())?;
-        self.result_contexts.push(ResultContext {
-            region: region.clone(),
-            expected,
-            family: expected.map(|carrier| carrier.family),
-        });
-        let body_outcome = self.type_expression_in_current_region(
-            module,
-            source,
-            hir,
-            body,
+        Ok(FailurePlan::ResultBlock {
             block,
-            TypeRequest::definitive(expected.map(|carrier| carrier.ty)),
-        );
-        let result_context = self
-            .result_contexts
-            .pop()
-            .ok_or(BodyTypingError::MissingResultContext)?;
-        self.leave_control_region(&region)?;
-        let body_outcome = body_outcome?;
+            request: TypeRequest::definitive(expected.map(|carrier| carrier.ty)),
+            context: ResultContext {
+                region,
+                expected,
+                family: expected.map(|carrier| carrier.family),
+            },
+            frame: ResultFrame { origin, block },
+        })
+    }
+
+    pub(super) fn finish_result(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        frame: ResultFrame,
+        result_context: ResultContext,
+        body_outcome: Outcome<TypedExpression>,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        let BodyContext { source, body, .. } = context;
+        let ResultFrame { origin, block } = frame;
+        let expected = result_context.expected;
+        let region = result_context.region.clone();
         let has_short_circuit = self.transfers.iter().any(|transfer| {
             transfer.kind() == ControlTransferKind::QuestionShortCircuit
                 && transfer.target() == &region
@@ -128,24 +168,19 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         self.apply_additional_poison(outcome, missing_yield_poison)
     }
 
-    pub(super) fn type_question(
+    pub(super) fn prepare_question(
         &mut self,
         context: BodyContext<'_, '_>,
         expression: ExprId,
         origin: OriginId,
         operand: ExprId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
+    ) -> Result<FailurePlan, BodyTypingError> {
+        let BodyContext { module, source, .. } = context;
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::CheckFailureFlow),
             SemanticLocation::origin(source.file(), origin),
         ) {
-            return Ok(Outcome::Unperformed);
+            return Ok(FailurePlan::Complete(Outcome::Unperformed));
         }
         let Some(context_index) = self.active_result_context_index() else {
             return self
@@ -156,17 +191,30 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     "? is only valid inside a result block",
                     BTreeMap::new(),
                 )
-                .map(Outcome::Poisoned);
+                .map(|poison| FailurePlan::Complete(Outcome::Poisoned(poison)));
         };
-
-        let operand = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
+        Ok(FailurePlan::QuestionOperand {
             operand,
-            TypeRequest::definitive(None),
-        )?;
+            request: TypeRequest::definitive(None),
+            frame: QuestionFrame {
+                key: ExpressionKey::new(module, expression),
+                origin,
+                context_index,
+            },
+        })
+    }
+
+    pub(super) fn finish_question(
+        &mut self,
+        source: &SemanticSource<'_>,
+        frame: QuestionFrame,
+        operand: Outcome<TypedExpression>,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        let QuestionFrame {
+            key,
+            origin,
+            context_index,
+        } = frame;
         let operand = match operand {
             Outcome::Known(operand) => operand,
             Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
@@ -224,7 +272,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         if has_exit && operand.normal_continuation.is_present() {
             let target = self.result_contexts[context_index].region.clone();
             self.record_control_transfer(
-                ControlTransferSource::Expression(ExpressionKey::new(module, expression)),
+                ControlTransferSource::Expression(key),
                 ControlTransferKind::QuestionShortCircuit,
                 target,
             )?;
@@ -239,28 +287,23 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         ))
     }
 
-    pub(super) fn type_checked(
+    pub(super) fn prepare_checked(
         &mut self,
         context: BodyContext<'_, '_>,
         expression: ExprId,
         origin: OriginId,
         block: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
+    ) -> Result<FailurePlan, BodyTypingError> {
+        let BodyContext { module, source, .. } = context;
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::CheckFailureFlow),
             SemanticLocation::origin(source.file(), origin),
         ) {
-            return Ok(Outcome::Unperformed);
+            return Ok(FailurePlan::Complete(Outcome::Unperformed));
         }
         let Some(numeric_error) = self.numeric_error_type(source, origin)? else {
-            return Ok(Outcome::Unperformed);
+            return Ok(FailurePlan::Complete(Outcome::Unperformed));
         };
         let expected_carrier = request
             .expected
@@ -284,27 +327,32 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
 
         let region = ControlRegionKey::Checked(ExpressionKey::new(module, expression));
-        self.enter_control_region(region.clone())?;
-        self.question_floors.push(self.result_contexts.len());
-        self.checked_contexts.push(CheckedContext {
-            region: region.clone(),
-        });
-        let body_outcome = self.type_expression_in_current_region(
-            module,
-            source,
-            hir,
-            body,
+        Ok(FailurePlan::CheckedBlock {
             block,
-            TypeRequest::definitive(expected_success),
-        );
-        self.checked_contexts
-            .pop()
-            .ok_or(BodyTypingError::MissingCheckedContext)?;
-        self.question_floors
-            .pop()
-            .ok_or(BodyTypingError::MissingQuestionBoundary)?;
-        self.leave_control_region(&region)?;
-        let body_outcome = body_outcome?;
+            request: TypeRequest::definitive(expected_success),
+            context: CheckedContext {
+                region: region.clone(),
+            },
+            frame: CheckedFrame {
+                region,
+                block,
+                numeric_error,
+            },
+        })
+    }
+
+    pub(super) fn finish_checked(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        frame: CheckedFrame,
+        body_outcome: Outcome<TypedExpression>,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        let BodyContext { module, body, .. } = context;
+        let CheckedFrame {
+            region,
+            block,
+            numeric_error,
+        } = frame;
         let has_fault = self.transfers.iter().any(|transfer| {
             matches!(transfer.kind(), ControlTransferKind::CheckedFault(_))
                 && transfer.target() == &region

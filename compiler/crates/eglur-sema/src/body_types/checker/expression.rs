@@ -1,111 +1,95 @@
+use super::branching::BranchPlan;
+use super::failure::FailurePlan;
+use super::invocation::InvocationPlan;
+use super::numeric::NumericPlan;
+use super::numeric_tree::NumericTreeFrame;
+use super::values::{ValueContinuation, ValuePlan};
 use super::*;
 
-impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn type_expression_in_region(
-        &mut self,
-        region: ControlRegionKey,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        self.enter_control_region(region.clone())?;
-        let outcome =
-            self.type_expression_in_current_region(module, source, hir, body, expression, request);
-        self.leave_control_region(&region)?;
-        outcome
-    }
-
-    pub(super) fn type_expression_in_current_region(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        expression: ExprId,
-        request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let is_block = matches!(
-            body.expression(expression)
-                .ok_or(BodyTypingError::WrongBodyExpression(expression))?
-                .kind(),
-            ExprKind::Block { .. }
-        );
-        if is_block {
-            self.block_region_overrides.push(expression);
-        }
-        let outcome = self.type_expression(module, source, hir, body, expression, request);
-        if is_block {
-            let removed = self
-                .block_region_overrides
-                .pop()
-                .ok_or(BodyTypingError::MissingBlockRegionOverride)?;
-            if removed != expression {
-                return Err(BodyTypingError::BlockRegionOverrideMismatch {
-                    expected: expression,
-                    actual: removed,
-                });
-            }
-        }
-        let outcome = outcome?;
-        if !is_block
-            && matches!(
-                &outcome,
-                Outcome::Known(value) if value.normal_continuation.is_present()
-            )
-        {
-            let region = self.current_control_region()?.clone();
-            self.record_control_transfer(
-                ControlTransferSource::RegionCompletion(region.clone()),
-                ControlTransferKind::NormalCompletion,
-                region,
-            )?;
-        }
-        Ok(outcome)
-    }
-
-    pub(super) fn type_block_expression(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        statements: &[StmtId],
+pub(super) enum ExpressionPlan {
+    Complete(Outcome<TypedExpression>),
+    Publish {
+        key: ExpressionKey,
+        outcome: Outcome<TypedExpression>,
+    },
+    Block {
+        key: ExpressionKey,
+        statements: Box<[StmtId]>,
         expected: Option<TypeId>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        if self.block_region_overrides.last() == Some(&expression) {
-            return self.type_block(module, source, hir, body, statements, expected);
-        }
-        let region = ControlRegionKey::Block(ExpressionKey::new(module, expression));
-        self.enter_control_region(region.clone())?;
-        let outcome = self.type_block(module, source, hir, body, statements, expected);
-        self.leave_control_region(&region)?;
-        outcome
-    }
+    },
+    Forward {
+        key: ExpressionKey,
+        expression: ExprId,
+        request: TypeRequest,
+    },
+    Value {
+        key: ExpressionKey,
+        plan: Box<ValuePlan>,
+    },
+    Invocation {
+        key: ExpressionKey,
+        plan: Box<InvocationPlan>,
+    },
+    Branch {
+        key: ExpressionKey,
+        plan: Box<BranchPlan>,
+    },
+    NumericTree(Box<NumericTreeFrame>),
+    Numeric {
+        key: ExpressionKey,
+        plan: Box<NumericPlan>,
+    },
+    Failure {
+        key: ExpressionKey,
+        plan: Box<FailurePlan>,
+    },
+}
 
+impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn type_expression(
         &mut self,
         module: ModuleId,
         source: &SemanticSource<'_>,
         hir: &HirFile,
         body: &Body,
-        expression_id: ExprId,
+        expression: ExprId,
         request: TypeRequest,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        self.type_expression_steps(
+            BodyContext {
+                module,
+                source,
+                hir,
+                body,
+            },
+            expression,
+            request,
+        )
+    }
+
+    pub(super) fn prepare_expression(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        expression_id: ExprId,
+        request: TypeRequest,
+    ) -> Result<ExpressionPlan, BodyTypingError> {
+        let BodyContext {
+            module,
+            source,
+            body,
+            ..
+        } = context;
         let key = ExpressionKey::new(module, expression_id);
         match self.expressions.state(&key) {
-            FactState::Known(expression) => return Ok(Outcome::Known(expression.clone())),
-            FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
-            FactState::NotApplicable => return Ok(Outcome::NotApplicable),
+            FactState::Known(expression) => {
+                return Ok(ExpressionPlan::Complete(Outcome::Known(expression.clone())));
+            }
+            FactState::Poisoned(poison) => {
+                return Ok(ExpressionPlan::Complete(Outcome::Poisoned(poison.clone())));
+            }
+            FactState::NotApplicable => {
+                return Ok(ExpressionPlan::Complete(Outcome::NotApplicable));
+            }
             FactState::Unperformed => {}
         }
         let expression = body
@@ -120,41 +104,29 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 },
                 Outcome::Poisoned(poison) => {
                     let outcome = Outcome::Poisoned(poison);
-                    self.record_expression(key, outcome.clone())?;
-                    return Ok(outcome);
+                    return Ok(ExpressionPlan::Publish { key, outcome });
                 }
-                Outcome::Deferred => return Ok(Outcome::Deferred),
+                Outcome::Deferred => return Ok(ExpressionPlan::Complete(Outcome::Deferred)),
                 Outcome::Unperformed | Outcome::NotApplicable => {
-                    return Ok(Outcome::Unperformed);
+                    return Ok(ExpressionPlan::Complete(Outcome::Unperformed));
                 }
             }
         } else {
             request
         };
         let kind = expression.kind().clone();
-        let context = BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        };
-        if !self.preparing_numeric_tree
-            && matches!(
-                kind,
-                ExprKind::Binary { .. }
-                    | ExprKind::Unary {
-                        operator: UnaryOperator::Negate,
-                        ..
-                    }
-                    | ExprKind::Group(_)
-            )
-            && let Some(outcome) = self.type_numeric_tree(context, expression_id, request)?
-        {
-            return Ok(outcome);
+        if !self.preparing_numeric_tree && NumericTreeFrame::accepts(&kind) {
+            return Ok(ExpressionPlan::NumericTree(Box::new(
+                NumericTreeFrame::new(expression_id, request),
+            )));
         }
         let outcome = match kind {
             ExprKind::Block { statements } => {
-                self.type_block_expression(context, expression_id, &statements, request.expected)?
+                return Ok(ExpressionPlan::Block {
+                    key,
+                    statements,
+                    expected: request.expected,
+                });
             }
             ExprKind::Literal(literal) => self.type_literal(source, &literal, request)?,
             ExprKind::Name(_) => self.type_name(context, expression_id, request)?,
@@ -168,59 +140,117 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Outcome::Known(self.value_expression(unit))
             }
             ExprKind::Group(inner) => {
-                self.type_expression(module, source, hir, body, inner, request)?
+                return Ok(ExpressionPlan::Forward {
+                    key,
+                    expression: inner,
+                    request,
+                });
             }
             ExprKind::Tuple(values) => {
-                self.type_tuple(module, source, hir, body, &values, request)?
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(self.prepare_tuple(values, request)?),
+                });
             }
             ExprKind::Reference { mutability, value } => {
-                self.type_reference(module, source, hir, body, value, mutability)?
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(ValuePlan::single(
+                        value,
+                        ValueContinuation::Reference { value, mutability },
+                    )),
+                });
             }
             ExprKind::Unary {
                 operator: UnaryOperator::Dereference,
                 operand,
-            } => self.type_dereference(module, source, hir, body, operand)?,
+            } => {
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(ValuePlan::single(
+                        operand,
+                        ValueContinuation::Dereference { operand },
+                    )),
+                });
+            }
             ExprKind::Call(call) => {
-                self.type_call(context, expression_id, origin, &call, request)?
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_call(
+                        context,
+                        expression_id,
+                        origin,
+                        &call,
+                        request,
+                    )?),
+                });
             }
             ExprKind::DTypeCall(call) => {
-                self.type_dtype_call(context, expression_id, origin, &call)?
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_dtype_call(
+                        context,
+                        expression_id,
+                        origin,
+                        call,
+                    )?),
+                });
             }
             ExprKind::Member { receiver, member } => {
-                self.type_member(context, expression_id, receiver, &member)?
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(self.prepare_member(
+                        context,
+                        expression_id,
+                        receiver,
+                        member,
+                    )?),
+                });
             }
-            ExprKind::TupleProjection { receiver, index } => self.type_tuple_projection(
-                module,
-                source,
-                hir,
-                body,
-                receiver,
-                TupleProjectionRequest {
-                    index: &index,
-                    origin,
-                },
-            )?,
-            ExprKind::StructLiteral { path, fields } => self.type_struct_literal(
-                context,
-                StructLiteralRequest {
-                    expression: expression_id,
-                    origin,
-                    head_origin: path.origin(),
-                    fields: &fields,
-                    ty: request,
-                },
-            )?,
-            ExprKind::VariantConstructor { path, payload } => self.type_variant_constructor(
-                context,
-                VariantConstructorRequest {
-                    expression: expression_id,
-                    origin,
-                    head_origin: path.origin(),
-                    qualified: path.is_qualified(),
-                    payload: &payload,
-                    ty: request,
-                },
-            )?,
+            ExprKind::TupleProjection { receiver, index } => {
+                return Ok(ExpressionPlan::Value {
+                    key,
+                    plan: Box::new(ValuePlan::single(
+                        receiver,
+                        ValueContinuation::TupleProjection {
+                            receiver,
+                            index,
+                            origin,
+                        },
+                    )),
+                });
+            }
+            ExprKind::StructLiteral { path, fields } => {
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_struct_literal(
+                        context,
+                        StructLiteralRequest {
+                            expression: expression_id,
+                            origin,
+                            head_origin: path.origin(),
+                            fields: &fields,
+                            ty: request,
+                        },
+                    )?),
+                });
+            }
+            ExprKind::VariantConstructor { path, payload } => {
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_variant_constructor(
+                        context,
+                        VariantConstructorRequest {
+                            expression: expression_id,
+                            origin,
+                            head_origin: path.origin(),
+                            qualified: path.is_qualified(),
+                            payload: &payload,
+                            ty: request,
+                        },
+                    )?),
+                });
+            }
             ExprKind::Invalid => Outcome::Poisoned(source.invalid_poison(origin).cloned().ok_or(
                 BodyTypingError::MissingOriginSpan {
                     file: source.file(),
@@ -231,41 +261,92 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 operator,
                 left,
                 right,
-            } => self.type_checked_binary(
-                context,
-                CheckedBinaryRequest {
-                    expression: expression_id,
-                    origin,
-                    operator,
-                    left,
-                    right,
-                    ty: request,
-                },
-            )?,
+            } => {
+                return Ok(ExpressionPlan::Numeric {
+                    key,
+                    plan: Box::new(self.prepare_checked_binary(
+                        context,
+                        CheckedBinaryRequest {
+                            expression: expression_id,
+                            origin,
+                            operator,
+                            left,
+                            right,
+                            ty: request,
+                        },
+                    )?),
+                });
+            }
             ExprKind::Unary {
                 operator: UnaryOperator::Negate,
                 operand,
-            } => self.type_checked_negation(context, expression_id, origin, operand, request)?,
+            } => {
+                return Ok(ExpressionPlan::Numeric {
+                    key,
+                    plan: Box::new(self.prepare_checked_negation(
+                        context,
+                        expression_id,
+                        origin,
+                        operand,
+                        request,
+                    )?),
+                });
+            }
             ExprKind::Unary { .. } => {
                 self.unsupported(TypecheckCapability::CheckOperators, source, origin)
             }
-            ExprKind::Match(match_expression) if match_expression.arms.is_empty() => {
-                self.type_empty_match(context, origin, match_expression.scrutinee)?
-            }
             ExprKind::If(if_expression) => {
-                self.type_if(context, expression_id, origin, &if_expression, request)?
+                return Ok(ExpressionPlan::Branch {
+                    key,
+                    plan: Box::new(self.prepare_if(source, key, origin, if_expression, request)),
+                });
             }
             ExprKind::Match(match_expression) => {
-                self.type_match(context, expression_id, origin, &match_expression, request)?
+                return Ok(ExpressionPlan::Branch {
+                    key,
+                    plan: Box::new(self.prepare_match(
+                        source,
+                        key,
+                        origin,
+                        match_expression,
+                        request,
+                    )),
+                });
             }
             ExprKind::Try(operand) => {
-                self.type_question(context, expression_id, origin, operand)?
+                return Ok(ExpressionPlan::Failure {
+                    key,
+                    plan: Box::new(self.prepare_question(
+                        context,
+                        expression_id,
+                        origin,
+                        operand,
+                    )?),
+                });
             }
             ExprKind::Result(block) => {
-                self.type_result(context, expression_id, origin, block, request)?
+                return Ok(ExpressionPlan::Failure {
+                    key,
+                    plan: Box::new(self.prepare_result(
+                        context,
+                        expression_id,
+                        origin,
+                        block,
+                        request,
+                    )?),
+                });
             }
             ExprKind::Checked(block) => {
-                self.type_checked(context, expression_id, origin, block, request)?
+                return Ok(ExpressionPlan::Failure {
+                    key,
+                    plan: Box::new(self.prepare_checked(
+                        context,
+                        expression_id,
+                        origin,
+                        block,
+                        request,
+                    )?),
+                });
             }
             ExprKind::Hole | ExprKind::Lambda(_) => {
                 self.unsupported(TypecheckCapability::CheckClosures, source, origin)
@@ -277,100 +358,22 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.unsupported(TypecheckCapability::CheckUnsafeExpressions, source, origin)
             }
             ExprKind::ReduceByCandidate(candidate) => {
-                self.type_reduce_by_candidate(context, expression_id, origin, &candidate, request)?
+                return Ok(ExpressionPlan::Invocation {
+                    key,
+                    plan: Box::new(self.prepare_reduce_by_candidate(
+                        context,
+                        expression_id,
+                        origin,
+                        candidate,
+                        request,
+                    )?),
+                });
             }
             ExprKind::CatalogCall(_) | ExprKind::TensorSchema(_) => {
                 self.unsupported(TypecheckCapability::AnalyzeTensorSource, source, origin)
             }
         };
-        self.record_expression(key, outcome.clone())?;
-        Ok(outcome)
-    }
-
-    fn type_reduce_by_candidate(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        origin: OriginId,
-        candidate: &ReduceByCandidateExpr,
-        request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        let mut receiver = candidate.receiver;
-        let canonical = loop {
-            let receiver_expression = body
-                .expression(receiver)
-                .ok_or(BodyTypingError::WrongBodyExpression(receiver))?;
-            match receiver_expression.kind() {
-                ExprKind::TensorSchema(schema) => {
-                    break schema.family == TensorSchemaFamily::Reduce;
-                }
-                ExprKind::Group(inner) => receiver = *inner,
-                _ => break false,
-            }
-        };
-
-        if canonical {
-            let commitment = if candidate
-                .ordered_phases
-                .as_ref()
-                .is_some_and(|phases| !phases.phases.is_empty())
-            {
-                Some(ReduceByCommitment::TensorPhases)
-            } else if candidate.single_reducer.is_some() {
-                Some(ReduceByCommitment::TensorSingle)
-            } else {
-                None
-            };
-            let Some(commitment) = commitment else {
-                return self.invalid_reduce_by_arguments(source, candidate.arguments_origin);
-            };
-            self.reduce_by_commitments.insert(
-                ExpressionKey::new(module, expression),
-                SemanticFact::Known(commitment),
-            )?;
-            return Ok(self.unsupported(TypecheckCapability::AnalyzeTensorSource, source, origin));
-        }
-
-        let receiver_type = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
-            candidate.receiver,
-            TypeRequest::definitive(None),
-        )?;
-        let Outcome::Known(_) = receiver_type else {
-            return Ok(receiver_type);
-        };
-        let Some(ordinary) = &candidate.ordinary else {
-            return self.invalid_reduce_by_arguments(source, candidate.arguments_origin);
-        };
-        self.reduce_by_commitments.insert(
-            ExpressionKey::new(module, expression),
-            SemanticFact::Known(ReduceByCommitment::Ordinary),
-        )?;
-        self.type_call(context, expression, origin, &ordinary.call, request)
-    }
-
-    fn invalid_reduce_by_arguments(
-        &mut self,
-        source: &SemanticSource<'_>,
-        origin: OriginId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        self.type_error(
-            source,
-            origin,
-            "REDUCE_BY_ARGUMENTS_INVALID",
-            "reduce_by arguments are invalid for the resolved receiver",
-            BTreeMap::new(),
-        )
-        .map(Outcome::Poisoned)
+        Ok(ExpressionPlan::Publish { key, outcome })
     }
 
     pub(super) fn type_literal(
@@ -650,58 +653,5 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.expression_origin(source, expression)?,
             )),
         }
-    }
-
-    fn type_dtype_call(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        origin: OriginId,
-        call: &eglur_hir::DTypeCallExpr,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext { module, source, .. } = context;
-        let key = ResolutionKey::Expression {
-            module,
-            expression: call.callee,
-        };
-        match self.names.fact(key) {
-            FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1 => {
-                if let Some(ExternalSemanticOwner::TensorSource(constructor)) =
-                    self.external_semantic_owner(&targets[0])
-                {
-                    let target = targets[0].clone();
-                    self.type_tensor_constructor(
-                        context,
-                        expression,
-                        origin,
-                        call,
-                        target,
-                        constructor,
-                    )
-                } else {
-                    self.dtype_bracket_forbidden(source, origin)
-                }
-            }
-            FactState::Known(ResolvedName::Local(_))
-            | FactState::Known(ResolvedName::Declarations(_))
-            | FactState::NotApplicable => self.dtype_bracket_forbidden(source, origin),
-            FactState::Poisoned(poison) => Ok(Outcome::Poisoned(poison.clone())),
-            FactState::Unperformed => Ok(Outcome::Unperformed),
-        }
-    }
-
-    fn dtype_bracket_forbidden(
-        &mut self,
-        source: &SemanticSource<'_>,
-        origin: OriginId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        self.type_error(
-            source,
-            origin,
-            "TYPE_ARG_BRACKET_SYNTAX_FORBIDDEN",
-            "type argument bracket syntax is forbidden for this callee",
-            BTreeMap::new(),
-        )
-        .map(Outcome::Poisoned)
     }
 }

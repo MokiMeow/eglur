@@ -3,6 +3,9 @@ use eglur_driver::{
     CompilerSession, FileSetRequest, SessionOptions, SupportProfile, TrustedCatalog,
 };
 
+#[path = "tensor_constructors/traversal.rs"]
+mod traversal;
+
 fn check(source: &str) -> CompilerSession {
     let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
     let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();

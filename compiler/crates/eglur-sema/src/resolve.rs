@@ -1,11 +1,13 @@
+mod traversal;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use eglur_diagnostics::{DiagnosticStore, DiagnosticStoreError, Poison, SourceSpan};
 use eglur_hir::{
-    AttributeMeta, AttributeValue, Body, BodyId, ConstructorPayload, ExprId, ExprKind,
-    FunctionBody, HirFile, ItemId, ItemKind, MatchArm, Name, OriginId, Path, PatternElement,
-    PatternId, PatternKind, ReduceBySingleValue, StmtId, StmtKind, TypeRefId, TypeRefKind,
+    AttributeMeta, AttributeValue, Body, BodyId, ExprId, ExprKind, FunctionBody, HirFile, ItemId,
+    ItemKind, Name, OriginId, Path, PatternElement, PatternId, PatternKind, StmtId, TypeRefId,
+    TypeRefKind,
 };
 use eglur_source::FileId;
 
@@ -737,367 +739,6 @@ impl Resolver<'_, '_> {
         Ok(outcome)
     }
 
-    fn visit_expr(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        expression_id: ExprId,
-    ) -> Result<VisitOutcome, NameResolutionError> {
-        let mut pending = vec![expression_id];
-        let mut combined: Option<VisitOutcome> = None;
-        while let Some(expression_id) = pending.pop() {
-            let expression = body
-                .expression(expression_id)
-                .ok_or(NameResolutionError::WrongBodyExpression(expression_id))?;
-            let key = ResolutionKey::Expression {
-                module,
-                expression: expression_id,
-            };
-            let outcome = match expression.kind() {
-                ExprKind::Block { statements } => {
-                    self.push_scope(module, body.id(), ScopeKind::Block)?;
-                    let mut outcome = VisitOutcome::Known;
-                    for &statement in statements {
-                        outcome = outcome
-                            .merge(self.visit_stmt(module, source, hir, body, statement)?)?;
-                    }
-                    self.pop_scope();
-                    outcome
-                }
-                ExprKind::Binary { left, right, .. } => {
-                    pending.push(*right);
-                    pending.push(*left);
-                    continue;
-                }
-                ExprKind::Unary { operand, .. }
-                | ExprKind::Reference { value: operand, .. }
-                | ExprKind::Try(operand)
-                | ExprKind::Group(operand)
-                | ExprKind::Unsafe(operand)
-                | ExprKind::Result(operand)
-                | ExprKind::Checked(operand) => {
-                    pending.push(*operand);
-                    continue;
-                }
-                ExprKind::Own(name) | ExprKind::Move(name) => self.resolve_name(
-                    module,
-                    source,
-                    name,
-                    Namespace::Value,
-                    key,
-                    LookupPurpose::Ordinary,
-                )?,
-                ExprKind::DropOwn { name, .. } => self.resolve_name(
-                    module,
-                    source,
-                    name,
-                    Namespace::Value,
-                    key,
-                    LookupPurpose::Ordinary,
-                )?,
-                ExprKind::Call(call) => {
-                    let mut outcome = self.visit_expr(module, source, hir, body, call.callee)?;
-                    for argument in &call.arguments {
-                        outcome = outcome.merge(self.visit_expr(
-                            module,
-                            source,
-                            hir,
-                            body,
-                            argument.value,
-                        )?)?;
-                    }
-                    for &argument in &call.type_arguments {
-                        outcome = outcome.merge(self.visit_type(module, source, hir, argument)?)?;
-                    }
-                    outcome
-                }
-                ExprKind::CatalogCall(call) => {
-                    let mut outcome = if call.owner.text().is_some() {
-                        self.demand_external(source, call.owner.origin())?
-                    } else {
-                        self.invalid_path_outcome(source, &call.owner)?
-                    };
-                    outcome = outcome.merge(if call.member.is_valid() {
-                        VisitOutcome::Known
-                    } else {
-                        self.invalid_outcome(source, call.member.origin())?
-                    })?;
-                    for &argument in &call.owner_arguments {
-                        outcome = outcome.merge(self.visit_type(module, source, hir, argument)?)?;
-                    }
-                    for argument in &call.arguments {
-                        outcome = outcome.merge(self.visit_expr(
-                            module,
-                            source,
-                            hir,
-                            body,
-                            argument.value,
-                        )?)?;
-                    }
-                    outcome
-                }
-                ExprKind::Member { receiver, member } => {
-                    let member = if member.is_valid() {
-                        VisitOutcome::Known
-                    } else {
-                        self.invalid_outcome(source, member.origin())?
-                    };
-                    self.visit_expr(module, source, hir, body, *receiver)?
-                        .merge(member)?
-                }
-                ExprKind::TupleProjection { receiver, .. } => {
-                    self.visit_expr(module, source, hir, body, *receiver)?
-                }
-                ExprKind::DTypeCall(call) => {
-                    let mut outcome = self.visit_expr(module, source, hir, body, call.callee)?;
-                    outcome = outcome.merge(self.visit_type(module, source, hir, call.dtype)?)?;
-                    for argument in &call.arguments {
-                        outcome = outcome.merge(self.visit_expr(
-                            module,
-                            source,
-                            hir,
-                            body,
-                            argument.value,
-                        )?)?;
-                    }
-                    outcome
-                }
-                ExprKind::ReduceByCandidate(candidate) => {
-                    let mut children = vec![candidate.receiver];
-                    if let Some(ordinary) = &candidate.ordinary {
-                        if ordinary.candidate_names.is_empty() {
-                            children.extend(
-                                ordinary
-                                    .call
-                                    .arguments
-                                    .iter()
-                                    .map(|argument| argument.value),
-                            );
-                        }
-                        for &name in &ordinary.candidate_names {
-                            self.defer_candidate_name(module, source, body, name)?;
-                        }
-                    }
-                    if let Some(single) = &candidate.single_reducer {
-                        let value = match single.value {
-                            ReduceBySingleValue::Expression(value)
-                            | ReduceBySingleValue::PhasePair { reducer: value, .. } => value,
-                        };
-                        children.push(value);
-                    }
-                    if let Some(phases) = &candidate.ordered_phases {
-                        for phase in &phases.phases {
-                            children.push(phase.reducer);
-                        }
-                    }
-                    let mut seen = BTreeSet::new();
-                    let mut outcome = VisitOutcome::Known;
-                    for child in children {
-                        if seen.insert(child) {
-                            outcome = outcome
-                                .merge(self.visit_expr(module, source, hir, body, child)?)?;
-                        }
-                    }
-                    outcome
-                }
-                ExprKind::Name(path) => self.resolve_path(
-                    module,
-                    source,
-                    path,
-                    PathLookup::Namespace(Namespace::Value),
-                    key,
-                    LookupPurpose::Ordinary,
-                )?,
-                ExprKind::Literal(_) | ExprKind::Hole | ExprKind::Unit => VisitOutcome::Known,
-                ExprKind::Tuple(values) | ExprKind::Array(values) => {
-                    let mut outcome = VisitOutcome::Known;
-                    for &value in values {
-                        outcome =
-                            outcome.merge(self.visit_expr(module, source, hir, body, value)?)?;
-                    }
-                    outcome
-                }
-                ExprKind::Map(entries) => {
-                    let mut outcome = VisitOutcome::Known;
-                    for entry in entries {
-                        outcome = outcome
-                            .merge(self.visit_expr(module, source, hir, body, entry.key)?)?
-                            .merge(self.visit_expr(module, source, hir, body, entry.value)?)?;
-                    }
-                    outcome
-                }
-                ExprKind::StructLiteral { path, fields } => {
-                    let mut outcome = self.resolve_path(
-                        module,
-                        source,
-                        path,
-                        PathLookup::Namespace(Namespace::Type),
-                        key,
-                        LookupPurpose::Ordinary,
-                    )?;
-                    for field in fields {
-                        outcome = outcome.merge(self.visit_expr(
-                            module,
-                            source,
-                            hir,
-                            body,
-                            field.value,
-                        )?)?;
-                    }
-                    outcome
-                }
-                ExprKind::VariantConstructor { path, payload } => {
-                    let lookup = if matches!(payload, ConstructorPayload::Named(_)) {
-                        PathLookup::BracedConstructor
-                    } else {
-                        PathLookup::Namespace(Namespace::Value)
-                    };
-                    let mut outcome = self.resolve_path(
-                        module,
-                        source,
-                        path,
-                        lookup,
-                        key,
-                        LookupPurpose::Ordinary,
-                    )?;
-                    match payload {
-                        ConstructorPayload::Absent => {}
-                        ConstructorPayload::Tuple(values) => {
-                            for &value in values {
-                                outcome = outcome
-                                    .merge(self.visit_expr(module, source, hir, body, value)?)?;
-                            }
-                        }
-                        ConstructorPayload::Named(fields) => {
-                            for field in fields {
-                                outcome = outcome.merge(self.visit_expr(
-                                    module,
-                                    source,
-                                    hir,
-                                    body,
-                                    field.value,
-                                )?)?;
-                            }
-                        }
-                    }
-                    outcome
-                }
-                ExprKind::Lambda(lambda) => {
-                    let lambda_body = hir.body(lambda.body);
-                    self.push_scope(module, lambda_body.id(), ScopeKind::LambdaParameters)?;
-                    let mut outcome = VisitOutcome::Known;
-                    for parameter in &lambda.parameters {
-                        let group =
-                            self.pattern_bindings(source, lambda_body, parameter.pattern)?;
-                        if let Some(collision) = self.first_collision(&group) {
-                            outcome =
-                                outcome.merge(self.record_binding_collision(source, collision)?)?;
-                        } else {
-                            outcome = outcome.merge(self.bind_group(source, group, None)?)?;
-                        }
-                        outcome = outcome.merge(self.visit_optional_type(
-                            module,
-                            source,
-                            hir,
-                            parameter.ty,
-                        )?)?;
-                    }
-                    self.push_scope(module, lambda_body.id(), ScopeKind::LambdaBody)?;
-                    for &statement in &lambda.statements {
-                        outcome = outcome.merge(self.visit_stmt(
-                            module,
-                            source,
-                            hir,
-                            lambda_body,
-                            statement,
-                        )?)?;
-                    }
-                    if let Some(tail) = lambda.tail {
-                        outcome = outcome.merge(self.visit_expr(
-                            module,
-                            source,
-                            hir,
-                            lambda_body,
-                            tail,
-                        )?)?;
-                    }
-                    self.pop_scope();
-                    self.pop_scope();
-                    outcome
-                }
-                ExprKind::If(value) => {
-                    let mut outcome =
-                        self.visit_expr(module, source, hir, body, value.condition)?;
-                    outcome = outcome.merge(self.visit_expr(
-                        module,
-                        source,
-                        hir,
-                        body,
-                        value.then_branch,
-                    )?)?;
-                    if let Some(branch) = value.else_branch {
-                        outcome =
-                            outcome.merge(self.visit_expr(module, source, hir, body, branch)?)?;
-                    }
-                    if let Some(branch) = value.unknown_branch {
-                        outcome =
-                            outcome.merge(self.visit_expr(module, source, hir, body, branch)?)?;
-                    }
-                    outcome
-                }
-                ExprKind::Match(value) => {
-                    let mut outcome =
-                        self.visit_expr(module, source, hir, body, value.scrutinee)?;
-                    for arm in &value.arms {
-                        outcome =
-                            outcome.merge(self.visit_match_arm(module, source, hir, body, arm)?)?;
-                    }
-                    outcome
-                }
-                ExprKind::TensorSchema(_) => VisitOutcome::Known,
-                ExprKind::Invalid => self.invalid_outcome(source, expression.origin())?,
-            };
-            combined = Some(match combined {
-                Some(previous) => previous.merge(outcome)?,
-                None => outcome,
-            });
-        }
-        Ok(combined.unwrap_or(VisitOutcome::Known))
-    }
-
-    fn visit_match_arm(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        arm: &MatchArm,
-    ) -> Result<VisitOutcome, NameResolutionError> {
-        let pattern = body
-            .pattern(arm.pattern)
-            .ok_or(NameResolutionError::WrongBodyPattern(arm.pattern))?;
-        let capability = CompileCapability::Resolve(ResolveCapability::ResolvePatternScopes);
-        let location = SemanticLocation::origin(source.file(), pattern.origin());
-        let pattern_outcome = if self.recorder.require(capability, location) {
-            self.visit_pattern_heads(module, source, body, arm.pattern)?
-        } else {
-            VisitOutcome::Unperformed
-        };
-        self.push_scope(module, body.id(), ScopeKind::MatchArm)?;
-        let group = self.pattern_bindings(source, body, arm.pattern)?;
-        let binding_outcome = self.bind_group(source, group, Some(pattern_outcome.clone()))?;
-        let mut outcome = pattern_outcome.merge(binding_outcome)?;
-        if let Some(guard) = &arm.guard {
-            outcome =
-                outcome.merge(self.visit_expr(module, source, hir, body, guard.condition)?)?;
-        }
-        outcome = outcome.merge(self.visit_expr(module, source, hir, body, arm.value)?)?;
-        self.pop_scope();
-        Ok(outcome)
-    }
-
     fn visit_pattern_heads(
         &mut self,
         module: ModuleId,
@@ -1198,125 +839,6 @@ impl Resolver<'_, '_> {
             | PatternKind::Invalid => {}
         }
         Ok(outcome)
-    }
-
-    fn visit_stmt(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        statement_id: StmtId,
-    ) -> Result<VisitOutcome, NameResolutionError> {
-        let statement = body
-            .statement(statement_id)
-            .ok_or(NameResolutionError::WrongBodyStatement(statement_id))?;
-        let outcome = match statement.kind() {
-            StmtKind::Let {
-                pattern,
-                ty,
-                initializer,
-                ..
-            } => {
-                let group = self.pattern_bindings(source, body, *pattern)?;
-                if let Some(collision) = self.first_collision(&group) {
-                    let outcome = self.record_binding_collision(source, collision)?;
-                    self.record_fact(
-                        ResolutionKey::Pattern {
-                            module,
-                            pattern: *pattern,
-                        },
-                        outcome.clone(),
-                    )?;
-                    return Ok(outcome);
-                }
-                let mut outcome = self.visit_optional_type(module, source, hir, *ty)?;
-                if let Some(initializer) = initializer {
-                    outcome = outcome.merge(self.visit_expr(
-                        module,
-                        source,
-                        hir,
-                        body,
-                        *initializer,
-                    )?)?;
-                }
-                let binding_outcome = self.bind_group(source, group, Some(outcome.clone()))?;
-                outcome.merge(binding_outcome)?
-            }
-            StmtKind::Assign { target, value } => self
-                .visit_assignment_target(module, source, hir, body, *target)?
-                .merge(self.visit_expr(module, source, hir, body, *value)?)?,
-            StmtKind::While {
-                condition,
-                body: loop_body,
-            } => self
-                .visit_expr(module, source, hir, body, *condition)?
-                .merge(self.visit_expr(module, source, hir, body, *loop_body)?)?,
-            StmtKind::For {
-                binding,
-                iterable,
-                body: loop_body,
-            } => {
-                let mut outcome = self.visit_expr(module, source, hir, body, *iterable)?;
-                self.push_scope(module, body.id(), ScopeKind::ForBinding)?;
-                let group = self.single_name_group(source, binding)?;
-                outcome = outcome.merge(self.bind_group(source, group, None)?)?;
-                outcome = outcome.merge(self.visit_expr(module, source, hir, body, *loop_body)?)?;
-                self.pop_scope();
-                outcome
-            }
-            StmtKind::Break | StmtKind::Continue => VisitOutcome::Known,
-            StmtKind::Return(value) => value.map_or(Ok(VisitOutcome::Known), |value| {
-                self.visit_expr(module, source, hir, body, value)
-            })?,
-            StmtKind::Expression(value) | StmtKind::Yield(value) => {
-                self.visit_expr(module, source, hir, body, *value)?
-            }
-            StmtKind::Invalid => {
-                let outcome = self.invalid_outcome(source, statement.origin())?;
-                self.set_scope_barrier(ScopeBarrier::from_outcome(&outcome))?;
-                outcome
-            }
-        };
-        Ok(outcome)
-    }
-
-    fn visit_assignment_target(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        hir: &HirFile,
-        body: &Body,
-        target: ExprId,
-    ) -> Result<VisitOutcome, NameResolutionError> {
-        let expression = body
-            .expression(target)
-            .ok_or(NameResolutionError::WrongBodyExpression(target))?;
-        let key = ResolutionKey::Expression {
-            module,
-            expression: target,
-        };
-        match expression.kind() {
-            ExprKind::Name(path) => self.resolve_path(
-                module,
-                source,
-                path,
-                PathLookup::Namespace(Namespace::Value),
-                key,
-                LookupPurpose::AssignmentTarget,
-            ),
-            ExprKind::Member { receiver, member } => self
-                .visit_expr(module, source, hir, body, *receiver)?
-                .merge(if member.is_valid() {
-                    VisitOutcome::Known
-                } else {
-                    self.invalid_outcome(source, member.origin())?
-                }),
-            ExprKind::Group(inner) => {
-                self.visit_assignment_target(module, source, hir, body, *inner)
-            }
-            _ => self.visit_expr(module, source, hir, body, target),
-        }
     }
 
     fn resolve_name(
@@ -2231,17 +1753,7 @@ impl Resolver<'_, '_> {
                 ));
             }
         }
-        let mut canonical = Vec::<BindingIntroduction>::new();
-        let mut positions = BTreeMap::<NameKey, usize>::new();
-        for introduction in introductions {
-            if let Some(&index) = positions.get(&introduction.name) {
-                canonical[index].origins.extend(introduction.origins);
-            } else {
-                positions.insert(introduction.name.clone(), canonical.len());
-                canonical.push(introduction);
-            }
-        }
-        Ok(BindingGroup::Known(canonical))
+        Ok(BindingGroup::known(introductions))
     }
 
     fn single_name_group(
@@ -2250,7 +1762,7 @@ impl Resolver<'_, '_> {
         name: &Name,
     ) -> Result<BindingGroup, NameResolutionError> {
         Ok(match self.binding_introduction(source, name)? {
-            BindingName::Known(introduction) => BindingGroup::Known(vec![introduction]),
+            BindingName::Known(introduction) => BindingGroup::known(vec![introduction]),
             BindingName::Poisoned(poison) => BindingGroup::Poisoned(poison),
         })
     }
@@ -2629,11 +2141,27 @@ enum BindingGroup {
 }
 
 impl BindingGroup {
+    fn known(introductions: Vec<BindingIntroduction>) -> Self {
+        // Name resolution shares one identity; typed pattern validation decides
+        // whether repeated occurrences are alternatives or illegal duplicates.
+        let mut canonical = Vec::<BindingIntroduction>::new();
+        let mut positions = BTreeMap::<NameKey, usize>::new();
+        for introduction in introductions {
+            if let Some(&index) = positions.get(&introduction.name) {
+                canonical[index].origins.extend(introduction.origins);
+            } else {
+                positions.insert(introduction.name.clone(), canonical.len());
+                canonical.push(introduction);
+            }
+        }
+        Self::Known(canonical)
+    }
+
     fn prepend(self, mut prefix: Vec<BindingIntroduction>) -> Self {
         match self {
             Self::Known(mut values) => {
                 prefix.append(&mut values);
-                Self::Known(prefix)
+                Self::known(prefix)
             }
             other => other,
         }

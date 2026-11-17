@@ -171,7 +171,7 @@ fn independent_operand_errors_are_retained_without_parent_cascades() {
 fn long_fractional_division_chains_retain_one_root_error_on_the_default_stack() {
     let source = format!(
         "fn invalid(a: Str) -> Unit {{ let value = a{}\nyield () }}\nfn main!() -> Unit = ()\n",
-        " /. a".repeat(100)
+        " /. a".repeat(4000)
     );
     assert_operand_error(
         &source,
