@@ -2,6 +2,7 @@ use super::*;
 use std::rc::Rc;
 
 mod aliases;
+mod construction;
 mod path_types;
 mod trait_refs;
 mod type_plans;
@@ -16,6 +17,7 @@ struct SourceSite {
     file: FileId,
     context: SourceTypeContext,
     custody: SourceCustody,
+    construction: Option<source_bounds::ConstructionId>,
 }
 
 #[derive(Clone)]
@@ -35,6 +37,7 @@ struct AliasRequest {
     alias: DefId,
     cycle_site: Option<(FileId, OriginId)>,
     custody: AliasCustody,
+    construction: Option<source_bounds::ConstructionId>,
 }
 
 enum AliasCustody {
@@ -46,12 +49,22 @@ enum Request {
     Type(TypeRequest),
     Trait(TraitRequest),
     Alias(AliasRequest),
+    Bound {
+        id: source_bounds::ConstructionId,
+        custody: SourceCustody,
+    },
+    Cohort {
+        id: source_bounds::ConstructionId,
+        site: Rc<SourceSite>,
+    },
 }
 
 enum Completed {
     Type(Resolution<TypeId>),
     Trait(Resolution<TraitRef>),
     Alias(Resolution<AliasTemplate>),
+    Blocked(Option<Poison>),
+    Cohort(Resolution<source_bounds::ReferenceCohort>),
 }
 
 struct TypeChildren {
@@ -60,6 +73,7 @@ struct TypeChildren {
     values: Vec<TypeId>,
     poison: PoisonAccumulator,
     unperformed: bool,
+    blocked: bool,
 }
 
 impl TypeChildren {
@@ -70,6 +84,7 @@ impl TypeChildren {
             next: 0,
             poison: PoisonAccumulator::new(),
             unperformed: false,
+            blocked: false,
         }
     }
 
@@ -93,6 +108,10 @@ impl TypeChildren {
     }
 
     fn finish(self) -> Resolution<Vec<TypeId>> {
+        assert!(
+            !self.blocked,
+            "blocked construction has no canonical child values"
+        );
         if let Some(poison) = self.poison.finish() {
             #[cfg(test)]
             poison_tests::observe(super::poison_tests::Step::Complete);
@@ -127,6 +146,19 @@ enum TypeContinuation {
         alias: DefId,
         arguments: Vec<TypeId>,
     },
+    ConstructionAliasTemplate {
+        alias: DefId,
+    },
+    ConstructionAliasArguments {
+        template: AliasTemplate,
+        parameters: std::rc::Rc<[(usize, GenericParameterId)]>,
+        children: TypeChildren,
+    },
+    Projection {
+        base: TypeId,
+        associated: CanonicalTarget,
+        argument_count: usize,
+    },
 }
 
 enum TypeCompletion {
@@ -141,6 +173,7 @@ enum TypeCompletion {
 }
 
 enum TypePlan {
+    Blocked(Option<Poison>),
     Complete(TypeCompletion),
     Await {
         request: Request,
@@ -161,6 +194,7 @@ enum TraitContinuation {
 }
 
 enum TraitPlan {
+    Blocked(Option<Poison>),
     Complete {
         result: Resolution<TraitRef>,
         written: Option<CanonicalTarget>,
@@ -190,6 +224,7 @@ struct TraitFrame {
 }
 
 enum AliasPlan {
+    Blocked(Option<Poison>),
     Complete(Resolution<AliasTemplate>),
     Body {
         request: TypeRequest,
@@ -208,6 +243,8 @@ enum Step {
     ResumeType(TypeFrame),
     ResumeTrait(TraitFrame),
     ResumeAlias(AliasFrame),
+    ResumeBound { id: source_bounds::ConstructionId },
+    ResumeCohort(construction::CohortFrame),
 }
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
@@ -227,6 +264,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             file: source.file(),
             context: context.clone(),
             custody,
+            construction: None,
         });
         let request = Request::Type(TypeRequest {
             site,
@@ -254,6 +292,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             file: source.file(),
             context: context.clone(),
             custody,
+            construction: None,
         });
         let request = Request::Trait(TraitRequest { site, type_ref });
         match self.run_source_worklist(request)? {
@@ -272,6 +311,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             alias,
             cycle_site: cycle_site.map(|(source, origin)| (source.file(), origin)),
             custody: AliasCustody::Original,
+            construction: None,
         });
         match self.run_source_worklist(request)? {
             Completed::Alias(result) => Ok(result),
@@ -304,7 +344,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     self,
                     execution::tests::Checkpoint::Alias(request.alias),
                 )?,
-                Step::ResumeType(_) | Step::ResumeTrait(_) | Step::ResumeAlias(_) => {}
+                Step::Enter(Request::Bound { .. })
+                | Step::Enter(Request::Cohort { .. })
+                | Step::ResumeCohort(_)
+                | Step::ResumeBound { .. }
+                | Step::ResumeType(_)
+                | Step::ResumeTrait(_)
+                | Step::ResumeAlias(_) => {}
             }
             match step {
                 Step::Enter(Request::Type(request)) => {
@@ -332,6 +378,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 Step::Enter(Request::Alias(request)) => {
                     let alias = request.alias;
                     match self.prepare_alias_plan(request)? {
+                        AliasPlan::Blocked(poison) => completed = Some(Completed::Blocked(poison)),
                         AliasPlan::Complete(result) => completed = Some(Completed::Alias(result)),
                         AliasPlan::Body {
                             request,
@@ -346,6 +393,21 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         }
                     }
                 }
+                Step::Enter(Request::Bound { id, custody }) => {
+                    self.enter_bound_construction(id, custody, &mut pending, &mut completed)?;
+                }
+                Step::Enter(Request::Cohort { id, site }) => {
+                    self.enter_cohort(id, site, &mut pending, &mut completed)?;
+                }
+                Step::ResumeCohort(frame) => {
+                    let result = completed.take().expect("cohort child completed");
+                    self.continue_cohort(frame, result, &mut pending, &mut completed)?;
+                }
+                Step::ResumeBound { id } => {
+                    let result = completed.take().expect("bound reference completed");
+                    self.finish_bound_construction(id, &result);
+                    completed = Some(result);
+                }
                 Step::ResumeType(frame) => {
                     self.claim_source_custody(&frame.parent.site.custody)?;
                     let Some(complete) = completed.take() else {
@@ -357,18 +419,14 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 }
                 Step::ResumeTrait(frame) => {
                     self.claim_source_custody(&frame.parent.site.custody)?;
-                    let Some(Completed::Type(result)) = completed.take() else {
-                        unreachable!("trait argument completed as type")
-                    };
+                    let result = completed.take().expect("trait argument completed");
                     let parent = frame.parent.clone();
                     let plan = self.continue_trait_plan(frame, result)?;
                     self.schedule_trait_plan(parent, plan, &mut pending, &mut completed)?;
                 }
                 Step::ResumeAlias(frame) => {
-                    let Some(Completed::Type(result)) = completed.take() else {
-                        unreachable!("alias body completed as type")
-                    };
-                    completed = Some(Completed::Alias(self.finish_alias_plan(frame, result)?));
+                    let result = completed.take().expect("alias body completed");
+                    completed = Some(self.complete_alias_frame(frame, result)?);
                 }
             }
         }
@@ -383,6 +441,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         completed: &mut Option<Completed>,
     ) -> Result<(), SignatureFlow> {
         match plan {
+            TypePlan::Blocked(poison) => *completed = Some(Completed::Blocked(poison)),
             TypePlan::Complete(completion) => {
                 *completed = Some(Completed::Type(
                     self.complete_type_plan(&request, completion)?,
@@ -410,6 +469,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         completed: &mut Option<Completed>,
     ) -> Result<(), SignatureFlow> {
         match plan {
+            TraitPlan::Blocked(poison) => *completed = Some(Completed::Blocked(poison)),
             TraitPlan::Await {
                 request: child,
                 continuation,

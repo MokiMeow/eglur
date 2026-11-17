@@ -27,6 +27,8 @@ mod associated_bindings;
 mod direct_children;
 #[path = "signatures/enums.rs"]
 mod enums;
+#[path = "signatures/generic_bounds.rs"]
+mod generic_bounds;
 #[path = "signatures/impl_arguments.rs"]
 mod impl_arguments;
 #[path = "signatures/inherent.rs"]

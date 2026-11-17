@@ -359,7 +359,7 @@ v0.1 supports first-order type parameters on declarations:
 Bound checking:
 
 1. `A + B` is conjunction: every listed bound is required, and bound order has no type-semantic meaning.
-2. Bound declarations use two passes. The first resolves every bound path and validates trait kind, generic arity, and duplicates without yet discharging bounds declared by a referenced generic trait. The complete normalized bound set collected by that pass forms the current declaration's **generic well-formedness environment**.
+2. Bound declarations use two passes. The first resolves every bound path and validates trait kind, generic arity, and duplicates without yet discharging bounds declared by a referenced generic trait. The complete normalized bound set collected by that pass forms the current declaration's **generic well-formedness environment**. Declaring-reference construction follows the acyclicity and completion rules in `traits.md`; source argument validation is not skipped when transparent alias expansion discards an argument.
 3. The environment in Rule 2 is available during the second-pass validation of
    dependent bound arguments and while checking that declaration's remaining
    header, signature, associated bindings where applicable, and body. It may

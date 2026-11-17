@@ -24,13 +24,13 @@ policy:
     - code: EXTERN_LINKAGE_FAILED
       precondition: ffi_linkage_probe
 summary:
-  required_code_count: 274
-  baseline_scope_code_count: 269
-  asserted_code_count: 265
+  required_code_count: 275
+  baseline_scope_code_count: 270
+  asserted_code_count: 266
   mentioned_only_code_count: 0
   uncovered_code_count: 9
-  hard_required_code_count: 263
-  hard_required_asserted_count: 263
+  hard_required_code_count: 264
+  hard_required_asserted_count: 264
   hard_required_gap_count: 0
   conditional_required_code_count: 2
   conditional_required_asserted_count: 2
@@ -750,6 +750,15 @@ coverage:
       - id: core-typecheck
         file: core/typecheck.yaml
         test_ids: [TYC-f-string-placeholder-name-must-resolve-in-scope]
+    mentioned_only_in: []
+  - code: GENERIC_BOUND_REFERENCE_CYCLE
+    severity: error
+    policy: hard_required_asserted
+    status: asserted
+    asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-generic-bound-rejects-direct-reference-construction-cycle, TRT-generic-bound-rejects-mutual-reference-cycle, TRT-generic-bound-rejects-mutual-reference-cycle-reordered, TRT-identity-alias-does-not-hide-bound-reference-cycle, TRT-nominal-wrapper-does-not-break-bound-reference-cycle]
     mentioned_only_in: []
   - code: GENERIC_PARAMETER_REDECLARATION
     severity: error
@@ -1473,6 +1482,9 @@ coverage:
     policy: hard_required_asserted
     status: asserted
     asserted_in:
+      - id: core-traits
+        file: core/traits.yaml
+        test_ids: [TRT-erased-bound-argument-still-requires-name-resolution]
       - id: core-typecheck
         file: core/typecheck.yaml
         test_ids: [TYC-catalog-variant-dot-form-is-not-constructor-syntax, TYC-closure-local-does-not-escape-closure, TYC-for-binder-does-not-escape-loop, TYC-later-local-declaration-is-not-hoisted, TYC-let-binding-group-activates-atomically, TYC-match-binding-does-not-escape-arm, TYC-never-path-does-not-suppress-later-source-validation, TYC-self-initializer-does-not-see-new-binding, TYC-unit-type-name-is-not-a-built-in-value, TYC-user-enum-variant-dot-form-is-not-constructor-syntax]
@@ -2303,7 +2315,7 @@ coverage:
     asserted_in:
       - id: core-traits
         file: core/traits.yaml
-        test_ids: [TRT-associated-reference-error-precedes-public-visibility-error, TRT-associated-type-binding-cannot-conceal-shared-reference, TRT-associated-type-binding-checks-callable-components-for-references, TRT-associated-type-binding-expands-alias-before-reference-check, TRT-generic-trait-reference-cannot-conceal-reference]
+        test_ids: [TRT-associated-reference-error-precedes-public-visibility-error, TRT-associated-type-binding-cannot-conceal-shared-reference, TRT-associated-type-binding-checks-callable-components-for-references, TRT-associated-type-binding-expands-alias-before-reference-check, TRT-erased-bound-argument-still-requires-reference-free-validation, TRT-generic-trait-reference-cannot-conceal-reference]
       - id: core-typecheck
         file: core/typecheck.yaml
         test_ids: [TYC-expected-fn-cannot-instantiate-generic-with-reference, TYC-explicit-mutable-reference-argument-fails-before-substituted-signature, TYC-inferred-generic-argument-cannot-conceal-shared-reference, TYC-nested-generic-argument-cannot-conceal-reference, TYC-reference-free-validation-precedes-trait-bound-checking]

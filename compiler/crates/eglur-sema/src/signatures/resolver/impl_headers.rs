@@ -453,57 +453,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         generic_ids: &[DefId],
     ) -> Result<(), SignatureFlow> {
-        for &declaration_id in generic_ids {
-            if self.source_generic_redeclarations.contains(&declaration_id) {
-                continue;
-            }
-            let declaration = self
-                .collection
-                .declaration(declaration_id)
-                .expect("generic declaration belongs to collection");
-            let owner =
-                declaration
-                    .parent()
-                    .ok_or(SignatureResolutionError::MissingGenericDeclaration(
-                        declaration_id,
-                    ))?;
-            let (file, parameter) = self.source_generic_parameter(declaration_id)?;
-            let parameter = parameter.clone();
-            if !parameter.name.is_valid()
-                || parameter.name.text().is_some_and(is_reserved_type_name)
-            {
-                continue;
-            }
-
-            let source = self.sources[&file];
-            let hir = self.source_hir(file)?;
-            let context = self.source_context(owner, false)?;
-            let parameter_id = GenericParameterId::Source(declaration_id);
-            let mut available = BTreeSet::new();
-            self.generic_bounds
-                .insert(parameter_id.clone(), Box::new([]));
-            for &bound_id in &parameter.bounds {
-                if type_ref_contains_generic_projection(hir, bound_id, &context.generics) {
-                    continue;
-                }
-                let result =
-                    self.resolve_source_trait_ref(owner, source, hir, bound_id, &context)?;
-                if let Resolution::Known(bound) = &result {
-                    available.insert(bound.clone());
-                    self.generic_bounds.insert(
-                        parameter_id.clone(),
-                        available
-                            .iter()
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .into_boxed_slice(),
-                    );
-                }
-                self.source_generic_bound_seeds
-                    .insert((declaration_id, bound_id), result);
-            }
-        }
-        Ok(())
+        self.construct_source_bound_inventory(generic_ids)
     }
 
     pub(super) fn resolve_source_generic(
@@ -518,6 +468,16 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 SourceGenericState::Resolved => Resolution::Known(()),
                 SourceGenericState::Poisoned(poison) => Resolution::Poisoned(poison.clone()),
             });
+        }
+        if !self.source_bounds.initialized {
+            let generic_ids = self
+                .collection
+                .modules()
+                .flat_map(|module| module.declarations())
+                .filter(|declaration| declaration.kind() == DeclarationKind::GenericParameter)
+                .map(Declaration::id)
+                .collect::<Vec<_>>();
+            self.prime_source_generic_bounds(&generic_ids)?;
         }
         self.source_generic_states
             .insert(declaration_id, SourceGenericState::Resolving);
@@ -580,8 +540,18 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     .source_generic_bound_seeds
                     .get(&(declaration_id, bound_id))
                 {
-                    Some(bound) => bound.clone(),
-                    None => {
+                    Some(Resolution::Poisoned(poison)) => Resolution::Poisoned(poison.clone()),
+                    Some(Resolution::Unperformed) => Resolution::Unperformed,
+                    Some(Resolution::Known(bound))
+                        if matches!(
+                            self.occurrences
+                                .state(&TypeOccurrenceId::new(file, bound_id)),
+                            FactState::Known(_)
+                        ) =>
+                    {
+                        Resolution::Known(bound.clone())
+                    }
+                    Some(Resolution::Known(_)) | None => {
                         self.resolve_source_trait_ref(owner, source, hir, bound_id, &context)?
                     }
                 };
@@ -610,17 +580,29 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             poison.include(&duplicate)?;
                         } else {
                             bounds.push(bound);
-                            let mut available = bounds.clone();
-                            available.sort();
-                            self.generic_bounds
-                                .insert(id.clone(), available.into_boxed_slice());
                         }
                     }
                     Resolution::Poisoned(found) => {
                         #[cfg(test)]
                         poison_tests::observe(poison_tests::Step::Input);
 
+                        let found = self.diagnostics.record_failure(
+                            eglur_diagnostics::DiagnosticFailure::Derivative(found),
+                        )?;
                         poison.include(&found)?;
+                        if matches!(
+                            self.occurrences
+                                .state(&TypeOccurrenceId::new(file, bound_id)),
+                            FactState::Unperformed
+                        ) {
+                            self.record_trait_occurrence(
+                                source,
+                                bound_id,
+                                hir.type_ref(bound_id).origin(),
+                                None,
+                                Resolution::Poisoned(found),
+                            )?;
+                        }
                     }
                     Resolution::Unperformed => unperformed = true,
                 }
@@ -643,8 +625,6 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
 
         let state = match result {
             Resolution::Known(signature) => {
-                self.generic_bounds
-                    .insert(id.clone(), signature.bounds().into());
                 self.generic_parameters
                     .insert(id, SemanticFact::Known(signature.clone()))?;
                 self.declarations.insert(

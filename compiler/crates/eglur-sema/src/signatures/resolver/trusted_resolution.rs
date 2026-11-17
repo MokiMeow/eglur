@@ -63,6 +63,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             source_generic_bound_seeds: BTreeMap::new(),
             source_generic_states: BTreeMap::new(),
             source_generic_stack: Vec::new(),
+            source_bounds: source_bounds::SourceBoundConstruction::default(),
             trait_info: BTreeMap::new(),
             alias_arities: BTreeMap::new(),
             alias_states: BTreeMap::new(),
@@ -868,7 +869,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             let signature =
                 GenericParameterSignature::new(id.clone(), parameter.name.clone(), bounds);
             self.generic_bounds
-                .insert(id.clone(), signature.bounds().into());
+                .insert(id.clone(), signature.bounds().iter().cloned().collect());
             self.generic_parameters
                 .insert(id, SemanticFact::Known(signature))?;
         }

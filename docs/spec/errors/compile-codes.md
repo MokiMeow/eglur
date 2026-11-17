@@ -867,6 +867,30 @@ Primary-span requirement:
 1. The primary span MUST select the later or inner redeclaring parameter.
 
 
+### `GENERIC_BOUND_REFERENCE_CYCLE`
+
+Severity: `error`
+
+Trigger: completing the normalized declaring trait references for a source generic-bound projection requires a direct or indirect construction cycle under the declaring reference construction rules in `../language/traits.md`. Reuse of a completed reference or ordinary finite mutual generic assumptions is not a cycle. Associated-type binding cycles in an impl, trait proof cycles, and alias expansion cycles retain their existing diagnostics.
+
+Message contract summary:
+
+1. `generic`.
+2. `bound`.
+3. `reference`.
+4. `cycle`.
+
+Data contract summary (if `data` is present):
+
+1. `parameter`.
+2. `cycle`.
+
+Primary-span requirement:
+
+1. The primary span MUST identify the earliest source-positioned projection occurrence that contributes a dependency in the selected construction cycle. After transparent alias expansion, attribute the occurrence back to user-written surface syntax.
+2. Cycle selection and source-position ordering MUST be independent of resolution traversal order.
+
+
 ### `TRAIT_BOUND_INVALID`
 
 Severity: `error`

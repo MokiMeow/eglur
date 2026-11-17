@@ -40,6 +40,7 @@ fn with_children(count: usize, inspect: impl FnOnce(TypeChildren, [TypeId; 3])) 
         };
         let request = TypeRequest {
             site: Rc::new(SourceSite {
+                construction: None,
                 custody: SourceCustody::Unmetered,
                 owner,
                 file: source.file(),

@@ -113,6 +113,25 @@ Projection rules:
 10. Associated type declarations inherit the visibility of their trait and have no per-item visibility modifier in v0.1. Importing a public trait makes its associated names available through valid projections from that trait bound; associated names are not imported as standalone type identifiers.
 11. Associated-type projections MUST NOT appear in an impl's implemented-trait reference or target type, including through transparent aliases. This keeps impl heads nominal and MUST fail with `ASSOCIATED_TYPE_PROJECTION_INVALID` when violated; the out-of-scope `Self` precedence from Rule 2 still applies to `Self::Name` written in an impl header.
 
+Declaring reference construction:
+
+1. The complete normalized trait references used to identify symbolic projections MUST have an acyclic construction dependency graph (`GENERIC_BOUND_REFERENCE_CYCLE` otherwise). A dependency exists when completing one declaring reference requires a projection whose own complete declaring reference must first be completed. Direct and mutual construction cycles are forbidden.
+2. Dependencies are determined after transparent alias expansion. Repeated type-parameter names, repeated trait heads, nominal type recursion, and reuse of a completed reference do not by themselves establish a construction cycle. Ordinary finite mutual assumptions such as `[T: Has[U], U: Has[T]]` remain permitted.
+3. A transparent alias that discards an argument does not retain that argument as a construction dependency of its expanded target. The discarded argument still requires ordinary name, type-position, alias-application, and bound validation before the declaration can succeed. This distinction does not permit alias expansion cycles or skipped source validation.
+4. Projection source legality is determined from the complete declared bound set, independently of bound order. Bounds with projection-dependent arguments participate in that set; an unresolved construction state is not evidence of an absent or unique declaring bound.
+5. Every projection occurrence in a generic declaration MUST satisfy these rules before that declaration is accepted.
+6. A construction cycle is distinct from an associated-type binding cycle during impl normalization and from a recursive trait proof. The latter retain `ASSOCIATED_TYPE_CYCLE` and `TRAIT_BOUND_NOT_SATISFIED`, respectively, under their existing rules.
+
+For example, with `trait Has[A] { type Item }`:
+
+```eglur
+fn ordinary[T: Has[U], U: Has[T]]() -> Unit = ()
+fn dependent[T: Has[U::Item], U: Has[i64]]() -> Unit = ()
+
+// Rejected: completing Has[T::Item] requires that same reference.
+fn cyclic[T: Has[T::Item]]() -> Unit = ()
+```
+
 Projection normalization and equality:
 
 1. In a generic declaration body, a projection is represented canonically by its base parameter, complete declaring trait reference, and associated name. Repeated occurrences of that same canonical projection denote the same abstract type.
@@ -468,6 +487,6 @@ Effect-summary inference follows `effects.md`:
 
 The following compile-time codes from `../ERRORS.md` are required for this section:
 
-`TRAIT_STATE_FORBIDDEN`, `TRAIT_METHOD_AMBIGUOUS`, `TRAIT_EFFECT_MISMATCH`, `TRAIT_IMPL_MISSING_METHOD`, `TRAIT_IMPL_SIGNATURE_MISMATCH`, `TRAIT_BOUND_INVALID`, `TRAIT_BOUND_NOT_SATISFIED`, `TRAIT_IMPL_ASSOC_TYPE_MISMATCH`, `ASSOCIATED_TYPE_PROJECTION_INVALID`, `ASSOCIATED_TYPE_CYCLE`, `TYPE_ARG_ARITY_MISMATCH`, `CLOSED_TRAIT_IMPL_FORBIDDEN`, `NAME_AMBIGUOUS`, `SELF_TYPE_INVALID`, `VISIBILITY_VIOLATION`, `IMPORT_NOT_FOUND`, `OWNERSHIP_TYPE_POSITION_FORBIDDEN`, `REFERENCE_TYPE_POSITION_FORBIDDEN`, `DYN_MUST_BE_EXPLICIT`, `DYN_TRAIT_UNSUPPORTED`, `ORPHAN_RULE_VIOLATION`, `TRAIT_IMPL_DUPLICATE`, `TRAIT_IMPL_OVERLAP`, `SPECIALIZATION_FORBIDDEN`, `NEGATIVE_IMPL_UNSUPPORTED`, `IMPL_GENERIC_ERROR_UNION_UNSUPPORTED`, `IMPL_UNCONSTRAINED_TYPE_PARAM`, `OVERLOAD_MARKER_REQUIRED`, `OVERLOAD_RETURN_ONLY_DIFFERENCE`, `OVERLOAD_OVERLAP`, `OVERLOAD_AMBIGUOUS`.
+`TRAIT_STATE_FORBIDDEN`, `TRAIT_METHOD_AMBIGUOUS`, `TRAIT_EFFECT_MISMATCH`, `TRAIT_IMPL_MISSING_METHOD`, `TRAIT_IMPL_SIGNATURE_MISMATCH`, `TRAIT_BOUND_INVALID`, `TRAIT_BOUND_NOT_SATISFIED`, `GENERIC_BOUND_REFERENCE_CYCLE`, `TRAIT_IMPL_ASSOC_TYPE_MISMATCH`, `ASSOCIATED_TYPE_PROJECTION_INVALID`, `ASSOCIATED_TYPE_CYCLE`, `TYPE_ARG_ARITY_MISMATCH`, `CLOSED_TRAIT_IMPL_FORBIDDEN`, `NAME_AMBIGUOUS`, `SELF_TYPE_INVALID`, `VISIBILITY_VIOLATION`, `IMPORT_NOT_FOUND`, `OWNERSHIP_TYPE_POSITION_FORBIDDEN`, `REFERENCE_TYPE_POSITION_FORBIDDEN`, `DYN_MUST_BE_EXPLICIT`, `DYN_TRAIT_UNSUPPORTED`, `ORPHAN_RULE_VIOLATION`, `TRAIT_IMPL_DUPLICATE`, `TRAIT_IMPL_OVERLAP`, `SPECIALIZATION_FORBIDDEN`, `NEGATIVE_IMPL_UNSUPPORTED`, `IMPL_GENERIC_ERROR_UNION_UNSUPPORTED`, `IMPL_UNCONSTRAINED_TYPE_PARAM`, `OVERLOAD_MARKER_REQUIRED`, `OVERLOAD_RETURN_ONLY_DIFFERENCE`, `OVERLOAD_OVERLAP`, `OVERLOAD_AMBIGUOUS`.
 
 These diagnostics apply equally to tensor impl headers (`Tensor[...]`) and non-tensor impl headers.

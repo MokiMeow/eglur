@@ -102,6 +102,46 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .expect("projection classifier found generic base")
                 .clone();
             let base = self.generic_types[&parameter];
+            if let GenericParameterId::Source(declaration) = &parameter {
+                match self.source_bounds.environments.get(declaration) {
+                    Some(Resolution::Poisoned(poison)) => {
+                        return Ok((Resolution::Poisoned(poison.clone()), None));
+                    }
+                    Some(Resolution::Unperformed) => return Ok((Resolution::Unperformed, None)),
+                    Some(Resolution::Known(())) | None => {}
+                }
+                if self.source_bounds.initialized {
+                    let selected = match self.select_source_declaring_bound(
+                        *declaration,
+                        source,
+                        type_origin,
+                        associated_name,
+                    )? {
+                        Resolution::Known(selected) => selected,
+                        Resolution::Poisoned(poison) => {
+                            return Ok((Resolution::Poisoned(poison), None));
+                        }
+                        Resolution::Unperformed => return Ok((Resolution::Unperformed, None)),
+                    };
+                    let source_bounds::ConstructionState::Complete(result) =
+                        self.source_bounds.state(selected.cohort).clone()
+                    else {
+                        unreachable!("all declaring cohorts are terminal before source validation");
+                    };
+                    let result = result.map(|value| match value {
+                        source_bounds::ConstructedReference::Cohort(reference) => reference,
+                        _ => unreachable!("declaring selection refers to a cohort"),
+                    });
+                    return self.complete_bound_projection(
+                        source,
+                        type_origin,
+                        base,
+                        selected.associated,
+                        arguments.len(),
+                        result,
+                    );
+                }
+            }
             if !self.generic_bounds.contains_key(&parameter) {
                 let GenericParameterId::Source(declaration) = &parameter else {
                     return Ok((Resolution::Unperformed, None));
@@ -127,7 +167,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     _ => Ok((Resolution::Unperformed, None)),
                 };
             };
-            (base, bounds.to_vec())
+            (base, bounds.iter().cloned().collect::<Vec<_>>())
         };
         let mut candidates = Vec::new();
         for trait_ref in trait_refs {
