@@ -29,6 +29,7 @@ impl Children {
 }
 
 enum Frame {
+    CompletedType(TypeId),
     Children(Rebuild, Children),
     Reference(ReferenceMutability),
     RawPointer(RawPointerMutability),
@@ -57,48 +58,62 @@ impl TraitEnvironment {
         active_obligations: &mut BTreeSet<TraitObligation>,
     ) -> Result<TraitNormalization, TraitEnvironmentError> {
         let mut frames = Vec::new();
+        let mut completed = BTreeMap::<TypeId, TraitNormalization>::new();
         let mut step = Step::Normalize(root);
         loop {
             step = match step {
-                Step::Normalize(ty) => match signatures.types().kind(ty)?.clone() {
-                    TypeKind::Never
-                    | TypeKind::Primitive(_)
-                    | TypeKind::GenericParameter(_)
-                    | TypeKind::SelfType(_) => Step::Complete(TraitNormalization::Normalized(ty)),
-                    TypeKind::Nominal { head, substitution } => Step::Children(
-                        Rebuild::Nominal(head),
-                        Children::new(signatures.types().substitution(substitution)?.to_vec()),
-                    ),
-                    TypeKind::Reference {
-                        mutability,
-                        referent,
-                    } => {
-                        frames.push(Frame::Reference(mutability));
-                        Step::Normalize(referent)
+                Step::Normalize(ty) => {
+                    if let Some(result) = completed.get(&ty) {
+                        step = Step::Complete(result.clone());
+                        continue;
                     }
-                    TypeKind::RawPointer {
-                        mutability,
-                        referent,
-                    } => {
-                        frames.push(Frame::RawPointer(mutability));
-                        Step::Normalize(referent)
+                    frames.push(Frame::CompletedType(ty));
+                    #[cfg(test)]
+                    {
+                        self.normalization_expansions += 1;
                     }
-                    TypeKind::Tuple(elements) => {
-                        Step::Children(Rebuild::Tuple, Children::new(elements.into_vec()))
+                    match signatures.types().kind(ty)?.clone() {
+                        TypeKind::Never
+                        | TypeKind::Primitive(_)
+                        | TypeKind::GenericParameter(_)
+                        | TypeKind::SelfType(_) => {
+                            Step::Complete(TraitNormalization::Normalized(ty))
+                        }
+                        TypeKind::Nominal { head, substitution } => Step::Children(
+                            Rebuild::Nominal(head),
+                            Children::new(signatures.types().substitution(substitution)?.to_vec()),
+                        ),
+                        TypeKind::Reference {
+                            mutability,
+                            referent,
+                        } => {
+                            frames.push(Frame::Reference(mutability));
+                            Step::Normalize(referent)
+                        }
+                        TypeKind::RawPointer {
+                            mutability,
+                            referent,
+                        } => {
+                            frames.push(Frame::RawPointer(mutability));
+                            Step::Normalize(referent)
+                        }
+                        TypeKind::Tuple(elements) => {
+                            Step::Children(Rebuild::Tuple, Children::new(elements.into_vec()))
+                        }
+                        TypeKind::Callable { parameters, result } => Step::Children(
+                            Rebuild::CallableParameters(result),
+                            Children::new(parameters.into_vec()),
+                        ),
+                        TypeKind::ErrorUnion(members) => {
+                            Step::Children(Rebuild::ErrorUnion, Children::new(members.into_vec()))
+                        }
+                        TypeKind::AssociatedProjection(projection) => {
+                            let base = projection.base();
+                            frames.push(Frame::ProjectionBase(projection));
+                            Step::Normalize(base)
+                        }
                     }
-                    TypeKind::Callable { parameters, result } => Step::Children(
-                        Rebuild::CallableParameters(result),
-                        Children::new(parameters.into_vec()),
-                    ),
-                    TypeKind::ErrorUnion(members) => {
-                        Step::Children(Rebuild::ErrorUnion, Children::new(members.into_vec()))
-                    }
-                    TypeKind::AssociatedProjection(projection) => {
-                        let base = projection.base();
-                        frames.push(Frame::ProjectionBase(projection));
-                        Step::Normalize(base)
-                    }
-                },
+                }
                 Step::Children(rebuild, mut children) => {
                     if let Some(child) = children.remaining.next() {
                         frames.push(Frame::Children(rebuild, children));
@@ -249,6 +264,18 @@ impl TraitEnvironment {
                     let Some(frame) = frames.pop() else {
                         return Ok(result);
                     };
+                    if let Frame::CompletedType(input) = frame {
+                        // Failures may depend on active proof guards; only completed
+                        // successful nodes are reusable within this assumption slice.
+                        if matches!(
+                            result,
+                            TraitNormalization::Normalized(_) | TraitNormalization::Symbolic(_)
+                        ) {
+                            completed.insert(input, result.clone());
+                        }
+                        step = Step::Complete(result);
+                        continue;
+                    }
                     if let Frame::ProjectionValue(projection_ty) = frame {
                         active_projections.remove(&projection_ty);
                         if let Some(owner) = owner {
@@ -306,6 +333,7 @@ impl TraitEnvironment {
                             )
                         }
                         Frame::ProjectionValue(_) => unreachable!("projection value was completed"),
+                        Frame::CompletedType(_) => unreachable!("type value was completed"),
                     }
                 }
             };
@@ -539,6 +567,151 @@ mod tests {
                     self.projection.associated().clone(),
                 ))
                 .unwrap()
+        }
+    }
+
+    #[test]
+    fn shared_structural_and_symbolic_subgraphs_expand_once_per_walk() {
+        for symbolic in [false, true] {
+            for owner_scope in [false, true] {
+                for depth in [1, 4, 8, 256, 2048] {
+                    let mut fixture = fixture(false);
+                    let integer = fixture
+                        .signatures
+                        .types_mut()
+                        .primitive(PrimitiveType::I64)
+                        .unwrap();
+                    let mut reachable = BTreeSet::new();
+                    let mut root = if symbolic {
+                        let base = fixture
+                            .signatures
+                            .types_mut()
+                            .self_type(CanonicalTarget::Source(fixture.owner))
+                            .unwrap();
+                        let projection = fixture.projection_type(base, &[]);
+                        reachable.extend([base, projection]);
+                        projection
+                    } else {
+                        reachable.insert(integer);
+                        integer
+                    };
+                    for layer in 0..depth {
+                        let types = fixture.signatures.types_mut();
+                        root = match layer % 6 {
+                            0 => types.tuple([root, root]).unwrap(),
+                            1 => types
+                                .nominal(
+                                    NominalHead::Intrinsic(IntrinsicNominal::Res),
+                                    [root, root],
+                                )
+                                .unwrap(),
+                            2 => {
+                                let reference =
+                                    types.reference(ReferenceMutability::Shared, root).unwrap();
+                                reachable.insert(reference);
+                                types.tuple([reference, reference]).unwrap()
+                            }
+                            3 => {
+                                let pointer = types
+                                    .raw_pointer(RawPointerMutability::Const, root)
+                                    .unwrap();
+                                reachable.insert(pointer);
+                                types.tuple([pointer, pointer]).unwrap()
+                            }
+                            4 => types.callable([root, root], root).unwrap(),
+                            _ => {
+                                reachable.insert(integer);
+                                types.error_union([root, integer]).unwrap()
+                            }
+                        };
+                        reachable.insert(root);
+                    }
+                    let count = fixture.signatures.types().type_count();
+                    fixture.environment.normalization_expansions = 0;
+                    let result = fixture
+                        .environment
+                        .normalize_inner(
+                            owner_scope.then_some(fixture.owner),
+                            &mut fixture.signatures,
+                            root,
+                            &[],
+                            &mut BTreeSet::new(),
+                            &mut BTreeSet::new(),
+                        )
+                        .unwrap();
+                    match result {
+                        TraitNormalization::Symbolic(ty) => {
+                            assert!(symbolic);
+                            assert_eq!(ty, root);
+                        }
+                        TraitNormalization::Normalized(ty) => {
+                            assert!(!symbolic);
+                            assert_eq!(ty, root);
+                        }
+                        failure => panic!("unexpected normalization failure: {failure:?}"),
+                    }
+                    assert_eq!(fixture.signatures.types().type_count(), count);
+                    assert!(
+                        fixture.environment.normalization_expansions <= reachable.len(),
+                        "{} expansions for {} reachable nodes (depth={depth}, symbolic={symbolic}, owner={owner_scope})",
+                        fixture.environment.normalization_expansions,
+                        reachable.len(),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn completed_node_memo_does_not_outlive_query_guards_or_invalidation() {
+        for owner_scope in [false, true] {
+            let mut fixture = fixture(false);
+            let owner = owner_scope.then_some(fixture.owner);
+            let integer = fixture
+                .signatures
+                .types_mut()
+                .primitive(PrimitiveType::I64)
+                .unwrap();
+            let projection = fixture.projection_type(fixture.projection.base(), &[]);
+            let root = fixture
+                .signatures
+                .types_mut()
+                .tuple([projection, projection])
+                .unwrap();
+            let expected = fixture
+                .signatures
+                .types_mut()
+                .tuple([integer, integer])
+                .unwrap();
+            for guarded in [false, true, false] {
+                fixture.environment.clear_query_caches();
+                fixture.environment.local_query_cache = Some(LocalQueryCache::default());
+                let mut active = if guarded {
+                    BTreeSet::from([projection])
+                } else {
+                    BTreeSet::new()
+                };
+                let original_active = active.clone();
+                let result = fixture
+                    .environment
+                    .normalize_inner(
+                        owner,
+                        &mut fixture.signatures,
+                        root,
+                        &[],
+                        &mut active,
+                        &mut BTreeSet::new(),
+                    )
+                    .unwrap();
+                if guarded {
+                    assert!(
+                        matches!(result, TraitNormalization::Cyclic(ref value) if value == &fixture.projection)
+                    );
+                } else {
+                    assert!(matches!(result, TraitNormalization::Normalized(ty) if ty == expected));
+                }
+                assert_eq!(active, original_active);
+            }
         }
     }
 

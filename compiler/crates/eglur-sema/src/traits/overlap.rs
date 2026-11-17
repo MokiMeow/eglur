@@ -376,6 +376,9 @@ pub(crate) fn classify_overlap(
     left: &TraitImplHeader,
     right: &TraitImplHeader,
 ) -> Result<Option<HeaderConflict>, TypeStoreError> {
+    #[cfg(test)]
+    super::coherence_index::tests::observe_comparison();
+
     if left.trait_ref().declaration() != right.trait_ref().declaration() {
         return Ok(None);
     }

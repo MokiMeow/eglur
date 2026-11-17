@@ -7,6 +7,10 @@ use eglur_source::FileId;
 
 use crate::ModuleAddress;
 
+mod invalid_poisons;
+
+use invalid_poisons::InvalidPoisonGroup;
+
 /// Normalized semantic-phase input for one driver-owned compilation unit.
 pub struct SemanticSource<'hir> {
     file: FileId,
@@ -53,12 +57,12 @@ impl<'hir> SemanticSource<'hir> {
             return Err(SourceInputError::OriginWithoutHir);
         }
 
-        let mut merged_invalid = BTreeMap::<OriginId, Poison>::new();
+        let mut merged_invalid = BTreeMap::<OriginId, InvalidPoisonGroup>::new();
         for (origin, poison) in invalid_poisons {
-            if let Some(existing) = merged_invalid.get(&origin) {
-                merged_invalid.insert(origin, existing.merge(&poison)?);
+            if let Some(existing) = merged_invalid.remove(&origin) {
+                merged_invalid.insert(origin, existing.include(poison)?);
             } else {
-                merged_invalid.insert(origin, poison);
+                merged_invalid.insert(origin, InvalidPoisonGroup::One(poison));
             }
         }
         let expected_invalid = hir
@@ -77,7 +81,10 @@ impl<'hir> SemanticSource<'hir> {
             module,
             hir,
             origin_spans: retained_spans,
-            invalid_poisons: merged_invalid,
+            invalid_poisons: merged_invalid
+                .into_iter()
+                .map(|(origin, group)| (origin, group.finish()))
+                .collect(),
             source_poison,
         })
     }

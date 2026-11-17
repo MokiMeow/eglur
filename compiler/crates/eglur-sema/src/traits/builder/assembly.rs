@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn collect_implementations(
     signatures: &DeclarationSignatures,
 ) -> Result<CollectedImplementations, TraitEnvironmentError> {
@@ -60,16 +63,19 @@ pub(super) fn validate_checked_coherence(
     signatures: &DeclarationSignatures,
     implementations: &BTreeMap<CanonicalTarget, TraitImpl>,
 ) -> Result<(), TraitEnvironmentError> {
-    let headers = implementations.values().collect::<Vec<_>>();
-    for (index, left) in headers.iter().enumerate() {
-        for right in &headers[index + 1..] {
-            if left.poison.is_none()
-                && right.poison.is_none()
-                && classify_overlap(signatures, &left.header, &right.header)?.is_some()
-            {
+    let mut headers = CoherenceIndex::default();
+    for implementation in implementations
+        .values()
+        .filter(|value| value.poison.is_none())
+    {
+        headers.insert(signatures.types(), implementation.header.clone())?;
+    }
+    for (index, left) in headers.headers().iter().enumerate() {
+        for (next, right) in headers.candidates(signatures.types(), left)? {
+            if next > index && classify_overlap(signatures, left, right)?.is_some() {
                 return Err(TraitEnvironmentError::UncheckedCoherence {
-                    left: left.header.declaration().clone(),
-                    right: right.header.declaration().clone(),
+                    left: left.declaration().clone(),
+                    right: right.declaration().clone(),
                 });
             }
         }

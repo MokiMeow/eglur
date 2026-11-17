@@ -6,6 +6,9 @@ mod poison_tests;
 #[cfg(test)]
 mod enum_poison_tests;
 
+#[cfg(test)]
+mod field_provenance_tests;
+
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_declarations(&mut self) -> Result<(), SignatureResolutionError> {
         let declarations = self
@@ -1077,13 +1080,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let item = parent_declaration
             .item()
             .ok_or(SignatureResolutionError::MissingDeclarationItem(parent))?;
-        let ItemKind::Enum(parent_item) = hir.item(item).kind() else {
+        let ItemKind::Enum(_) = hir.item(item).kind() else {
             return Err(SignatureResolutionError::WrongDeclarationItem(parent));
         };
-        let variant = parent_item
-            .variants
-            .iter()
-            .find(|variant| variant.origin == declaration.origin())
+        let variant = self
+            .source_enum_variants
+            .get(hir.file(), item, declaration.origin())
             .ok_or(SignatureResolutionError::WrongDeclarationItem(
                 declaration_id,
             ))?;
@@ -1118,20 +1120,25 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             EnumVariantPayload::Named(fields) => {
                 let declarations =
                     self.child_declarations(declaration_id, DeclarationKind::EnumVariantField);
+                let mut fields_by_origin = BTreeMap::new();
+                for candidate in declarations {
+                    #[cfg(test)]
+                    field_provenance_tests::observe_origin_inspection();
+
+                    if let Some(declaration) = self.collection.declaration(candidate) {
+                        fields_by_origin
+                            .entry(declaration.origin())
+                            .or_insert(candidate);
+                    }
+                }
+
                 let mut resolved = Vec::with_capacity(fields.len());
                 let mut poison = PoisonAccumulator::new();
                 let mut unperformed = false;
                 for field in fields {
-                    let field_id = declarations
-                        .clone()
-                        .find(|&candidate| {
-                            self.collection
-                                .declaration(candidate)
-                                .is_some_and(|declaration| declaration.origin() == field.origin)
-                        })
-                        .ok_or(SignatureResolutionError::WrongDeclarationItem(
-                            declaration_id,
-                        ))?;
+                    let field_id = fields_by_origin.get(&field.origin).copied().ok_or(
+                        SignatureResolutionError::WrongDeclarationItem(declaration_id),
+                    )?;
                     if !field.name.is_valid() {
                         let found = source.invalid_poison(field.name.origin()).cloned().ok_or(
                             SignatureResolutionError::MissingInvalidPoison {

@@ -41,6 +41,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             diagnostic_type_names,
             declarations: FactTable::new(),
             enum_variant_names: HashMap::new(),
+            source_enum_variants: enum_variants::SourceEnumVariantIndex::default(),
             overload_family_poisons: BTreeMap::new(),
             generic_parameters: FactTable::new(),
             occurrences: FactTable::new(),
@@ -77,6 +78,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 &resolver.source_generic_redeclarations,
             ));
         resolver.register_generic_types()?;
+        resolver.source_enum_variants = enum_variants::SourceEnumVariantIndex::new(
+            resolver.sources.values().filter_map(|source| source.hir()),
+        );
         Ok(resolver)
     }
 
@@ -599,9 +603,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 }
             }
         }
-        for (index, left) in headers.iter().enumerate() {
-            for right in &headers[index + 1..] {
-                if classify_overlap(self, left, right)?.is_some() {
+        let mut index = CoherenceIndex::default();
+        for header in headers {
+            index.insert(&self.types, header.clone())?;
+        }
+        for (ordinal, left) in index.headers().iter().enumerate() {
+            for (next, right) in index.candidates(&self.types, left)? {
+                if next > ordinal && classify_overlap(self, left, right)?.is_some() {
                     let CanonicalTarget::External(left) = left.declaration() else {
                         unreachable!("trusted header has an external declaration")
                     };

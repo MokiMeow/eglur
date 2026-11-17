@@ -205,7 +205,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     }
 
     pub(super) fn validate_source_impl_headers(&mut self) -> Result<(), SignatureResolutionError> {
-        let mut accepted = self
+        let trusted = self
             .retained_impl_headers
             .iter()
             .filter_map(|(target, fact)| {
@@ -217,6 +217,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     })
             })
             .collect::<Vec<_>>();
+
+        let mut accepted = CoherenceIndex::default();
+        for header in trusted {
+            accepted.insert(&self.types, header)?;
+        }
 
         let implementations = self
             .collection
@@ -241,8 +246,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 continue;
             }
             let conflict = accepted
-                .iter()
-                .find_map(|candidate| {
+                .candidates(&self.types, &header)?
+                .find_map(|(_, candidate)| {
                     classify_overlap(self, candidate, &header)
                         .transpose()
                         .map(|conflict| conflict.map(|kind| (candidate.clone(), kind)))
@@ -288,7 +293,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 self.reject_source_impl_header(declaration_id, poison)?;
                 continue;
             }
-            accepted.push(header.clone());
+            accepted.insert(&self.types, header.clone())?;
             if self.public_impl_header_exposes_private_type(&header)? {
                 let poison = self.source_impl_header_error(
                     declaration_id,
