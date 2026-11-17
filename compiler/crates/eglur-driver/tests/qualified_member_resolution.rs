@@ -365,7 +365,13 @@ fn qualified_trait_value_requires_method_resolution_capability() {
         SupportProfile::semantic_core_v1()
             .compile_capabilities()
             .filter(|capability| {
-                *capability != CompileCapability::Typecheck(TypecheckCapability::ResolveMethods)
+                !matches!(
+                    capability,
+                    CompileCapability::Typecheck(
+                        TypecheckCapability::ResolveMethods
+                            | TypecheckCapability::ResolveTrustedInherentMethods
+                    )
+                )
             }),
     )
     .unwrap();
@@ -438,11 +444,28 @@ fn unapplied_generic_alias_is_not_a_method_owner() {
 }
 
 #[test]
-fn primitive_alias_has_no_concrete_method_namespace() {
-    assert_eq!(
-        diagnostic_codes("type Alias = i64\nfn source(value: Alias) -> i64 = Alias.read(value)\n"),
-        ["METHOD_NOT_FOUND"]
+fn primitive_alias_keeps_its_owner_with_complete_empty_inventory() {
+    let (fact, _, diagnostics, missing) = inspect(
+        &[(
+            "main.eglur",
+            "type Alias = i64\nfn source(value: Alias) -> i64 = Alias.read(value)\n",
+        )],
+        "read",
     );
+    assert!(matches!(fact, Some(ResolvedName::TypeMemberOwner(_))));
+    assert_eq!(diagnostics, ["METHOD_NOT_FOUND"]);
+    assert!(missing.is_empty());
+    let request = FileSetRequest::single(
+        "main.eglur",
+        b"type Alias = i64\nfn source(value: Alias) -> i64 = Alias.read(value)\n".to_vec(),
+    )
+    .unwrap();
+    let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let analysis = session
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+    assert!(!analysis.trace().has_unsupported());
 }
 
 #[test]

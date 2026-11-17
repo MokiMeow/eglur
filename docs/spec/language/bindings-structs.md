@@ -185,6 +185,10 @@ Rules:
 1. Member read form `recv.name` resolves to one of:
    1. raw stored-field read when `name` is a declared `field` / `field mut`,
    2. property-read lowering `recv.get_name()` when `name` is a declared `prop` / `prop mut`.
+   If the receiver's static type exposes neither a stored field nor a property
+   with that name, compilation MUST fail with `MEMBER_NOT_FOUND`.
+   Method calls and owner-qualified callable references use the separate
+   lookup rules in `traits.md` and `calls-references.md`.
 2. Stored-field assignment form `recv.name = value` is valid only for declared `field mut` members.
 3. Assignment to a declared immutable `field` member MUST fail with `IMMUTABLE_BINDING_ASSIGN`.
 4. Assignment to a declared property name (`recv.name = value`) MUST fail with `PROPERTY_ASSIGN_FORBIDDEN`, even for `prop mut`.

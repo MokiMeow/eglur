@@ -4,7 +4,9 @@ use eglur_diagnostics::{
     AcceptedDiagnostics, Diagnostic, DiagnosticDataValue, DiagnosticSnapshot, PrimarySpan,
     RejectedDiagnostics, SourceSpan, render_plain,
 };
-use eglur_sema::{CapabilityTrace, DemandDisposition, ProgramMode};
+use eglur_sema::{
+    CapabilityTrace, CompileInputRefusal, DemandDisposition, ProgramMode, UnavailableCompileInput,
+};
 use serde_json::{Map, Value, json};
 
 use crate::{CheckedProgram, PhaseObservation, SealedCompilation, SupportManifest};
@@ -53,20 +55,20 @@ impl ToolLimit {
     }
 }
 
-/// Capability trace proven to contain no missing demand.
-pub struct NoMissingCapabilityTrace(CapabilityTrace);
+/// Trace with all demanded capabilities and required inputs available.
+pub struct AvailableCapabilityTrace(CapabilityTrace);
 
-impl NoMissingCapabilityTrace {
+impl AvailableCapabilityTrace {
     #[must_use]
     pub const fn trace(&self) -> &CapabilityTrace {
         &self.0
     }
 }
 
-/// Capability trace proven to contain at least one missing demand.
-pub struct MissingCapabilityTrace(CapabilityTrace);
+/// Trace with a missing capability or unavailable required input.
+pub struct UnsupportedCapabilityTrace(CapabilityTrace);
 
-impl MissingCapabilityTrace {
+impl UnsupportedCapabilityTrace {
     #[must_use]
     pub const fn trace(&self) -> &CapabilityTrace {
         &self.0
@@ -82,7 +84,7 @@ struct AttemptContext {
 /// Successful compile state with all completion proofs retained.
 pub struct SucceededAttempt {
     checked: CheckedProgram,
-    trace: NoMissingCapabilityTrace,
+    trace: AvailableCapabilityTrace,
     diagnostics: AcceptedDiagnostics,
     context: AttemptContext,
 }
@@ -94,7 +96,7 @@ impl SucceededAttempt {
     }
 
     #[must_use]
-    pub const fn trace(&self) -> &NoMissingCapabilityTrace {
+    pub const fn trace(&self) -> &AvailableCapabilityTrace {
         &self.trace
     }
 
@@ -107,7 +109,7 @@ impl SucceededAttempt {
 /// Conclusive source rejection with at least one ordered root error.
 pub struct RejectedAttempt {
     errors: RejectedDiagnostics,
-    trace: NoMissingCapabilityTrace,
+    trace: AvailableCapabilityTrace,
     context: AttemptContext,
 }
 
@@ -118,21 +120,21 @@ impl RejectedAttempt {
     }
 
     #[must_use]
-    pub const fn trace(&self) -> &NoMissingCapabilityTrace {
+    pub const fn trace(&self) -> &AvailableCapabilityTrace {
         &self.trace
     }
 }
 
-/// Inconclusive attempt stopped by at least one unavailable capability.
+/// Inconclusive attempt stopped by a missing capability or required input.
 pub struct UnsupportedAttempt {
-    trace: MissingCapabilityTrace,
+    trace: UnsupportedCapabilityTrace,
     diagnostics: DiagnosticSnapshot,
     context: AttemptContext,
 }
 
 impl UnsupportedAttempt {
     #[must_use]
-    pub const fn trace(&self) -> &MissingCapabilityTrace {
+    pub const fn trace(&self) -> &UnsupportedCapabilityTrace {
         &self.trace
     }
 
@@ -196,14 +198,14 @@ impl CompileAttempt {
                 context,
             }));
         }
-        if trace.has_missing() {
+        if trace.has_unsupported() {
             return Ok(Self::Unsupported(UnsupportedAttempt {
-                trace: MissingCapabilityTrace(trace),
+                trace: UnsupportedCapabilityTrace(trace),
                 diagnostics,
                 context,
             }));
         }
-        let trace = NoMissingCapabilityTrace(trace);
+        let trace = AvailableCapabilityTrace(trace);
         match diagnostics {
             DiagnosticSnapshot::Rejected(errors) => Ok(Self::Rejected(RejectedAttempt {
                 errors,
@@ -285,8 +287,39 @@ impl CompileAttempt {
                 attempt
                     .trace
                     .trace()
-                    .missing()
-                    .map(|entry| entry.capability().stable_key())
+                    .unsupported()
+                    .map(|entry| {
+                        let mut label = entry.capability().stable_key().to_owned();
+                        for refusal in entry.input_refusals() {
+                            match refusal.input() {
+                                UnavailableCompileInput::TrustedValueMemberInventory { owner } => {
+                                    label.push_str(&format!(
+                                        " (missing field/property inventory: {})",
+                                        owner.as_str()
+                                    ));
+                                }
+                                UnavailableCompileInput::PrimitiveInherentInventory { owner } => {
+                                    label.push_str(&format!(
+                                        " (missing inherent inventory: std::prelude::{})",
+                                        owner.spelling()
+                                    ));
+                                }
+                                UnavailableCompileInput::IntrinsicInherentInventory { owner } => {
+                                    label.push_str(&format!(
+                                        " (missing inherent inventory: std::prelude::{})",
+                                        owner.spelling()
+                                    ));
+                                }
+                                UnavailableCompileInput::TrustedInherentInventory { owner } => {
+                                    label.push_str(&format!(
+                                        " (missing inherent inventory: {})",
+                                        owner.as_str()
+                                    ));
+                                }
+                            }
+                        }
+                        label
+                    })
                     .collect::<Vec<_>>()
                     .join(", ")
             )),
@@ -562,7 +595,7 @@ fn capability_trace_json(trace: &CapabilityTrace) -> Value {
             .entries()
             .iter()
             .map(|entry| {
-                json!({
+                let mut value = json!({
                     "capability": entry.capability().stable_key(),
                     "disposition": match entry.disposition() {
                         DemandDisposition::Satisfied => "satisfied",
@@ -574,10 +607,51 @@ fn capability_trace_json(trace: &CapabilityTrace) -> Value {
                             "origin": location.hir_origin().map(|origin| origin.get()),
                         })
                     }).collect::<Vec<_>>(),
-                })
+                });
+                if !entry.input_refusals().is_empty() {
+                    let inputs = entry
+                        .input_refusals()
+                        .iter()
+                        .map(compile_input_refusal_json)
+                        .collect();
+                    value
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("unavailable_inputs".into(), Value::Array(inputs));
+                }
+                value
             })
             .collect(),
     )
+}
+
+fn compile_input_refusal_json(refusal: &CompileInputRefusal) -> Value {
+    let (kind, owner) = match refusal.input() {
+        UnavailableCompileInput::TrustedValueMemberInventory { owner } => {
+            ("trusted_value_member_inventory", owner.as_str().to_owned())
+        }
+        UnavailableCompileInput::TrustedInherentInventory { owner } => {
+            ("trusted_inherent_inventory", owner.as_str().to_owned())
+        }
+        UnavailableCompileInput::PrimitiveInherentInventory { owner } => (
+            "primitive_inherent_inventory",
+            format!("std::prelude::{}", owner.spelling()),
+        ),
+        UnavailableCompileInput::IntrinsicInherentInventory { owner } => (
+            "intrinsic_inherent_inventory",
+            format!("std::prelude::{}", owner.spelling()),
+        ),
+    };
+    json!({
+        "kind": kind,
+        "owner": owner,
+        "locations": refusal.locations().iter().map(|location| {
+            json!({
+                "file": location.file().get(),
+                "origin": location.hir_origin().map(|origin| origin.get()),
+            })
+        }).collect::<Vec<_>>(),
+    })
 }
 
 fn support_manifest_json(manifest: &SupportManifest) -> Value {

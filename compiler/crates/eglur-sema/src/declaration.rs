@@ -39,6 +39,8 @@ pub enum DeclarationKind {
     StorageField,
     Property,
     GenericParameter,
+    PrimitiveType,
+    IntrinsicType,
 }
 
 impl DeclarationKind {
@@ -52,9 +54,13 @@ impl DeclarationKind {
             Self::Function | Self::ExternFunction | Self::IntrinsicConstructor | Self::Const => {
                 Some(Namespace::Value)
             }
-            Self::Trait | Self::Struct | Self::Enum | Self::OpaqueType | Self::TypeAlias => {
-                Some(Namespace::Type)
-            }
+            Self::Trait
+            | Self::Struct
+            | Self::Enum
+            | Self::OpaqueType
+            | Self::TypeAlias
+            | Self::PrimitiveType
+            | Self::IntrinsicType => Some(Namespace::Type),
             Self::Impl
             | Self::EnumVariant
             | Self::EnumVariantField
@@ -399,6 +405,8 @@ impl DeclarationCollection {
                     owner.kind() == DeclarationKind::Enum && owner.visibility().is_public()
                 }),
             DeclarationKind::Impl
+            | DeclarationKind::PrimitiveType
+            | DeclarationKind::IntrinsicType
             | DeclarationKind::OpaqueType
             | DeclarationKind::IntrinsicConstructor
             | DeclarationKind::AssociatedType

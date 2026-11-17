@@ -26,6 +26,20 @@ The prelude MUST provide:
 18. `ScopedFailure[E]` for scoped-resource acquisition, callback, and close
     failures.
 
+Primitive type names (`Unit`, `Bool`, `Str`, `Nat`, `PositiveNat`, and the
+fixed-width numeric types) are ordinary type-namespace prelude bindings, not
+reserved spellings. Module declarations, explicit imports, and in-scope
+generic parameters MAY shadow them under `../language/modules-resolution.md`.
+An explicit `std::prelude::<name>` path or an import alias from that module
+MUST denote the canonical primitive type. Aliases and re-exports preserve that
+identity; they do not introduce nominal types.
+
+Literal types are independent of these bindings: `()`, Boolean literals, and
+numeric literal defaults retain their canonical types when a same-spelled
+source name is shadowed. Expected-type inference follows the resolved type,
+not its spelling. The reserved intrinsic names listed in
+`../language/algebraic-data.md` remain reserved.
+
 `Unit` is the language-intrinsic singleton type. The prelude provides the type
 binding only and MUST NOT provide a value binding named `Unit`; the sole
 built-in Unit value is written `()` as specified by

@@ -192,9 +192,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         mode: PatternBindingMode,
     ) -> Result<Outcome<()>, BodyTypingError> {
         let mutability = mode.mutability();
-        let pattern = body
+        let mut pattern = body
             .pattern(pattern_id)
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
+
+        if matches!(mode, PatternBindingMode::Let(_)) {
+            while let PatternKind::Group(inner) = pattern.kind() {
+                pattern = body
+                    .pattern(*inner)
+                    .ok_or(BodyTypingError::WrongBodyPattern(*inner))?;
+            }
+        }
+
         let origin = pattern.origin();
         let kind = pattern.kind().clone();
         match kind {
@@ -224,9 +233,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 } else {
                     Ok(Outcome::Known(()))
                 }
-            }
-            PatternKind::Group(inner) if matches!(mode, PatternBindingMode::Let(_)) => {
-                self.bind_pattern(module, source, body, inner, ty, mode)
             }
             PatternKind::Unit if matches!(mode, PatternBindingMode::Let(_)) => {
                 let unit = self.primitive(PrimitiveType::Unit)?;

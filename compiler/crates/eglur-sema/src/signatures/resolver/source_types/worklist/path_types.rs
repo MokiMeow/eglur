@@ -43,48 +43,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 };
                 return Ok(Self::position_type(result, None));
             }
-            if let Some(primitive) = crate::PrimitiveType::from_spelling(&path_text) {
-                let result = if arguments.is_empty() {
-                    Resolution::Known(self.types.primitive(primitive)?)
-                } else {
-                    Resolution::Poisoned(self.record_arity_error(
-                        source,
-                        origin,
-                        0,
-                        arguments.len(),
-                    )?)
-                };
-                return Ok(Self::position_type(result, None));
-            }
             if let Some(intrinsic) = IntrinsicNominal::from_spelling(&path_text) {
-                if arguments.len() != intrinsic.arity() {
-                    return Ok(Self::position_type(
-                        Resolution::Poisoned(self.record_arity_error(
-                            source,
-                            origin,
-                            intrinsic.arity(),
-                            arguments.len(),
-                        )?),
-                        None,
-                    ));
-                }
-                let children = TypeChildren::new(
-                    arguments
-                        .iter()
-                        .enumerate()
-                        .map(|(index, &id)| {
-                            Self::type_child(
-                                request,
-                                id,
-                                position.intrinsic_argument(intrinsic, index),
-                            )
-                        })
-                        .collect(),
-                );
-                return self.advance_type_children(
-                    request,
-                    TypeContinuation::Intrinsic(intrinsic, children),
-                );
+                return self.prepare_intrinsic_plan(request, intrinsic, arguments, origin);
             }
             if path_text == "Union" {
                 if arguments.len() < 2 {
@@ -201,6 +161,17 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 return Ok(Self::position_type(Resolution::Unperformed, None));
             }
         };
+        if let CanonicalTarget::Primitive(primitive) = target {
+            let result = if arguments.is_empty() {
+                Resolution::Known(self.types.primitive(primitive)?)
+            } else {
+                Resolution::Poisoned(self.record_arity_error(source, origin, 0, arguments.len())?)
+            };
+            return Ok(Self::position_type(result, Some(target)));
+        }
+        if let CanonicalTarget::Intrinsic(intrinsic) = target {
+            return self.prepare_intrinsic_plan(request, intrinsic, arguments, origin);
+        }
         let kind = self.target_kind(&target)?;
         match self.source_head_state(&target)? {
             Resolution::Known(()) => {}
@@ -221,6 +192,18 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     return match target {
                         CanonicalTarget::External(_) => {
                             Ok(Self::position_type(Resolution::Unperformed, Some(target)))
+                        }
+                        CanonicalTarget::Primitive(primitive) => {
+                            Err(SignatureResolutionError::UnexpectedPrimitiveTarget {
+                                primitive,
+                                expected: "a nominal declaration",
+                            })
+                        }
+                        CanonicalTarget::Intrinsic(intrinsic) => {
+                            Err(SignatureResolutionError::UnexpectedIntrinsicTarget {
+                                intrinsic,
+                                expected: "a nominal declaration",
+                            })
                         }
                         CanonicalTarget::Source(_) => {
                             Err(SignatureResolutionError::MissingTrustedSignature(target))
@@ -287,5 +270,40 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 Some(target),
             )),
         }
+    }
+
+    fn prepare_intrinsic_plan(
+        &mut self,
+        request: &TypeRequest,
+        intrinsic: IntrinsicNominal,
+        arguments: &[TypeRefId],
+        origin: OriginId,
+    ) -> Result<TypePlan, SignatureResolutionError> {
+        if arguments.len() != intrinsic.arity() {
+            let source = self.sources[&request.site.file];
+            return Ok(Self::position_type(
+                Resolution::Poisoned(self.record_arity_error(
+                    source,
+                    origin,
+                    intrinsic.arity(),
+                    arguments.len(),
+                )?),
+                None,
+            ));
+        }
+        let children = TypeChildren::new(
+            arguments
+                .iter()
+                .enumerate()
+                .map(|(index, &id)| {
+                    Self::type_child(
+                        request,
+                        id,
+                        request.position.intrinsic_argument(intrinsic, index),
+                    )
+                })
+                .collect(),
+        );
+        self.advance_type_children(request, TypeContinuation::Intrinsic(intrinsic, children))
     }
 }

@@ -2,6 +2,8 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
+use crate::DeclarationKind;
+
 mod identity;
 mod semantic;
 
@@ -98,6 +100,31 @@ impl CanonicalFingerprintBuilder {
         self.write_u8(u8::from(value));
     }
 
+    /// Encode a declaration role independently of Rust enum layout.
+    pub fn write_declaration_kind(&mut self, kind: DeclarationKind) {
+        self.write_u8(match kind {
+            DeclarationKind::Function => 0,
+            DeclarationKind::ExternFunction => 1,
+            DeclarationKind::IntrinsicConstructor => 2,
+            DeclarationKind::Trait => 3,
+            DeclarationKind::Impl => 4,
+            DeclarationKind::Struct => 5,
+            DeclarationKind::Enum => 6,
+            DeclarationKind::OpaqueType => 7,
+            DeclarationKind::EnumVariant => 8,
+            DeclarationKind::EnumVariantField => 9,
+            DeclarationKind::TypeAlias => 10,
+            DeclarationKind::Const => 11,
+            DeclarationKind::AssociatedType => 12,
+            DeclarationKind::AssociatedTypeBinding => 13,
+            DeclarationKind::StorageField => 14,
+            DeclarationKind::Property => 15,
+            DeclarationKind::GenericParameter => 16,
+            DeclarationKind::PrimitiveType => 17,
+            DeclarationKind::IntrinsicType => 18,
+        });
+    }
+
     pub fn write_u32(&mut self, value: u32) {
         self.hasher.update(value.to_le_bytes());
     }
@@ -165,6 +192,50 @@ fingerprint_type!(ConformanceComponentFingerprint);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declaration_kind_encoding_preserves_schema_v1_wire_tags() {
+        let wire_tags = [
+            (DeclarationKind::Function, 0),
+            (DeclarationKind::ExternFunction, 1),
+            (DeclarationKind::IntrinsicConstructor, 2),
+            (DeclarationKind::Trait, 3),
+            (DeclarationKind::Impl, 4),
+            (DeclarationKind::Struct, 5),
+            (DeclarationKind::Enum, 6),
+            (DeclarationKind::OpaqueType, 7),
+            (DeclarationKind::EnumVariant, 8),
+            (DeclarationKind::EnumVariantField, 9),
+            (DeclarationKind::TypeAlias, 10),
+            (DeclarationKind::Const, 11),
+            (DeclarationKind::AssociatedType, 12),
+            (DeclarationKind::AssociatedTypeBinding, 13),
+            (DeclarationKind::StorageField, 14),
+            (DeclarationKind::Property, 15),
+            (DeclarationKind::GenericParameter, 16),
+            (DeclarationKind::PrimitiveType, 17),
+            (DeclarationKind::IntrinsicType, 18),
+        ];
+        for domain in [
+            FingerprintDomain::DeclarationDiscriminator,
+            FingerprintDomain::Interface,
+            FingerprintDomain::Catalog,
+        ] {
+            for (kind, tag) in wire_tags {
+                let mut actual = CanonicalFingerprintBuilder::new(domain);
+                actual.write_str("before");
+                actual.write_declaration_kind(kind);
+                actual.write_str("after");
+
+                let mut expected = CanonicalFingerprintBuilder::new(domain);
+                expected.write_str("before");
+                expected.write_u8(tag);
+                expected.write_str("after");
+
+                assert_eq!(actual.finish(), expected.finish(), "{domain:?}: {kind:?}");
+            }
+        }
+    }
 
     #[test]
     fn canonical_encoding_separates_domains_and_value_boundaries() {

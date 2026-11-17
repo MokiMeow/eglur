@@ -285,6 +285,26 @@ Message contract summary:
 3. `forbidden`.
 
 
+### `MEMBER_NOT_FOUND`
+
+Severity: `error`
+
+Trigger: a value-member read or stored-field assignment selects a name that
+the receiver's static type does not expose as a stored field or property.
+This code does not apply to method calls or owner-qualified callable references.
+
+The primary span MUST identify the selected member-name token. Structured data
+MUST include `member` and `receiver_type`. The latter identifies the canonical
+type whose fields and properties are queried, with transparent aliases expanded.
+For a receiver of type `&T` or `&mut T`, it reports `T`.
+Missing compiler input is not proof that a member is absent.
+
+Message contract summary:
+
+1. `member`.
+2. `not found`.
+
+
 ### `METHOD_NOT_FOUND`
 
 Severity: `error`
@@ -482,7 +502,7 @@ The producer MUST NOT invent an `actual_type` for an unselected overload set.
 Severity: `error`
 
 Trigger: a struct literal or variant-constructor head resolves to exactly one
-declaration, but that declaration's normalized semantic kind is not valid for
+binding, but that binding's normalized semantic kind is not valid for
 the written constructor surface. A struct literal requires `struct`; a variant
 constructor requires `variant_constructor`.
 
@@ -495,10 +515,10 @@ Message contract summary:
 
 Data contract summary:
 
-1. `target`: the selected source declaration name or trusted catalog identity.
+1. `target`: the selected source name, primitive type name, or trusted catalog identity.
 2. `expected_kind`: `struct` or `variant_constructor`, according to the written
    surface.
-3. `actual_kind`: the selected declaration's normalized semantic target kind.
+3. `actual_kind`: the selected binding's normalized semantic target kind.
 
 `expected_kind` and `actual_kind` use the closed target-kind vocabulary in
 `data-keys.md`. Unresolved, ambiguous, inaccessible, poisoned, or unperformed

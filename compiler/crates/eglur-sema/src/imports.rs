@@ -199,6 +199,21 @@ fn locate_import_module(
         .module(importer)
         .expect("import record owner belongs to declaration collection");
     let target = import.target();
+    if let [root, prelude, name] = target
+        && !root.is_bang()
+        && root.text() == "std"
+        && !prelude.is_bang()
+        && prelude.text() == "prelude"
+        && crate::type_namespace::builtin_prelude_binding(name).is_some()
+    {
+        return Ok(ModuleLookup::Found(PlannedImport {
+            module: ImportModuleTarget::External(
+                ModuleAddress::new([Box::<str>::from("std"), Box::<str>::from("prelude")])
+                    .expect("builtin prelude address is non-empty"),
+            ),
+            symbols: Box::new([name.clone()]),
+        }));
+    }
     let first = target
         .first()
         .expect("declaration collection rejects empty import paths");
@@ -317,11 +332,13 @@ impl ImportAnalysisUnit {
     }
 }
 
-/// Canonical declaration identity selected by source or trusted metadata.
+/// Canonical source, trusted declaration, or built-in type binding identity.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CanonicalTarget {
     Source(DefId),
     External(ExternalDefId),
+    Primitive(crate::PrimitiveType),
+    Intrinsic(crate::IntrinsicNominal),
 }
 
 /// One namespace binding introduced by a resolved import entry.
@@ -630,12 +647,32 @@ fn attempt_import(
     let mut bindings = Vec::new();
     match planned.module() {
         ImportModuleTarget::External(module) => {
+            if module.as_str() == "std::prelude"
+                && let Some(builtin) = crate::type_namespace::builtin_prelude_binding(symbol)
+            {
+                bindings.push(ImportedBinding {
+                    local_name: local_name.clone(),
+                    namespace: Namespace::Type,
+                    targets: Box::new([builtin]),
+                    public: import.visibility().is_public(),
+                });
+            }
             let Some(environment) = external else {
+                if !bindings.is_empty() {
+                    return Ok(ImportAttempt::Ready(bindings));
+                }
                 return Err(ImportResolutionError::MissingCapabilityInput(
                     CompileCapability::Resolve(ResolveCapability::ResolveTrustedExternalNames),
                 ));
             };
             for namespace in [Namespace::Value, Namespace::Type] {
+                if namespace == Namespace::Type
+                    && bindings
+                        .iter()
+                        .any(|binding| binding.namespace == Namespace::Type)
+                {
+                    continue;
+                }
                 let candidates = environment.module_candidates(module, namespace, symbol);
                 if !candidates.is_empty() {
                     bindings.push(ImportedBinding {
@@ -782,7 +819,9 @@ fn target_is_public(collection: &DeclarationCollection, target: &CanonicalTarget
         CanonicalTarget::Source(id) => collection
             .declaration(*id)
             .is_some_and(|declaration| declaration.visibility().is_public()),
-        CanonicalTarget::External(_) => true,
+        CanonicalTarget::External(_)
+        | CanonicalTarget::Primitive(_)
+        | CanonicalTarget::Intrinsic(_) => true,
     }
 }
 
@@ -826,6 +865,8 @@ fn validate_import_bang(
         .iter()
         .flat_map(ImportedBinding::targets)
         .any(|target| match target {
+            CanonicalTarget::Primitive(_) => false,
+            CanonicalTarget::Intrinsic(_) => false,
             CanonicalTarget::Source(id) => collection
                 .declaration(*id)
                 .and_then(|declaration| declaration.name())

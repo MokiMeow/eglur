@@ -269,7 +269,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 };
                 let related = match previous.declaration() {
                     CanonicalTarget::Source(previous) => Some(*previous),
-                    CanonicalTarget::External(_) => None,
+                    CanonicalTarget::External(_)
+                    | CanonicalTarget::Primitive(_)
+                    | CanonicalTarget::Intrinsic(_) => None,
                 };
                 let poison =
                     self.source_impl_header_error(declaration_id, code, message, related)?;

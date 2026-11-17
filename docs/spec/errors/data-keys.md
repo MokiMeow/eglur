@@ -91,7 +91,7 @@ Type-system diagnostics use keys according to the compared semantic facts:
    an arbitrary `expected_type` merely to avoid the conditional shape.
 9. A constructor-target comparison uses `expected_kind` and `actual_kind`.
    Both values use this closed normalized vocabulary: `function`,
-   `variant_constructor`, `trait`, `impl`, `struct`, `nominal_type`, `enum`,
+   `variant_constructor`, `trait`, `impl`, `struct`, `nominal_type`, `primitive_type`, `enum`,
    `field`, `type_alias`, `const`, `associated_type`,
    `associated_type_binding`, `property`, and `generic_parameter`.
    Implementations MUST NOT expose internal declaration or signature enum names

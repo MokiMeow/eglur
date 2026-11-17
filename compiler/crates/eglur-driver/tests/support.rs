@@ -122,7 +122,7 @@ fn capability_trace_deduplicates_locations_and_rejects_profile_drift() {
     assert!(matches!(analysis.product(), PhaseProduct::Performed(_)));
     let mut demands = analysis.demands().to_vec();
     demands.reverse();
-    demands.push(demands[0]);
+    demands.push(demands[0].clone());
 
     let trace = CapabilityTrace::from_demands(&supported, demands.clone()).unwrap();
     assert!(!trace.has_missing());
@@ -141,7 +141,7 @@ fn capability_trace_deduplicates_locations_and_rejects_profile_drift() {
 
     let missing_analysis = collect_declarations(&sources, &unsupported).unwrap();
     let missing =
-        CapabilityTrace::from_demands(&unsupported, missing_analysis.demands().iter().copied())
+        CapabilityTrace::from_demands(&unsupported, missing_analysis.demands().iter().cloned())
             .unwrap();
     assert!(missing.has_missing());
     assert_eq!(missing.missing().count(), 1);
@@ -159,6 +159,18 @@ fn complete_ownership_flow_cannot_be_enabled_before_it_is_implemented() {
     assert!(matches!(
         profile(core.compile_capabilities().chain([full])),
         Err(SupportProfileError::UnimplementedCapability(capability)) if capability == full
+    ));
+}
+
+#[test]
+fn trusted_inherent_resolution_requires_the_method_operation() {
+    let trusted = CompileCapability::Typecheck(
+        eglur_sema::TypecheckCapability::ResolveTrustedInherentMethods,
+    );
+    let core = SupportProfile::semantic_core_v1();
+    assert!(matches!(
+        profile(core.compile_capabilities().filter(|capability| *capability != CompileCapability::Typecheck(eglur_sema::TypecheckCapability::ResolveMethods))),
+        Err(SupportProfileError::MissingPrerequisite { capability, prerequisite }) if capability == trusted && prerequisite == CompileCapability::Typecheck(eglur_sema::TypecheckCapability::ResolveMethods)
     ));
 }
 

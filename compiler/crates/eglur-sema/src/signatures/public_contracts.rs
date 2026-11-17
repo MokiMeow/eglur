@@ -108,6 +108,8 @@ fn nameable(collection: &DeclarationCollection, target: &CanonicalTarget) -> boo
             .is_some_and(|declaration| declaration.visibility().is_public()),
         // File-set trusted catalog declarations are externally accessible. Package bridges
         // have a separate contract and are not decided by this predicate.
-        CanonicalTarget::External(_) => true,
+        CanonicalTarget::External(_)
+        | CanonicalTarget::Primitive(_)
+        | CanonicalTarget::Intrinsic(_) => true,
     }
 }

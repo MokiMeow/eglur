@@ -10,7 +10,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let BodyContext { module, source, .. } = context;
         let expression = request.expression;
         let origin = request.origin;
-        let target = match self.constructor_target(module, source, expression, origin)? {
+        let target = match self.constructor_target(
+            module,
+            source,
+            expression,
+            origin,
+            request.head_origin,
+            ResolvedTargetKind::Struct,
+        )? {
             Outcome::Known(target) => target,
             Outcome::Poisoned(poison) => {
                 return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
@@ -210,7 +217,19 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             payload,
             ty,
         } = request;
-        let target = match self.constructor_target(module, source, expression, origin)? {
+        let expected = if matches!(payload, ConstructorPayload::Named(_)) {
+            ResolvedTargetKind::Struct
+        } else {
+            ResolvedTargetKind::VariantConstructor
+        };
+        let target = match self.constructor_target(
+            module,
+            source,
+            expression,
+            origin,
+            head_origin,
+            expected,
+        )? {
             Outcome::Known(target) => target,
             Outcome::Poisoned(poison) => {
                 return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
@@ -666,6 +685,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         expression: ExprId,
         origin: OriginId,
+        head_origin: OriginId,
+        expected: ResolvedTargetKind,
     ) -> Result<Outcome<ConstructorTarget>, BodyTypingError> {
         let target = match self
             .names
@@ -698,6 +719,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             FactState::Unperformed => return Ok(Outcome::Unperformed),
         };
+        if matches!(target, CanonicalTarget::Primitive(_)) {
+            let poison = self
+                .constructor_kind_error(
+                    source,
+                    head_origin,
+                    &target,
+                    ResolvedTargetKind::PrimitiveType,
+                    expected,
+                )?
+                .expect("primitive types are not constructor targets");
+            return Ok(Outcome::Poisoned(poison));
+        }
         let signature = match self.signatures.declaration(&target) {
             FactState::Known(signature) => signature.clone(),
             FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
@@ -724,12 +757,28 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: &ConstructorTarget,
         expected: ResolvedTargetKind,
     ) -> Result<Option<Poison>, BodyTypingError> {
-        let actual = target.kind;
+        self.constructor_kind_error(
+            source,
+            head_origin,
+            &target.declaration,
+            target.kind,
+            expected,
+        )
+    }
+
+    fn constructor_kind_error(
+        &mut self,
+        source: &SemanticSource<'_>,
+        head_origin: OriginId,
+        target: &CanonicalTarget,
+        actual: ResolvedTargetKind,
+        expected: ResolvedTargetKind,
+    ) -> Result<Option<Poison>, BodyTypingError> {
         if actual == expected {
             return Ok(None);
         }
-        let target_label = self.target_label(&target.declaration);
-        let related = self.target_span(&target.declaration).map(|span| {
+        let target_label = self.target_label(target);
+        let related = self.target_span(target).map(|span| {
             RelatedSpan::new(span, "target declared here")
                 .expect("static related-span label is non-empty")
         });
@@ -820,6 +869,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: &'target CanonicalTarget,
     ) -> Option<&'target str> {
         match target {
+            CanonicalTarget::Primitive(primitive) => Some(primitive.spelling()),
+            CanonicalTarget::Intrinsic(intrinsic) => Some(intrinsic.spelling()),
             CanonicalTarget::Source(declaration) => self
                 .collection
                 .declaration(*declaration)

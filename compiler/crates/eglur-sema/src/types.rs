@@ -3,28 +3,56 @@ use std::fmt;
 
 use crate::{CanonicalTarget, DefId, ExternalDefId, IdentityOverflow, SubstId, TypeId};
 
-/// Concrete language-intrinsic scalar and singleton types.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum PrimitiveType {
-    Unit,
-    Bool,
-    Str,
-    I8,
-    I16,
-    I32,
-    I64,
-    U8,
-    U16,
-    U32,
-    U64,
-    F16,
-    Bf16,
-    F32,
-    F64,
-    Complex64,
-    Complex128,
-    Nat,
-    PositiveNat,
+macro_rules! primitive_types {
+    ($($variant:ident => $spelling:literal),+ $(,)?) => {
+        /// Concrete language-intrinsic scalar and singleton types.
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub enum PrimitiveType {
+            $($variant),+
+        }
+
+        impl PrimitiveType {
+            pub const ALL: [Self; [$(stringify!($variant)),+].len()] = [$(Self::$variant),+];
+
+            /// Returns the canonical source spelling of this primitive.
+            #[must_use]
+            pub const fn spelling(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $spelling),+
+                }
+            }
+
+            #[must_use]
+            pub fn from_spelling(spelling: &str) -> Option<Self> {
+                match spelling {
+                    $($spelling => Some(Self::$variant)),+,
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+primitive_types! {
+    Unit => "Unit",
+    Bool => "Bool",
+    Str => "Str",
+    I8 => "i8",
+    I16 => "i16",
+    I32 => "i32",
+    I64 => "i64",
+    U8 => "u8",
+    U16 => "u16",
+    U32 => "u32",
+    U64 => "u64",
+    F16 => "f16",
+    Bf16 => "bf16",
+    F32 => "f32",
+    F64 => "f64",
+    Complex64 => "complex64",
+    Complex128 => "complex128",
+    Nat => "Nat",
+    PositiveNat => "PositiveNat",
 }
 
 impl PrimitiveType {
@@ -68,58 +96,6 @@ impl PrimitiveType {
             Self::Complex64 => Some(13),
             Self::Complex128 => Some(14),
             Self::Unit | Self::Str | Self::Nat | Self::PositiveNat => None,
-        }
-    }
-
-    /// Returns the canonical source spelling of this primitive.
-    #[must_use]
-    pub const fn spelling(self) -> &'static str {
-        match self {
-            Self::Unit => "Unit",
-            Self::Bool => "Bool",
-            Self::Str => "Str",
-            Self::I8 => "i8",
-            Self::I16 => "i16",
-            Self::I32 => "i32",
-            Self::I64 => "i64",
-            Self::U8 => "u8",
-            Self::U16 => "u16",
-            Self::U32 => "u32",
-            Self::U64 => "u64",
-            Self::F16 => "f16",
-            Self::Bf16 => "bf16",
-            Self::F32 => "f32",
-            Self::F64 => "f64",
-            Self::Complex64 => "complex64",
-            Self::Complex128 => "complex128",
-            Self::Nat => "Nat",
-            Self::PositiveNat => "PositiveNat",
-        }
-    }
-
-    #[must_use]
-    pub fn from_spelling(spelling: &str) -> Option<Self> {
-        match spelling {
-            "Unit" => Some(Self::Unit),
-            "Bool" => Some(Self::Bool),
-            "Str" => Some(Self::Str),
-            "i8" => Some(Self::I8),
-            "i16" => Some(Self::I16),
-            "i32" => Some(Self::I32),
-            "i64" => Some(Self::I64),
-            "u8" => Some(Self::U8),
-            "u16" => Some(Self::U16),
-            "u32" => Some(Self::U32),
-            "u64" => Some(Self::U64),
-            "f16" => Some(Self::F16),
-            "bf16" => Some(Self::Bf16),
-            "f32" => Some(Self::F32),
-            "f64" => Some(Self::F64),
-            "complex64" => Some(Self::Complex64),
-            "complex128" => Some(Self::Complex128),
-            "Nat" => Some(Self::Nat),
-            "PositiveNat" => Some(Self::PositiveNat),
-            _ => None,
         }
     }
 }
@@ -311,8 +287,10 @@ pub struct CanonicalTypeStore {
     never: TypeId,
     types: Vec<TypeKind>,
     may_need_generic_substitution: Vec<bool>,
+    ownership_presence: Vec<Option<bool>>,
     type_ids: BTreeMap<TypeKind, TypeId>,
     substitutions: Vec<Box<[TypeId]>>,
+    substitution_ownership_presence: Vec<Option<bool>>,
     substitution_ids: BTreeMap<Box<[TypeId]>, SubstId>,
     nominal_arities: BTreeMap<NominalHead, usize>,
 }
@@ -324,8 +302,10 @@ impl CanonicalTypeStore {
             never,
             types: Vec::new(),
             may_need_generic_substitution: Vec::new(),
+            ownership_presence: Vec::new(),
             type_ids: BTreeMap::new(),
             substitutions: Vec::new(),
+            substitution_ownership_presence: Vec::new(),
             substitution_ids: BTreeMap::new(),
             nominal_arities: BTreeMap::new(),
         };
@@ -355,6 +335,12 @@ impl CanonicalTypeStore {
         head: NominalHead,
         arity: usize,
     ) -> Result<(), TypeStoreError> {
+        if let NominalHead::Declaration(CanonicalTarget::Primitive(primitive)) = head {
+            return Err(TypeStoreError::PrimitiveNominalHead(primitive));
+        }
+        if let NominalHead::Declaration(CanonicalTarget::Intrinsic(intrinsic)) = head {
+            return Err(TypeStoreError::IntrinsicDeclarationHead(intrinsic));
+        }
         if let Some(&existing) = self.nominal_arities.get(&head) {
             if existing != arity {
                 return Err(TypeStoreError::ConflictingNominalArity {
@@ -512,12 +498,17 @@ impl CanonicalTypeStore {
             return Ok(id);
         }
         let id = SubstId::from_index(self.substitutions.len())?;
+        let ownership_presence = self.ownership_presence_for_types(arguments.iter().copied());
         self.substitution_ids.insert(arguments.clone(), id);
         self.substitutions.push(arguments);
+        self.substitution_ownership_presence
+            .push(ownership_presence);
         Ok(id)
     }
 
     pub fn kind(&self, id: TypeId) -> Result<&TypeKind, TypeStoreError> {
+        #[cfg(test)]
+        ownership_presence_tests::observe_kind_read();
         self.types
             .get(id.index())
             .ok_or(TypeStoreError::UnknownType(id))
@@ -581,6 +572,12 @@ impl CanonicalTypeStore {
     }
 
     pub fn contains_ownership(&self, root: TypeId) -> Result<bool, TypeStoreError> {
+        self.require_type(root)?;
+        if let Some(present) = self.ownership_presence[root.index()] {
+            return Ok(present);
+        }
+
+        // Incomplete private metadata retains the original fallible traversal.
         self.contains(root, |kind| {
             matches!(
                 kind,
@@ -806,13 +803,49 @@ impl CanonicalTypeStore {
         }
         let id = TypeId::from_index(self.types.len())?;
         let may_need_generic_substitution = self.kind_needs_generic_substitution(&kind);
+        let ownership_presence = self.kind_ownership_presence(&kind);
         self.type_ids.insert(kind.clone(), id);
         self.types.push(kind);
         self.may_need_generic_substitution
             .push(may_need_generic_substitution);
+        self.ownership_presence.push(ownership_presence);
         #[cfg(test)]
         substitution_tests::observe_admission();
         Ok(id)
+    }
+
+    fn kind_ownership_presence(&self, kind: &TypeKind) -> Option<bool> {
+        match kind {
+            TypeKind::Nominal {
+                head: NominalHead::Intrinsic(IntrinsicNominal::Own),
+                ..
+            } => Some(true),
+            TypeKind::Nominal { substitution, .. } => self
+                .substitution_ownership_presence
+                .get(substitution.index())
+                .copied()
+                .flatten(),
+            _ => self.ownership_presence_for_types(
+                self.payload_dependencies_for_kind(kind)
+                    .ok()?
+                    .filter_map(|dependency| match dependency {
+                        PayloadDependency::Type(child) => Some(child),
+                        PayloadDependency::Projection(_) => None,
+                    }),
+            ),
+        }
+    }
+
+    fn ownership_presence_for_types(&self, children: impl Iterator<Item = TypeId>) -> Option<bool> {
+        let mut present = false;
+        for child in children {
+            present |= self
+                .ownership_presence
+                .get(child.index())
+                .copied()
+                .flatten()?;
+        }
+        Some(present)
     }
 
     fn require_type(&self, id: TypeId) -> Result<(), TypeStoreError> {
@@ -871,6 +904,8 @@ pub enum TypeStoreError {
     UnknownType(TypeId),
     UnknownSubstitution(SubstId),
     UnregisteredNominalHead(NominalHead),
+    PrimitiveNominalHead(PrimitiveType),
+    IntrinsicDeclarationHead(IntrinsicNominal),
     ConflictingNominalArity {
         head: NominalHead,
         existing: usize,
@@ -895,6 +930,18 @@ impl fmt::Display for TypeStoreError {
             Self::UnregisteredNominalHead(head) => {
                 write!(formatter, "unregistered nominal type head {head:?}")
             }
+            Self::PrimitiveNominalHead(primitive) => {
+                write!(
+                    formatter,
+                    "primitive {} is not a nominal type head",
+                    primitive.spelling()
+                )
+            }
+            Self::IntrinsicDeclarationHead(intrinsic) => write!(
+                formatter,
+                "intrinsic {} must use its canonical nominal head",
+                intrinsic.spelling()
+            ),
             Self::ConflictingNominalArity {
                 head,
                 existing,
@@ -924,6 +971,8 @@ impl From<IdentityOverflow> for TypeStoreError {
     }
 }
 
+#[cfg(test)]
+mod ownership_presence_tests;
 mod rewrite;
 
 #[cfg(test)]
@@ -949,6 +998,62 @@ mod tests {
 
     fn external(key: &str) -> CanonicalTarget {
         CanonicalTarget::External(ExternalDefId::new(key).unwrap())
+    }
+
+    #[test]
+    fn primitive_spellings_roundtrip_without_alias_or_case_normalization() {
+        let mut spellings = BTreeSet::new();
+        for primitive in PrimitiveType::ALL {
+            assert!(spellings.insert(primitive.spelling()));
+            assert_eq!(
+                PrimitiveType::from_spelling(primitive.spelling()),
+                Some(primitive)
+            );
+        }
+        for unknown in ["", "bool", "I32", "Int32", "std::prelude::i32"] {
+            assert_eq!(PrimitiveType::from_spelling(unknown), None);
+        }
+    }
+
+    #[test]
+    fn primitive_bindings_cannot_be_admitted_as_nominal_heads() {
+        let mut store = CanonicalTypeStore::new().unwrap();
+        for primitive in PrimitiveType::ALL {
+            let head = NominalHead::Declaration(CanonicalTarget::Primitive(primitive));
+            assert!(store.register_nominal_head(head.clone(), 0).is_err());
+            assert_eq!(store.nominal_arity(&head), None);
+            assert!(store.nominal(head, []).is_err());
+
+            let ty = store.primitive(primitive).unwrap();
+            assert_eq!(store.kind(ty).unwrap(), &TypeKind::Primitive(primitive));
+        }
+    }
+
+    #[test]
+    fn intrinsic_bindings_cannot_be_wrapped_in_declaration_nominal_heads() {
+        let mut store = CanonicalTypeStore::new().unwrap();
+        let scalar = store.primitive(PrimitiveType::I64).unwrap();
+        for intrinsic in [
+            IntrinsicNominal::Own,
+            IntrinsicNominal::Box,
+            IntrinsicNominal::Opt,
+            IntrinsicNominal::Res,
+        ] {
+            let duplicate = NominalHead::Declaration(CanonicalTarget::Intrinsic(intrinsic));
+            assert_eq!(
+                store.register_nominal_head(duplicate.clone(), intrinsic.arity()),
+                Err(TypeStoreError::IntrinsicDeclarationHead(intrinsic))
+            );
+            assert_eq!(store.nominal_arity(&duplicate), None);
+            let arguments = vec![scalar; intrinsic.arity()];
+            assert!(store.nominal(duplicate, arguments.iter().copied()).is_err());
+            let ty = store
+                .nominal(NominalHead::Intrinsic(intrinsic), arguments)
+                .unwrap();
+            assert!(
+                matches!(store.kind(ty).unwrap(), TypeKind::Nominal { head: NominalHead::Intrinsic(found), .. } if *found == intrinsic)
+            );
+        }
     }
 
     #[test]

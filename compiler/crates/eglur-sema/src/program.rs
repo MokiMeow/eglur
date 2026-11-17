@@ -413,7 +413,7 @@ pub fn seal_checked_program(
     trace: &CapabilityTrace,
     diagnostics: &mut DiagnosticStore,
 ) -> Result<Option<CheckedProgram>, ProgramSealError> {
-    if diagnostics.has_errors() || trace.has_missing() {
+    if diagnostics.has_errors() || trace.has_unsupported() {
         return Ok(None);
     }
     validate_source_set(&sources, &resolution)?;

@@ -19,10 +19,10 @@ mod support_manifest;
 
 pub use catalog::{TrustedCatalog, TrustedCatalogError};
 pub use compile_attempt::{
-    CompileAttempt, CompileAttemptError, CompileDisposition, CompilerOutputError,
-    CompilerResultProjection, DevelopmentAttemptProjection, MAX_COMPILER_RESULT_BYTES,
-    MissingCapabilityTrace, NoMissingCapabilityTrace, RejectedAttempt, SucceededAttempt, ToolLimit,
-    ToolLimitExceededAttempt, UnsupportedAttempt,
+    AvailableCapabilityTrace, CompileAttempt, CompileAttemptError, CompileDisposition,
+    CompilerOutputError, CompilerResultProjection, DevelopmentAttemptProjection,
+    MAX_COMPILER_RESULT_BYTES, RejectedAttempt, SucceededAttempt, ToolLimit,
+    ToolLimitExceededAttempt, UnsupportedAttempt, UnsupportedCapabilityTrace,
 };
 pub use eglur_eval::{
     CompletedExecution, EvaluationLimits, ExecutionAttempt, ExecutionCapability, ExecutionOutcome,

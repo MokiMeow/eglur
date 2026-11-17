@@ -93,13 +93,19 @@ enum InvocationContract {
 }
 
 impl InvocationContract {
-    fn generic_parameters(&self) -> &[GenericParameterId] {
-        match self {
+    fn generic_parameters<'a>(
+        &'a self,
+        signatures: &'a DeclarationSignatures,
+    ) -> Result<&'a [GenericParameterId], BodyTypingError> {
+        Ok(match self {
             Self::Callable { callable, .. } => callable.generic_parameters(),
             Self::CallableValue { .. } => &[],
-            Self::Method { candidate, .. } => &candidate.explicit_parameters,
+            Self::Method { candidate, .. } => signatures
+                .callable(candidate.callable.id())
+                .ok_or(BodyTypingError::UnknownCallable(candidate.callable.id()))?
+                .generic_parameters(),
             Self::Constructor { parameters, .. } => parameters,
-        }
+        })
     }
 
     fn callee(&self) -> Option<ExprId> {
@@ -672,6 +678,39 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
 
         let BodyContext { module, source, .. } = context;
+        if let InvocationContract::Method { candidate, .. } = &frame.contract
+            && let Some(constraint) = &candidate.owner_constraint
+            && !constraint.matches(self.signatures.types_mut(), &application.replacements)?
+        {
+            let expected = self
+                .signatures
+                .types_mut()
+                .substitute(constraint.pattern(), &application.replacements)?;
+            return Ok(Outcome::Poisoned(self.type_error(
+                source,
+                frame.origin,
+                "CALL_ARG_TYPE_MISMATCH",
+                "type arguments do not match the qualified owner",
+                BTreeMap::from([
+                    (
+                        Box::<str>::from("reason"),
+                        DiagnosticDataValue::from("parameter_type"),
+                    ),
+                    (
+                        Box::<str>::from("parameter"),
+                        DiagnosticDataValue::from("owner"),
+                    ),
+                    (
+                        Box::<str>::from("expected_type"),
+                        DiagnosticDataValue::from(self.format_type(expected)?),
+                    ),
+                    (
+                        Box::<str>::from("actual_type"),
+                        DiagnosticDataValue::from(self.format_type(constraint.subject())?),
+                    ),
+                ]),
+            )?));
+        }
         if let InvocationContract::Callable { callable, .. } = &frame.contract
             && let Some(poison) = self.check_callable_requirements(
                 source,
@@ -684,11 +723,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
 
         let key = ExpressionKey::new(module, frame.expression);
+        let parameters = frame.contract.generic_parameters(self.signatures)?.to_vec();
         self.record_trait_obligations(
             key,
             source,
             frame.origin,
-            frame.contract.generic_parameters(),
+            &parameters,
             &application.replacements,
         )?;
         let target = match &frame.contract {
@@ -700,8 +740,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 ty: *ty,
             },
             InvocationContract::Method { candidate, .. } => {
-                let arguments = candidate
-                    .explicit_parameters
+                let arguments = parameters
                     .iter()
                     .map(|parameter| {
                         application

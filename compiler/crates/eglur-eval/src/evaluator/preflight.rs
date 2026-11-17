@@ -636,6 +636,9 @@ impl<'a> Planner<'a> {
                     selected
                 };
                 match &selected.target {
+                    CanonicalTarget::Primitive(_) | CanonicalTarget::Intrinsic(_) => Err(
+                        SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram),
+                    ),
                     CanonicalTarget::Source(declaration) => {
                         let frame = if selected.method.is_some() {
                             self.witness_store
@@ -702,6 +705,9 @@ impl<'a> Planner<'a> {
             selected
         };
         match &selected.target {
+            CanonicalTarget::Primitive(_) | CanonicalTarget::Intrinsic(_) => Err(
+                SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram),
+            ),
             CanonicalTarget::Source(declaration) => {
                 let frame = if selected.method.is_some() {
                     self.witness_store
@@ -750,6 +756,9 @@ impl<'a> Planner<'a> {
             ));
         }
         match declaration {
+            CanonicalTarget::Primitive(_) | CanonicalTarget::Intrinsic(_) => Err(
+                SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram),
+            ),
             CanonicalTarget::Source(_) => self.require(ExecutionCapability::Aggregates),
             CanonicalTarget::External(declaration) => self.plan_hook(declaration).map(|_| ()),
         }

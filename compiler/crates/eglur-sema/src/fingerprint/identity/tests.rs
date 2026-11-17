@@ -21,6 +21,36 @@ fn encode(value: &StableType) -> FingerprintDigest {
 }
 
 #[test]
+fn intrinsic_binding_keys_encode_their_identity_without_an_external_declaration() {
+    let keys = StableDeclarationKeys {
+        keys: BTreeMap::new(),
+    };
+    for intrinsic in [
+        IntrinsicNominal::Own,
+        IntrinsicNominal::Box,
+        IntrinsicNominal::Opt,
+        IntrinsicNominal::Res,
+    ] {
+        let canonical = keys.target(&CanonicalTarget::Intrinsic(intrinsic)).unwrap();
+        assert_eq!(canonical, StableTargetKey::Intrinsic(intrinsic));
+        let mut actual = CanonicalFingerprintBuilder::new(FingerprintDomain::Interface);
+        canonical.write_to(&mut actual);
+        let mut expected = CanonicalFingerprintBuilder::new(FingerprintDomain::Interface);
+        expected.write_u8(3);
+        expected.write_str(intrinsic.spelling());
+        assert_eq!(actual.finish(), expected.finish());
+        let mut fabricated = CanonicalFingerprintBuilder::new(FingerprintDomain::Interface);
+        StableTargetKey::External(
+            ExternalDefId::new(format!("std::prelude::{}", intrinsic.spelling())).unwrap(),
+        )
+        .write_to(&mut fabricated);
+        let mut actual = CanonicalFingerprintBuilder::new(FingerprintDomain::Interface);
+        canonical.write_to(&mut actual);
+        assert_ne!(actual.finish(), fabricated.finish());
+    }
+}
+
+#[test]
 fn nested_stable_types_build_encode_compare_and_drop_on_the_default_stack() {
     enum Shape {
         Tuple,

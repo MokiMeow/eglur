@@ -410,6 +410,7 @@ pub fn resolve_names(
         locals: Vec::new(),
         local_by_origin: BTreeMap::new(),
         active_scopes: Vec::new(),
+        current_owner: None,
         next_scope: BTreeMap::new(),
         next_local: BTreeMap::new(),
     };
@@ -435,6 +436,7 @@ struct Resolver<'analysis, 'support> {
     locals: Vec<LocalBinding>,
     local_by_origin: BTreeMap<(ModuleId, BodyId, OriginId), LocalBindingId>,
     active_scopes: Vec<ActiveScope>,
+    current_owner: Option<crate::DefId>,
     next_scope: BTreeMap<(ModuleId, BodyId), usize>,
     next_local: BTreeMap<(ModuleId, BodyId), usize>,
 }
@@ -452,6 +454,24 @@ impl Resolver<'_, '_> {
     }
 
     fn visit_item(
+        &mut self,
+        module: ModuleId,
+        source: &SemanticSource<'_>,
+        hir: &HirFile,
+        item_id: ItemId,
+    ) -> Result<VisitOutcome, NameResolutionError> {
+        let previous_owner = self.current_owner;
+        self.current_owner = self
+            .collection
+            .module(module)
+            .and_then(|module| module.item_def(item_id))
+            .or(previous_owner);
+        let result = self.visit_item_contents(module, source, hir, item_id);
+        self.current_owner = previous_owner;
+        result
+    }
+
+    fn visit_item_contents(
         &mut self,
         module: ModuleId,
         source: &SemanticSource<'_>,
@@ -1092,6 +1112,13 @@ impl Resolver<'_, '_> {
             .ok_or(NameResolutionError::UnknownModule(module))?;
         let decision = if let Some(poison) = module_declarations.declaration_poison() {
             NameLookupDecision::Poisoned(poison.clone())
+        } else if namespace == Namespace::Type
+            && matches!(lookup, UnqualifiedLookup::Ordinary(_))
+            && let Some(target) = self.generic_type_binding(name)
+        {
+            NameLookupDecision::Resolved(ResolvedName::Declarations(Box::new([
+                CanonicalTarget::Source(target),
+            ])))
         } else {
             let candidates = module_declarations.candidates(namespace, name);
             if matches!(lookup, UnqualifiedLookup::Ordinary(_)) && !candidates.is_empty() {
@@ -1102,6 +1129,10 @@ impl Resolver<'_, '_> {
                 && let Some(decision) = self.plan_imported_name(module, namespace, name, false)?
             {
                 decision
+            } else if namespace == Namespace::Type
+                && let Some(builtin) = crate::type_namespace::builtin_prelude_binding(name)
+            {
+                NameLookupDecision::Resolved(ResolvedName::Declarations(Box::new([builtin])))
             } else {
                 requirements.push(CompileCapability::Resolve(
                     ResolveCapability::ResolveTrustedExternalNames,
@@ -1146,6 +1177,21 @@ impl Resolver<'_, '_> {
             name: name.clone(),
             decision,
         })
+    }
+
+    fn generic_type_binding(&self, name: &NameKey) -> Option<crate::DefId> {
+        let mut owner = self.current_owner;
+        while let Some(current) = owner {
+            let candidates =
+                self.collection
+                    .child_candidates(current, name, DeclarationKind::GenericParameter);
+            // Signature validation diagnoses duplicates; they still occupy this tier.
+            if let Some(parameter) = candidates.first() {
+                return Some(*parameter);
+            }
+            owner = self.collection.declaration(current)?.parent();
+        }
+        None
     }
 
     fn lookup_imported_name(
@@ -1300,6 +1346,8 @@ impl Resolver<'_, '_> {
             NameLookupDecision::Resolved(ResolvedName::Declarations(targets)) => {
                 targets.iter().all(|target| {
                     let kind = match target {
+                        CanonicalTarget::Primitive(_) => Some(DeclarationKind::PrimitiveType),
+                        CanonicalTarget::Intrinsic(_) => Some(DeclarationKind::IntrinsicType),
                         CanonicalTarget::Source(id) => self
                             .collection
                             .declaration(*id)
@@ -1368,6 +1416,31 @@ impl Resolver<'_, '_> {
         origin: OriginId,
         purpose: LookupPurpose,
     ) -> Result<ExternalModuleLookup, NameResolutionError> {
+        if let [root, module, name] = segments
+            && root.text() == "std"
+            && !root.is_bang()
+            && module.text() == "prelude"
+            && !module.is_bang()
+            && let Some(builtin) = crate::type_namespace::builtin_prelude_binding(name)
+        {
+            if lookup.direct_namespace() == Namespace::Type {
+                return Ok(ExternalModuleLookup::Matched(VisitOutcome::Resolved(
+                    ResolvedName::Declarations(Box::new([builtin])),
+                )));
+            }
+            let prelude =
+                ModuleAddress::new([Box::<str>::from("std"), Box::<str>::from("prelude")])
+                    .expect("builtin prelude address is non-empty");
+            if !self.external.is_some_and(|external| {
+                !lookup
+                    .external_candidates(external, &prelude, name)
+                    .is_empty()
+            }) {
+                return self
+                    .not_found(source, name, origin, purpose)
+                    .map(ExternalModuleLookup::Matched);
+            }
+        }
         let Some(external) = self.require_external(source, origin)? else {
             return Ok(ExternalModuleLookup::Matched(VisitOutcome::Unperformed));
         };

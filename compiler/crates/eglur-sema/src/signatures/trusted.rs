@@ -5,6 +5,7 @@ use eglur_hir::is_residual_constructor_name;
 use eglur_syntax::is_identifier_spelling;
 
 use super::trusted_method_contracts::validate_trusted_method_contracts;
+use super::{TrustedInherentOwner, TrustedInherentOwnerHead};
 
 use crate::{
     ExternalDefId, GenericParameterId, IntrinsicNominal, NameKey, RawPointerMutability,
@@ -257,11 +258,21 @@ pub struct TrustedSignatureEnvironment {
     pub(super) declarations: Box<[TrustedDeclarationSignature]>,
     pub(super) by_id: BTreeMap<ExternalDefId, usize>,
     hidden_callables: BTreeSet<ExternalDefId>,
+    inherent_owners: BTreeMap<TrustedInherentOwnerHead, TrustedInherentOwner>,
 }
 
 impl TrustedSignatureEnvironment {
     pub fn new(
         declarations: impl IntoIterator<Item = TrustedDeclarationSignature>,
+    ) -> Result<Self, TrustedSignatureError> {
+        Self::with_inherent_owners(declarations, [])
+    }
+
+    /// Admit complete ordinary inventories without inventing nominal identities for builtins.
+    /// Ordinary member signatures spell Self as the explicit complete owner type.
+    pub fn with_inherent_owners(
+        declarations: impl IntoIterator<Item = TrustedDeclarationSignature>,
+        owners: impl IntoIterator<Item = TrustedInherentOwner>,
     ) -> Result<Self, TrustedSignatureError> {
         let mut declarations = declarations.into_iter().collect::<Vec<_>>();
         for declaration in &mut declarations {
@@ -310,13 +321,20 @@ impl TrustedSignatureEnvironment {
                 }
             }
         }
-        let (method_owners, hidden_callables) =
+        let (method_owners, mut hidden_callables) =
             validate_trusted_method_relations(&declarations, &by_id)?;
         validate_trusted_method_contracts(&declarations, &by_id, &method_owners)?;
+        let inherent_owners = super::trusted_inherent::admit_inherent_owners(
+            owners,
+            &declarations,
+            &by_id,
+            &mut hidden_callables,
+        )?;
         Ok(Self {
             declarations: declarations.into_boxed_slice(),
             by_id,
             hidden_callables,
+            inherent_owners,
         })
     }
 
@@ -332,6 +350,16 @@ impl TrustedSignatureEnvironment {
     #[must_use]
     pub fn is_hidden_callable(&self, declaration: &ExternalDefId) -> bool {
         self.hidden_callables.contains(declaration)
+    }
+
+    /// None denotes unavailable metadata, not a complete empty inventory.
+    #[must_use]
+    pub fn inherent_owner(&self, head: &TrustedInherentOwnerHead) -> Option<&TrustedInherentOwner> {
+        self.inherent_owners.get(head)
+    }
+
+    pub fn inherent_owners(&self) -> impl ExactSizeIterator<Item = &TrustedInherentOwner> {
+        self.inherent_owners.values()
     }
 }
 
@@ -591,6 +619,15 @@ fn validate_trusted_method_relations(
 /// Malformed or semantically inconsistent trusted declaration input.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TrustedSignatureError {
+    DuplicateInherentOwner(TrustedInherentOwnerHead),
+    InvalidInherentOwner {
+        head: TrustedInherentOwnerHead,
+        reason: &'static str,
+    },
+    InvalidInherentMember {
+        callable: ExternalDefId,
+        reason: &'static str,
+    },
     DuplicateDeclaration(ExternalDefId),
     InvalidEnumMember {
         owner: ExternalDefId,
@@ -675,6 +712,18 @@ pub enum TrustedSignatureError {
 impl fmt::Display for TrustedSignatureError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::DuplicateInherentOwner(head) => {
+                write!(formatter, "duplicate trusted inherent owner {head:?}")
+            }
+            Self::InvalidInherentOwner { head, reason } => write!(
+                formatter,
+                "invalid trusted inherent owner {head:?}: {reason}"
+            ),
+            Self::InvalidInherentMember { callable, reason } => write!(
+                formatter,
+                "invalid trusted inherent member {}: {reason}",
+                callable.as_str()
+            ),
             Self::DuplicateDeclaration(id) => {
                 write!(formatter, "duplicate trusted signature {}", id.as_str())
             }

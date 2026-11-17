@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::fingerprint::identity::{
-    BinderContext, DeclarationBinderContexts, write_declaration_kind, write_name,
-};
+use crate::fingerprint::identity::{BinderContext, DeclarationBinderContexts, write_name};
 use crate::{
     AssociatedBindingSignature, CallableRequirement, CanonicalFingerprintBuilder, CanonicalTarget,
     ConstructorPayloadSignature, Declaration, DeclarationCollection, DeclarationKind,
@@ -115,6 +113,8 @@ pub(super) fn child_is_externally_reachable(
         | DeclarationKind::OpaqueType
         | DeclarationKind::TypeAlias => declaration.kind() == DeclarationKind::GenericParameter,
         DeclarationKind::Const
+        | DeclarationKind::PrimitiveType
+        | DeclarationKind::IntrinsicType
         | DeclarationKind::AssociatedType
         | DeclarationKind::AssociatedTypeBinding
         | DeclarationKind::EnumVariantField
@@ -283,7 +283,11 @@ pub(super) fn target_error(target: &CanonicalTarget) -> SemanticFingerprintError
         CanonicalTarget::Source(declaration) => {
             SemanticFingerprintError::UnknownStableDeclaration(*declaration)
         }
-        CanonicalTarget::External(_) => unreachable!("external targets are stable"),
+        CanonicalTarget::External(_)
+        | CanonicalTarget::Primitive(_)
+        | CanonicalTarget::Intrinsic(_) => {
+            unreachable!("non-source targets are stable")
+        }
     }
 }
 
@@ -310,7 +314,7 @@ impl InterfaceWriter<'_, '_> {
                 declaration.id(),
             ))?
             .write_to(builder);
-        write_declaration_kind(builder, declaration.kind());
+        builder.write_declaration_kind(declaration.kind());
         builder.write_bool(declaration.visibility().is_public());
         self.write_declaration_signature(builder, declaration)?;
         if declaration.kind() == DeclarationKind::Const {
@@ -344,7 +348,9 @@ impl InterfaceWriter<'_, '_> {
                         target: keys.target(target).ok_or_else(|| target_error(target))?,
                         source: match target {
                             CanonicalTarget::Source(declaration) => Some(*declaration),
-                            CanonicalTarget::External(_) => None,
+                            CanonicalTarget::External(_)
+                            | CanonicalTarget::Primitive(_)
+                            | CanonicalTarget::Intrinsic(_) => None,
                         },
                     });
                 }

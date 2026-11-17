@@ -1,14 +1,17 @@
 mod applications;
 mod error;
 mod generics;
+mod inherent;
 mod model;
 pub(crate) mod public_contracts;
 mod resolver;
 mod trusted;
+mod trusted_inherent;
 mod trusted_method_contracts;
 
 pub use error::SignatureResolutionError;
 pub use generics::GenericParameterSignature;
+pub use inherent::*;
 pub use model::*;
 pub use resolver::{SignatureResolutionInputs, resolve_declaration_signatures};
 pub use trusted::*;

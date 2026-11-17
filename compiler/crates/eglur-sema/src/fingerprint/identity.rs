@@ -50,7 +50,7 @@ impl StableDeclarationKey {
                     overload,
                 } => {
                     builder.write_u8(0);
-                    write_declaration_kind(builder, *kind);
+                    builder.write_declaration_kind(*kind);
                     write_name(builder, name);
                     builder.write_bool(overload.is_some());
                     if let Some(discriminator) = overload {
@@ -75,6 +75,8 @@ impl StableDeclarationKey {
 pub enum StableTargetKey {
     Source(StableDeclarationKey),
     External(ExternalDefId),
+    Primitive(crate::PrimitiveType),
+    Intrinsic(IntrinsicNominal),
 }
 
 impl StableTargetKey {
@@ -87,6 +89,14 @@ impl StableTargetKey {
             Self::External(key) => {
                 builder.write_u8(1);
                 builder.write_str(key.as_str());
+            }
+            Self::Primitive(primitive) => {
+                builder.write_u8(2);
+                builder.write_str(primitive.spelling());
+            }
+            Self::Intrinsic(intrinsic) => {
+                builder.write_u8(3);
+                builder.write_str(intrinsic.spelling());
             }
         }
     }
@@ -113,6 +123,8 @@ impl StableDeclarationKeys {
     #[must_use]
     pub fn target(&self, target: &CanonicalTarget) -> Option<StableTargetKey> {
         match target {
+            CanonicalTarget::Primitive(primitive) => Some(StableTargetKey::Primitive(*primitive)),
+            CanonicalTarget::Intrinsic(intrinsic) => Some(StableTargetKey::Intrinsic(*intrinsic)),
             CanonicalTarget::Source(declaration) => self
                 .source(*declaration)
                 .cloned()
@@ -144,7 +156,11 @@ impl StableDeclarationKeys {
                     CanonicalTarget::Source(declaration) => {
                         StableDeclarationError::UnknownDeclaration(*declaration)
                     }
-                    CanonicalTarget::External(_) => unreachable!("external targets are stable"),
+                    CanonicalTarget::External(_)
+                    | CanonicalTarget::Primitive(_)
+                    | CanonicalTarget::Intrinsic(_) => {
+                        unreachable!("non-source targets are stable")
+                    }
                 })?;
         let arguments = signatures
             .types()
@@ -405,6 +421,8 @@ impl<'a> KeyDeriver<'a> {
         target: &CanonicalTarget,
     ) -> Result<StableTargetKey, StableDeclarationError> {
         match target {
+            CanonicalTarget::Primitive(primitive) => Ok(StableTargetKey::Primitive(*primitive)),
+            CanonicalTarget::Intrinsic(intrinsic) => Ok(StableTargetKey::Intrinsic(*intrinsic)),
             CanonicalTarget::Source(declaration) => {
                 self.derive_one(*declaration).map(StableTargetKey::Source)
             }
@@ -528,7 +546,11 @@ impl StableType {
                 CanonicalTarget::Source(declaration) => {
                     StableDeclarationError::UnknownDeclaration(*declaration)
                 }
-                CanonicalTarget::External(_) => unreachable!("external targets are stable"),
+                CanonicalTarget::External(_)
+                | CanonicalTarget::Primitive(_)
+                | CanonicalTarget::Intrinsic(_) => {
+                    unreachable!("non-source targets are stable")
+                }
             })
         })
     }
@@ -795,31 +817,6 @@ fn write_sequence<T>(
 pub(crate) fn write_name(builder: &mut CanonicalFingerprintBuilder, name: &NameKey) {
     builder.write_str(name.text());
     builder.write_bool(name.is_bang());
-}
-
-pub(crate) fn write_declaration_kind(
-    builder: &mut CanonicalFingerprintBuilder,
-    kind: DeclarationKind,
-) {
-    builder.write_u8(match kind {
-        DeclarationKind::Function => 0,
-        DeclarationKind::ExternFunction => 1,
-        DeclarationKind::IntrinsicConstructor => 2,
-        DeclarationKind::Trait => 3,
-        DeclarationKind::Impl => 4,
-        DeclarationKind::Struct => 5,
-        DeclarationKind::Enum => 6,
-        DeclarationKind::OpaqueType => 7,
-        DeclarationKind::EnumVariant => 8,
-        DeclarationKind::EnumVariantField => 9,
-        DeclarationKind::TypeAlias => 10,
-        DeclarationKind::Const => 11,
-        DeclarationKind::AssociatedType => 12,
-        DeclarationKind::AssociatedTypeBinding => 13,
-        DeclarationKind::StorageField => 14,
-        DeclarationKind::Property => 15,
-        DeclarationKind::GenericParameter => 16,
-    });
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

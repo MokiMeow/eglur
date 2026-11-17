@@ -5,6 +5,58 @@
 # - Diagnostics use structured code/message/data assertions.
 
 tests:
+- id: DTP-shadowed-dtype-name-shares-type-annotation-normalization
+  category: tensor_dtype
+  title: shadowed dtype name shares type annotation normalization
+  code: |
+    import std::tensor::{ones, Tensor}
+    type f32 = f64
+    fn make() -> Tensor[f32] = ones[f32](2)
+    fn as_f64() -> Tensor[f64] = make()
+    fn main!() -> Res[Str, Str] {
+      _ = as_f64()
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
+- id: DTP-shadowed-dtype-name-does-not-redefine-fixed-constructor-family
+  category: tensor_dtype
+  title: shadowed dtype name does not redefine a fixed constructor family
+  code: |
+    import std::tensor::{nan, Tensor}
+    type f32 = f64
+    fn bad() -> Tensor[f32] = nan[f32](2)
+  expect:
+    compile_error:
+      code: CALL_ARG_TYPE_MISMATCH
+      message_contains:
+      - call
+      - argument
+      - type
+      - mismatch
+      data_keys:
+      - reason
+      - actual_type
+      - expected_family
+      data_equals:
+        reason: type_family
+- id: DTP-qualified-primitive-dtype-bypasses-source-type-shadow
+  category: tensor_dtype
+  title: qualified primitive dtype bypasses a source type shadow
+  code: |
+    import std::tensor::{ones, Tensor}
+    struct f32 {}
+    fn make() -> Tensor[std::prelude::f32] = ones[std::prelude::f32](2)
+    fn main!() -> Res[Str, Str] {
+      _ = make()
+      yield Ok("ok")
+    }
+  expect:
+    value:
+      kind: Ok
+      repr: '"ok"'
 - id: DTP-tensor-constructors-support-required-bool-integer-and-float-dtypes
   category: tensor_dtype
   title: Tensor constructors support required bool, integer and float dtypes

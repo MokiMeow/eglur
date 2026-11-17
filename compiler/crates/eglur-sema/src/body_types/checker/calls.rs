@@ -2,6 +2,36 @@ use super::application::ApplicationPlan;
 use super::invocation::InvocationFrame;
 use super::*;
 
+impl QualifiedMethodOwner {
+    pub(super) fn matches_subject(
+        &self,
+        types: &crate::CanonicalTypeStore,
+        subject: TypeId,
+    ) -> Result<bool, crate::TypeStoreError> {
+        if self.fixed_subject.is_some_and(|fixed| fixed != subject) {
+            return Ok(false);
+        }
+        Ok(match (types.kind(subject)?, &self.target) {
+            (TypeKind::Primitive(found), CanonicalTarget::Primitive(owner)) => found == owner,
+            (
+                TypeKind::Nominal {
+                    head: NominalHead::Intrinsic(found),
+                    ..
+                },
+                CanonicalTarget::Intrinsic(owner),
+            ) => found == owner,
+            (
+                TypeKind::Nominal {
+                    head: NominalHead::Declaration(found),
+                    ..
+                },
+                owner,
+            ) => found == owner,
+            _ => false,
+        })
+    }
+}
+
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn qualified_method_owner(
         &mut self,
@@ -9,6 +39,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         written: &CanonicalTarget,
     ) -> Result<Outcome<QualifiedMethodOwner>, BodyTypingError> {
+        if let CanonicalTarget::Primitive(owner) = written {
+            return Ok(Outcome::Known(QualifiedMethodOwner {
+                target: written.clone(),
+                fixed_subject: Some(self.signatures.types_mut().primitive(*owner)?),
+            }));
+        }
+        if matches!(written, CanonicalTarget::Intrinsic(_)) {
+            return Ok(Outcome::Known(QualifiedMethodOwner {
+                target: written.clone(),
+                fixed_subject: None,
+            }));
+        }
         match self.signatures.declaration(written) {
             FactState::Known(DeclarationSignature::TypeAlias {
                 generic_parameters,
@@ -33,18 +75,31 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .map(Outcome::Poisoned);
                 }
                 let value = *value;
-                let TypeKind::Nominal {
-                    head: NominalHead::Declaration(target),
-                    ..
-                } = self.signatures.types().kind(value)?
-                else {
-                    return Ok(Outcome::Known(QualifiedMethodOwner {
-                        target: written.clone(),
-                        fixed_subject: None,
-                    }));
+                if let TypeKind::Primitive(primitive) = self.signatures.types().kind(value)? {
+                    return self.qualified_method_owner(
+                        source,
+                        origin,
+                        &CanonicalTarget::Primitive(*primitive),
+                    );
+                }
+                let target = match self.signatures.types().kind(value)? {
+                    TypeKind::Nominal {
+                        head: NominalHead::Declaration(target),
+                        ..
+                    } => target.clone(),
+                    TypeKind::Nominal {
+                        head: NominalHead::Intrinsic(intrinsic),
+                        ..
+                    } => CanonicalTarget::Intrinsic(*intrinsic),
+                    _ => {
+                        return Ok(Outcome::Known(QualifiedMethodOwner {
+                            target: written.clone(),
+                            fixed_subject: None,
+                        }));
+                    }
                 };
                 Ok(Outcome::Known(QualifiedMethodOwner {
-                    target: target.clone(),
+                    target,
                     fixed_subject: Some(value),
                 }))
             }
@@ -85,23 +140,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             _ => None,
         })
-    }
-
-    pub(super) fn inherent_method_targets(
-        &self,
-        subject: TypeId,
-        name: &NameKey,
-    ) -> Result<Vec<DefId>, BodyTypingError> {
-        let TypeKind::Nominal {
-            head: NominalHead::Declaration(CanonicalTarget::Source(owner)),
-            ..
-        } = self.signatures.types().kind(subject)?
-        else {
-            return Ok(Vec::new());
-        };
-        Ok(self
-            .collection
-            .child_candidates(*owner, name, DeclarationKind::Function))
     }
 
     pub(super) fn inherent_family_is_inaccessible(
@@ -186,6 +224,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 callable,
                 explicit_parameters,
                 preset_replacements: BTreeMap::new(),
+                owner_constraint: None,
                 dispatch: MethodDispatchTemplate::Direct,
             });
         }
@@ -326,6 +365,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             callable,
             explicit_parameters,
             preset_replacements,
+            owner_constraint: None,
             dispatch: MethodDispatchTemplate::Trait {
                 subject,
                 trait_ref: receiver.trait_ref().clone(),

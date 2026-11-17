@@ -4094,6 +4094,44 @@
       },
       "origin": {
         "kind": "file_conformance",
+        "path": "facade.eglur",
+        "suite_id": "core-modules",
+        "test_id": "MOD-qualified-primitive-path-and-reexport-preserve-identity"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "pub import std::prelude::i32 as Count\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "file_conformance",
+        "path": "main.eglur",
+        "suite_id": "core-modules",
+        "test_id": "MOD-qualified-primitive-path-and-reexport-preserve-identity"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "import facade::Count\nstruct i32 {}\nfn identity(value: Count) -> std::prelude::i32 = value\nfn main!() -> Res[Str, Str] = Ok(to_str(identity(7)))\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "file_conformance",
         "path": "src/main.eglur",
         "suite_id": "core-modules",
         "test_id": "MOD-qualified-registry-dependency-resolves-from-canonical-tree"
@@ -13739,6 +13777,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-modules",
+        "test_id": "MOD-ambiguous-scalar-type-import-does-not-fall-back-to-prelude"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "import std::prelude::i32\nimport std::prelude::Bool as i32\nfn identity(value: i32) -> i32 = value\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-modules",
         "test_id": "MOD-bang-import-alias-must-remain-bang"
       },
       "public_examples": [],
@@ -13811,6 +13867,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-modules",
+        "test_id": "MOD-generic-scalar-name-shadows-primitive-type-binding"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn identity[i32](value: i32) -> i32 = value\nfn main!() -> Res[Str, Str] = Ok(to_str(identity::[Bool](true)))\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-modules",
         "test_id": "MOD-local-declaration-shadows-imported-name"
       },
       "public_examples": [],
@@ -13847,12 +13921,66 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-modules",
+        "test_id": "MOD-primitive-type-binding-is-not-a-struct-constructor"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn bad() -> Unit {\n  _ = std::prelude::i32{}\n  yield ()\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-modules",
         "test_id": "MOD-pub-import-is-valid-top-level-item"
       },
       "public_examples": [],
       "source": {
         "kind": "utf8",
         "text": "module app::demo\npub import std::parse::parse_int as parse_int\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-modules",
+        "test_id": "MOD-shadowed-scalar-literal-keeps-canonical-primitive-type"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Bool {}\nfn bad() -> Bool = true\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-modules",
+        "test_id": "MOD-source-scalar-name-shadows-primitive-type-binding"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct i32 {\n  field flag: Bool\n  fn read(self: &Self) -> Bool = self.flag\n}\nfn read(value: i32) -> Bool = i32.read(&value)\nfn main!() -> Res[Str, Str] {\n  let value = i32{flag: true}\n  yield Ok(to_str(read(value)))\n}\n"
       }
     },
     {
@@ -26843,6 +26971,60 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-missing-field-assignment-precedes-value-mismatch"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Point { field x: i32 }\nfn write!(value: &mut Point) -> Unit { value.missing = true }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-missing-field-read-identifies-member-and-receiver"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Point { field x: i32 }\ntype Alias = Point\nfn read(value: &Alias) -> i32 = value.missing // @primary missing-member\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-missing-property-read-is-not-a-method-call"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Cell {\n  prop count: i32 { fn get_count(self: &Self) -> i32 = 0 }\n}\nfn read(value: Cell) -> i32 = value.missing\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-mixed-struct-enum-layout-cycle-requires-indirection"
       },
       "public_examples": [],
@@ -27011,6 +27193,24 @@
       "source": {
         "kind": "utf8",
         "text": "fn inc(x: i64) = wrapping_add(x, 1)\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-named-member-read-on-primitive-is-rejected"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn read(value: &i32) -> Unit = value.missing\n"
       }
     },
     {
@@ -30281,6 +30481,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-variant-fields-are-not-direct-enum-members"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "enum Choice { Item { value: i32 } }\nfn read(value: Choice) -> Unit = value.value\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-vec-only-method-on-array-literal-requires-explicit-to-vec-conversion"
       },
       "public_examples": [],
@@ -32068,12 +32286,66 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "tensor-dtypes",
+        "test_id": "DTP-qualified-primitive-dtype-bypasses-source-type-shadow"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "import std::tensor::{ones, Tensor}\nstruct f32 {}\nfn make() -> Tensor[std::prelude::f32] = ones[std::prelude::f32](2)\nfn main!() -> Res[Str, Str] {\n  _ = make()\n  yield Ok(\"ok\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "tensor-dtypes",
         "test_id": "DTP-rand-constructor-exposes-stable-shape-dtype-and-device-introspection"
       },
       "public_examples": [],
       "source": {
         "kind": "utf8",
         "text": "import std::tensor::{DType, rand!}\n\nfn accepts_f32_dtype(_dtype: DType[f32]) -> Unit = ()\n\nfn main!() -> Res[Str, Str] =\n  result {\n    let x = rand![f32](2,3)\n    _ = x.device()\n    let dtype = x.dtype()\n    accepts_f32_dtype(dtype)\n    let ok = ((to_str(x.shape()) == \"[2,3]\")\n      && (dtype.to_str() == \"f32\")\n      && (to_str(dtype) == \"f32\"))\n    yield Ok(to_str(ok))\n  }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "tensor-dtypes",
+        "test_id": "DTP-shadowed-dtype-name-does-not-redefine-fixed-constructor-family"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "import std::tensor::{nan, Tensor}\ntype f32 = f64\nfn bad() -> Tensor[f32] = nan[f32](2)\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "tensor-dtypes",
+        "test_id": "DTP-shadowed-dtype-name-shares-type-annotation-normalization"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "import std::tensor::{ones, Tensor}\ntype f32 = f64\nfn make() -> Tensor[f32] = ones[f32](2)\nfn as_f64() -> Tensor[f64] = make()\nfn main!() -> Res[Str, Str] {\n  _ = as_f64()\n  yield Ok(\"ok\")\n}\n"
       }
     },
     {
@@ -39315,6 +39587,6 @@
       }
     }
   ],
-  "input_digest": "sha256:93dbdb8ffce353267861614367e2c81a23152b55f1aa5bfb9ba695dc7c4a9d0c",
+  "input_digest": "sha256:3ebf85cb06b64382fe7f6a62f28925d8ba64a2ca0eeae9cec69b8d5d940befdb",
   "schema_version": "0.1"
 }

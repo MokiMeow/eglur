@@ -152,6 +152,63 @@ fn ordinary_named_function_value_infers_its_local_callable_type() {
 }
 
 #[test]
+fn inferred_callable_values_cannot_publish_ownership_bearing_signatures() {
+    for declaration in [
+        "fn borrow(v: &Own[NumericError]) -> Unit = ()",
+        "fn transfer(v: Own[i64]) -> Own[i64] = move v",
+        "fn transfer(v: Opt[Own[i64]]) -> Opt[Own[i64]] = move v",
+        "fn transfer(v: Res[Own[i64], NumericError]) -> Res[Own[i64], NumericError] = move v",
+    ] {
+        let name = if declaration.starts_with("fn borrow") {
+            "borrow"
+        } else {
+            "transfer"
+        };
+        let source =
+            format!("{declaration}\nfn use() -> Unit {{ let f = {name}\n_ = f\nyield () }}\n");
+        let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
+        let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
+        let catalog = TrustedCatalog::first_slice().unwrap();
+        let analysis = session
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        let resolution = analysis.resolution().unwrap();
+        assert_eq!(
+            resolution.body_types().callable_values().len(),
+            0,
+            "{source}"
+        );
+        assert!(!analysis.trace().has_unsupported(), "{source}");
+        let diagnostics = session.into_diagnostics(None);
+        assert_eq!(
+            diagnostics
+                .diagnostics()
+                .iter()
+                .map(|d| d.code().as_str())
+                .collect::<Vec<_>>(),
+            ["OWNERSHIP_TYPE_POSITION_FORBIDDEN"],
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn direct_resource_calls_and_ownership_free_callable_values_remain_supported() {
+    for source in [
+        "fn borrow(v: &Own[NumericError]) -> Unit = ()\nfn use(v: &Own[NumericError]) -> Unit = borrow(v)\n",
+        "fn transfer(v: Own[i64]) -> Own[i64] = move v\nfn use(v: Own[i64]) -> Own[i64] = transfer(move v)\n",
+        "fn transfer(v: Opt[Own[i64]]) -> Opt[Own[i64]] = move v\nfn use(v: Opt[Own[i64]]) -> Opt[Own[i64]] = transfer(move v)\n",
+        "fn borrow(v: &i64) -> Unit = ()\nfn use(v: &i64) -> Unit { let f = borrow\nyield f(v) }\n",
+    ] {
+        assert_eq!(
+            supported_diagnostic_codes(source),
+            Vec::<String>::new(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn local_callable_value_call_has_indirect_checked_identity() {
     let source = concat!(
         "fn add_one(value: i64) -> i64 = value\n",

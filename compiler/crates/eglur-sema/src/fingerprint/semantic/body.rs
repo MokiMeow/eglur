@@ -923,8 +923,10 @@ impl NodeHasher<'_, '_> {
                             CanonicalTarget::Source(declaration) => {
                                 SemanticFingerprintError::UnknownStableDeclaration(*declaration)
                             }
-                            CanonicalTarget::External(_) => {
-                                unreachable!("external targets are stable")
+                            CanonicalTarget::External(_)
+                            | CanonicalTarget::Primitive(_)
+                            | CanonicalTarget::Intrinsic(_) => {
+                                unreachable!("non-source targets are stable")
                             }
                         })
                     })
@@ -944,7 +946,11 @@ impl NodeHasher<'_, '_> {
                         CanonicalTarget::Source(declaration) => {
                             SemanticFingerprintError::UnknownStableDeclaration(*declaration)
                         }
-                        CanonicalTarget::External(_) => unreachable!("external targets are stable"),
+                        CanonicalTarget::External(_)
+                        | CanonicalTarget::Primitive(_)
+                        | CanonicalTarget::Intrinsic(_) => {
+                            unreachable!("non-source targets are stable")
+                        }
                     })?
                     .write_to(builder);
             }
@@ -1773,6 +1779,10 @@ fn stable_target_error(target: &CanonicalTarget) -> SemanticFingerprintError {
         CanonicalTarget::Source(declaration) => {
             SemanticFingerprintError::UnknownStableDeclaration(*declaration)
         }
-        CanonicalTarget::External(_) => unreachable!("external targets are stable"),
+        CanonicalTarget::External(_)
+        | CanonicalTarget::Primitive(_)
+        | CanonicalTarget::Intrinsic(_) => {
+            unreachable!("non-source targets are stable")
+        }
     }
 }

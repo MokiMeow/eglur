@@ -219,11 +219,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             substitution,
         } = self.signatures.types().kind(subject)?.clone()
         else {
-            return Ok(self.unsupported(
-                TypecheckCapability::ResolveMethods,
-                source,
-                member.origin(),
-            ));
+            return self.missing_value_member(source, member, subject);
         };
         let (generic_parameters, storage_fields, properties) =
             match self.signatures.declaration(&owner) {
@@ -238,12 +234,27 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 ),
                 FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
                 FactState::Unperformed => return Ok(Outcome::Unperformed),
+                FactState::Known(DeclarationSignature::Enum { .. }) => {
+                    return self.missing_value_member(source, member, subject);
+                }
+                FactState::Known(DeclarationSignature::Nominal { .. }) => {
+                    let CanonicalTarget::External(owner) = owner else {
+                        return Err(BodyTypingError::UnexpectedSignatureKind {
+                            target: owner,
+                            expected: "struct or enum",
+                        });
+                    };
+                    self.recorder.refuse_input(
+                        crate::UnavailableCompileInput::TrustedValueMemberInventory { owner },
+                        SemanticLocation::origin(source.file(), member.origin()),
+                    );
+                    return Ok(Outcome::Unperformed);
+                }
                 FactState::Known(_) | FactState::NotApplicable => {
-                    return Ok(self.unsupported(
-                        TypecheckCapability::ResolveMethods,
-                        source,
-                        member.origin(),
-                    ));
+                    return Err(BodyTypingError::UnexpectedSignatureKind {
+                        target: owner,
+                        expected: "struct, enum or trusted nominal",
+                    });
                 }
             };
         let member_name = member.text().expect("valid member has text");
@@ -281,11 +292,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             };
             (declaration, MemberKind::Property, template)
         } else {
-            return Ok(self.unsupported(
-                TypecheckCapability::ResolveMethods,
-                source,
-                member.origin(),
-            ));
+            return self.missing_value_member(source, member, subject);
         };
         let arguments = self.signatures.types().substitution(substitution)?.to_vec();
         let replacements = generic_parameters
@@ -328,6 +335,30 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .continuation_for_type(ty)
                 .strict(receiver_value.normal_continuation),
         }))
+    }
+
+    fn missing_value_member(
+        &mut self,
+        source: &SemanticSource<'_>,
+        member: &Name,
+        subject: TypeId,
+    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        let name = member.text().expect("valid member has text");
+        let receiver_type = self.format_type(subject)?;
+        let poison = self.type_error(
+            source,
+            member.origin(),
+            "MEMBER_NOT_FOUND",
+            format!("field or property member `{name}` not found on `{receiver_type}`"),
+            BTreeMap::from([
+                ("member".into(), DiagnosticDataValue::from(name)),
+                (
+                    "receiver_type".into(),
+                    DiagnosticDataValue::from(receiver_type),
+                ),
+            ]),
+        )?;
+        Ok(Outcome::Poisoned(poison))
     }
 
     fn finish_reference(

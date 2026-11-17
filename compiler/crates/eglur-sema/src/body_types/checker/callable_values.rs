@@ -29,6 +29,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Known(owner) => owner,
             outcome => return Ok(outcome.map(|_| unreachable!())),
         };
+        if matches!(
+            owner.target,
+            CanonicalTarget::Primitive(_) | CanonicalTarget::Intrinsic(_)
+        ) {
+            return self.type_qualified_concrete_method_value(
+                module, source, expression, member, &owner, request,
+            );
+        }
         match self.signatures.declaration(&owner.target) {
             FactState::Known(DeclarationSignature::Trait { .. }) => self
                 .type_qualified_trait_method_value(
@@ -43,12 +51,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .type_qualified_concrete_method_value(
                     module, source, expression, member, &owner, request,
                 ),
-            FactState::Known(DeclarationSignature::Nominal { .. })
-                if matches!(&owner.target, CanonicalTarget::External(_)) =>
-            {
-                let origin = self.expression_origin(source, expression)?;
-                Ok(self.unsupported(TypecheckCapability::CheckClosures, source, origin))
-            }
+            FactState::Known(
+                DeclarationSignature::Nominal { .. } | DeclarationSignature::Enum { .. },
+            ) if matches!(&owner.target, CanonicalTarget::External(_)) => self
+                .type_qualified_concrete_method_value(
+                    module, source, expression, member, &owner, request,
+                ),
             FactState::Known(_) | FactState::NotApplicable => self.method_not_found(source, member),
             FactState::Poisoned(poison) => Ok(Outcome::Poisoned(poison.clone())),
             FactState::Unperformed => Ok(Outcome::Unperformed),
@@ -82,16 +90,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         ) {
             return Ok(Outcome::Unperformed);
         }
-        let CanonicalTarget::Source(owner_id) = owner else {
-            return Ok(self.unsupported(TypecheckCapability::CheckClosures, source, origin));
+        let family = match self.inherent_method_family(source, origin, owner, &name)? {
+            Outcome::Known(Some(family)) => family,
+            Outcome::Known(None) => return self.method_not_found(source, member),
+            outcome => return Ok(outcome.map(|_| unreachable!())),
         };
-        let targets = self
-            .collection
-            .child_candidates(*owner_id, &name, DeclarationKind::Function);
-        if targets.is_empty() {
-            return self.method_not_found(source, member);
-        }
-        if self.inherent_family_is_inaccessible(module, &targets)? {
+        if self.inaccessible_inherent_family(module, &family)? {
             return self
                 .type_error(
                     source,
@@ -109,62 +113,88 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             _ => None,
         };
-        let generic_parameters = match self.signatures.declaration(owner) {
-            FactState::Known(DeclarationSignature::Struct {
-                generic_parameters, ..
-            }) => generic_parameters.len(),
-            _ => return Err(BodyTypingError::UnknownDeclaration(*owner_id)),
-        };
-        let subject = if let Some(subject) = qualified_owner.fixed_subject {
-            subject
-        } else if generic_parameters == 0 {
-            self.signatures
-                .types_mut()
-                .nominal(NominalHead::Declaration(owner.clone()), [])?
-        } else if let Some(expected) = expected {
-            let TypeKind::Callable { parameters, .. } = self.signatures.types().kind(expected)?
-            else {
-                unreachable!("expected callable type was checked above");
-            };
-            let Some(&receiver) = parameters.first() else {
-                return self.type_argument_inference_failure(source, origin);
-            };
-            self.method_subject(receiver)?
-        } else {
-            return self.missing_callable_value_context(source, origin, request);
-        };
-        let TypeKind::Nominal {
-            head: NominalHead::Declaration(found),
-            ..
-        } = self.signatures.types().kind(subject)?
-        else {
-            return self.type_argument_inference_failure(source, origin);
-        };
-        if found != owner {
-            return self.type_argument_inference_failure(source, origin);
-        }
-        let methods = match self.inherent_method_candidates(subject, &targets)? {
-            Outcome::Known(methods) => methods,
+        let templates = match self.inherent_family_templates(&family)? {
+            Outcome::Known(templates) => templates,
             outcome => return Ok(outcome.map(|_| unreachable!())),
         };
-        let overloaded = methods.len() > 1;
+        let overloaded = templates.len() > 1;
+        let presented = templates
+            .iter()
+            .map(|template| template.callable().clone())
+            .collect::<Vec<_>>();
+        let subject = if let CanonicalTarget::Source(owner_id) = owner {
+            let generic_parameters = match self.signatures.declaration(owner) {
+                FactState::Known(DeclarationSignature::Struct {
+                    generic_parameters, ..
+                }) => generic_parameters.len(),
+                _ => return Err(BodyTypingError::UnknownDeclaration(*owner_id)),
+            };
+            let subject = if let Some(subject) = qualified_owner.fixed_subject {
+                subject
+            } else if generic_parameters == 0 {
+                self.signatures
+                    .types_mut()
+                    .nominal(NominalHead::Declaration(owner.clone()), [])?
+            } else if let Some(expected) = expected {
+                let TypeKind::Callable { parameters, .. } =
+                    self.signatures.types().kind(expected)?
+                else {
+                    unreachable!("expected callable type was checked above");
+                };
+                let Some(&receiver) = parameters.first() else {
+                    return self.type_argument_inference_failure(source, origin);
+                };
+                self.method_subject(receiver)?
+            } else {
+                return self.missing_callable_value_context(source, origin, request);
+            };
+            let TypeKind::Nominal {
+                head: NominalHead::Declaration(found),
+                ..
+            } = self.signatures.types().kind(subject)?
+            else {
+                return self.type_argument_inference_failure(source, origin);
+            };
+            if found != owner {
+                return self.type_argument_inference_failure(source, origin);
+            }
+            Some(subject)
+        } else {
+            qualified_owner.fixed_subject
+        };
+        let mut methods = Vec::new();
+        for template in templates {
+            match self.inherent_template_candidate(template, subject)? {
+                Outcome::Known(Some(candidate)) => methods.push(candidate),
+                Outcome::Known(None) => {}
+                outcome => return Ok(outcome.map(|_| unreachable!())),
+            }
+        }
         if overloaded && expected.is_none() {
             return self.missing_callable_value_context(source, origin, request);
         }
 
         let mut matched = Vec::new();
-        let mut presented = Vec::new();
         let mut first_ready = None;
         let mut underconstrained = false;
         let mut failed_normalization = None;
         for candidate in methods {
             let callable = candidate.callable;
-            presented.push(callable.clone());
             if callable.is_bang() {
                 continue;
             }
-            match self.candidate_callable_value(callable, expected, overloaded)? {
+            match self.candidate_callable_value(
+                callable,
+                expected,
+                overloaded,
+                candidate.preset_replacements,
+            )? {
                 CandidateOutcome::Ready(value) => {
+                    if let Some(constraint) = candidate.owner_constraint
+                        && !constraint.matches(self.signatures.types_mut(), &value.replacements)?
+                    {
+                        continue;
+                    }
                     if first_ready.is_none() {
                         first_ready = Some(value.clone());
                     }
@@ -328,7 +358,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         callable.id(),
                     ))?;
                 presented.push(specialized.clone());
-                match self.candidate_callable_value(specialized, Some(expected), true)? {
+                match self.candidate_callable_value(
+                    specialized,
+                    Some(expected),
+                    true,
+                    BTreeMap::new(),
+                )? {
                     CandidateOutcome::Ready(mut value)
                         if self.signatures.types().is_assignable(value.ty, expected)? =>
                     {
@@ -436,7 +471,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 continue;
             }
 
-            match self.candidate_callable_value(callable, expected, signatures.len() > 1)? {
+            match self.candidate_callable_value(
+                callable,
+                expected,
+                signatures.len() > 1,
+                BTreeMap::new(),
+            )? {
                 CandidateOutcome::Ready(candidate) => {
                     if first_ready.is_none() {
                         first_ready = Some(candidate.clone());
@@ -528,6 +568,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(Outcome::Poisoned(poison));
         }
 
+        if self.signatures.types().contains_ownership(selected.ty)? {
+            return self
+                .type_error(
+                    source,
+                    origin,
+                    "OWNERSHIP_TYPE_POSITION_FORBIDDEN",
+                    "Own type position is forbidden in a callable value",
+                    BTreeMap::new(),
+                )
+                .map(Outcome::Poisoned);
+        }
+
         let key = ExpressionKey::new(module, expression);
         self.record_trait_obligations(
             key,
@@ -554,6 +606,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         callable: CallableSignature,
         expected: Option<TypeId>,
         filter_parameters: bool,
+        mut replacements: BTreeMap<GenericParameterId, TypeId>,
     ) -> Result<CandidateOutcome, BodyTypingError> {
         let expected_parameters = if filter_parameters {
             match expected {
@@ -578,19 +631,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
-        let mut replacements = BTreeMap::new();
         if !parameters.is_empty() {
-            let Some(expected) = expected else {
-                return Ok(CandidateOutcome::Underconstrained);
-            };
-            let template = self.signatures.types_mut().callable(
-                callable.parameters().iter().map(CallableParameter::ty),
-                callable.result(),
-            )?;
-            if self.infer_constraints(template, expected, &parameters, &mut replacements)?
-                == ConstraintOutcome::Conflict
-            {
-                return Ok(CandidateOutcome::Mismatch);
+            if let Some(expected) = expected {
+                let template = self.signatures.types_mut().callable(
+                    callable.parameters().iter().map(CallableParameter::ty),
+                    callable.result(),
+                )?;
+                if self.infer_constraints(template, expected, &parameters, &mut replacements)?
+                    == ConstraintOutcome::Conflict
+                {
+                    return Ok(CandidateOutcome::Mismatch);
+                }
             }
             if !parameters
                 .iter()
