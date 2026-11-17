@@ -102,7 +102,13 @@ pub fn typecheck_bodies(
         diagnostics,
         None,
     )? {
-        BodyExecution::Completed(phase) => Ok(*phase),
+        BodyExecution::Completed(packet) => {
+            let (phase, custody) = packet.into_parts();
+            if !matches!(custody, BodyProofInputs::Unmetered) {
+                return Err(BodyTypingError::ProofInputModeMismatch);
+            }
+            Ok(phase)
+        }
         BodyExecution::Interrupted(_) => Err(BodyTypingError::UnexpectedUnmeteredInterruption),
     }
 }
@@ -167,6 +173,9 @@ fn typecheck_bodies_inner<'hir>(
             prefix: BodyTypingPrefix::empty(),
             demands: Vec::new(),
             internal_failures: Vec::new(),
+            proof_inputs: BodyProofInputs::new(
+                analysis_work.as_ref().map(BodyAnalysisWork::accounting),
+            ),
         })));
     }
     let mut recorder = DemandRecorder::new(support);
@@ -177,7 +186,10 @@ fn typecheck_bodies_inner<'hir>(
     }
     if !supported {
         return Ok(BodyExecution::Completed(Box::new(
-            recorder.finish(PhaseProduct::Unperformed),
+            CompletedBodyExecution::new(
+                recorder.finish(PhaseProduct::Unperformed),
+                BodyProofInputs::new(analysis_work.as_ref().map(BodyAnalysisWork::accounting)),
+            )?,
         )));
     }
 
@@ -235,6 +247,9 @@ fn typecheck_bodies_inner<'hir>(
         control_path_barriers: Vec::new(),
         current_return: None,
         current_owner: None,
+        proof_inputs: BodyProofInputs::new(
+            analysis_work.as_ref().map(BodyAnalysisWork::accounting),
+        ),
         analysis_work,
         internal_failures: Vec::new(),
     };
@@ -270,6 +285,7 @@ struct BodyChecker<'input, 'hir, 'support> {
     callable_instance_ids: BTreeMap<(CallableSignatureId, SubstId), CallableInstanceId>,
     obligations: Vec<PendingTraitObligation>,
     method_dispatches: Vec<PendingMethodDispatch>,
+    proof_inputs: BodyProofInputs,
     region_stack: Vec<ControlRegionKey>,
     block_region_overrides: Vec<ExprId>,
     result_contexts: Vec<ResultContext>,

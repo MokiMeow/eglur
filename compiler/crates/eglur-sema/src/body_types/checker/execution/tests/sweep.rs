@@ -29,6 +29,73 @@ struct Run {
     fingerprints: Option<SemanticFingerprints>,
     stop: Option<crate::AnalysisWorkIncomplete>,
     internal_failures: Vec<BodyTypingError>,
+    proof_inputs: Option<ProofSnapshot>,
+}
+
+#[derive(Debug)]
+struct ProofSnapshot {
+    bounds: Vec<(
+        ExpressionKey,
+        crate::GenericParameterRecordId,
+        usize,
+        crate::AnalysisRootIdentity,
+    )>,
+    dispatches: Vec<(crate::MethodDispatchSite, crate::AnalysisRootIdentity)>,
+}
+
+impl ProofSnapshot {
+    fn capture(
+        custody: &crate::BodyProofInputs,
+        bounds: &[PendingTraitObligation],
+        dispatches: &[PendingMethodDispatch],
+        inputs: &BodyPhaseInputs<'_, '_>,
+        accounting: &AnalysisWorkAccounting,
+    ) -> Option<Self> {
+        let crate::BodyProofInputs::Metered(custody) = custody else {
+            return None;
+        };
+        assert_eq!(
+            custody.validate_accounting(accounting),
+            accounting
+                .incomplete()
+                .map_or(Ok(()), |stop| Err(AnalysisWorkFailure::Incomplete(stop)))
+        );
+        assert_eq!(custody.bounds().len(), bounds.len());
+        assert_eq!(custody.dispatches().len(), dispatches.len());
+        let bounds = custody
+            .bounds()
+            .iter()
+            .zip(bounds)
+            .map(|(connection, pending)| {
+                assert_eq!(connection.site(), pending.site());
+                assert_eq!(connection.bound_index(), pending.bound_index());
+                let FactState::Known(parameter) = inputs
+                    .declarations
+                    .signatures()
+                    .generic_parameter_record(pending.parameter())
+                else {
+                    panic!("pending bound lost its original declaration")
+                };
+                assert_eq!(connection.parameter(), parameter.id());
+                (
+                    connection.site(),
+                    connection.parameter(),
+                    connection.bound_index(),
+                    connection.ticket().identity(),
+                )
+            })
+            .collect();
+        let dispatches = custody
+            .dispatches()
+            .iter()
+            .zip(dispatches)
+            .map(|(connection, pending)| {
+                assert_eq!(connection.site(), pending.site());
+                (connection.site(), connection.ticket().identity())
+            })
+            .collect();
+        Some(Self { bounds, dispatches })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -68,54 +135,80 @@ fn run(text: &str, metered: bool, cut: Option<Cut>, corrupt_cleanup: bool, valid
                 .unwrap()
             } else {
                 BodyExecution::Completed(Box::new(
-                    typecheck_bodies(
-                        inputs.collection,
-                        inputs.imports,
-                        inputs.names,
-                        Some(external),
-                        inputs.sources,
-                        &Support,
-                        inputs.declarations,
-                        inputs.trait_environment,
-                        inputs.diagnostics,
+                    crate::CompletedBodyExecution::new(
+                        typecheck_bodies(
+                            inputs.collection,
+                            inputs.imports,
+                            inputs.names,
+                            Some(external),
+                            inputs.sources,
+                            &Support,
+                            inputs.declarations,
+                            inputs.trait_environment,
+                            inputs.diagnostics,
+                        )
+                        .unwrap(),
+                        crate::BodyProofInputs::Unmetered,
                     )
                     .unwrap(),
                 ))
             }
         });
 
-        let (snapshot, demands, fingerprint, stop, internal_failures) = match execution {
-            BodyExecution::Completed(phase) => {
-                assert!(cut.is_none(), "cut execution completed");
-                assert_eq!(trace.finishes, 1);
-                let (PhaseProduct::Performed(bodies), demands) = phase.into_parts() else {
-                    panic!("completed execution did not perform")
-                };
-                let fingerprint = valid.then(|| fingerprints(&mut inputs, &bodies));
-                (
-                    Snapshot::body(&bodies),
-                    demands.into_vec(),
-                    fingerprint,
-                    None,
-                    Vec::new(),
-                )
-            }
-            BodyExecution::Interrupted(stopped) => {
-                assert!(cut.is_some(), "uncut execution interrupted");
-                assert_eq!(trace.finishes, 0, "success finish after stop");
-                assert_eq!(accounting.incomplete(), Some(stopped.stop()));
-                inspect_prefix(&inputs, stopped.prefix(), &trace);
-                let snapshot = Snapshot::prefix(stopped.prefix());
-                assert_eq!(trace.terminal_facts.as_ref(), Some(&snapshot));
-                (
-                    snapshot,
-                    stopped.demands().to_vec(),
-                    None,
-                    Some(stopped.stop()),
-                    stopped.internal_failures().to_vec(),
-                )
-            }
-        };
+        let (snapshot, demands, fingerprint, stop, internal_failures, proof_inputs) =
+            match execution {
+                BodyExecution::Completed(packet) => {
+                    assert!(cut.is_none(), "cut execution completed");
+                    assert_eq!(trace.finishes, 1);
+                    let PhaseProduct::Performed(body) = packet.analysis().product() else {
+                        panic!("performed body")
+                    };
+                    let custody = ProofSnapshot::capture(
+                        packet.proof_inputs(),
+                        body.obligations(),
+                        body.method_dispatches(),
+                        &inputs,
+                        &accounting,
+                    );
+                    let (PhaseProduct::Performed(bodies), demands) =
+                        packet.into_parts().0.into_parts()
+                    else {
+                        panic!("completed execution did not perform")
+                    };
+                    let fingerprint = valid.then(|| fingerprints(&mut inputs, &bodies));
+                    (
+                        Snapshot::body(&bodies),
+                        demands.into_vec(),
+                        fingerprint,
+                        None,
+                        Vec::new(),
+                        custody,
+                    )
+                }
+                BodyExecution::Interrupted(stopped) => {
+                    assert!(cut.is_some(), "uncut execution interrupted");
+                    assert_eq!(trace.finishes, 0, "success finish after stop");
+                    assert_eq!(accounting.incomplete(), Some(stopped.stop()));
+                    inspect_prefix(&inputs, stopped.prefix(), &trace);
+                    let snapshot = Snapshot::prefix(stopped.prefix());
+                    assert_eq!(trace.terminal_facts.as_ref(), Some(&snapshot));
+                    let custody = ProofSnapshot::capture(
+                        stopped.proof_inputs(),
+                        stopped.prefix().obligations(),
+                        stopped.prefix().method_dispatches(),
+                        &inputs,
+                        &accounting,
+                    );
+                    (
+                        snapshot,
+                        stopped.demands().to_vec(),
+                        None,
+                        Some(stopped.stop()),
+                        stopped.internal_failures().to_vec(),
+                        custody,
+                    )
+                }
+            };
         assert_eq!(
             trace.terminal,
             Some(true),
@@ -134,6 +227,7 @@ fn run(text: &str, metered: bool, cut: Option<Cut>, corrupt_cleanup: bool, valid
             fingerprints: fingerprint,
             stop,
             internal_failures,
+            proof_inputs,
         });
     });
     result.unwrap()
@@ -256,6 +350,14 @@ fn assert_cut(complete: &Run, stopped: &Run, ordinal: usize) {
     assert_eq!(stopped.stop.unwrap().root(), charge.root);
     assert!(complete.policy.starts_with(&stopped.policy));
     stopped.snapshot.assert_retained_from(&complete.snapshot);
+    let complete_custody = complete.proof_inputs.as_ref().expect("metered completion");
+    let stopped_custody = stopped.proof_inputs.as_ref().expect("metered interruption");
+    assert!(complete_custody.bounds.starts_with(&stopped_custody.bounds));
+    assert!(
+        complete_custody
+            .dispatches
+            .starts_with(&stopped_custody.dispatches)
+    );
     for demand in &stopped.demands {
         assert!(complete.demands.contains(demand));
     }

@@ -47,13 +47,19 @@ fn run(
             &mut fixture.environment,
         )
     } else {
-        arena.materialize(
-            owner,
-            obligation,
-            selected,
-            &mut fixture.signatures,
-            &mut fixture.environment,
-        )
+        arena
+            .materialize(
+                owner,
+                obligation,
+                selected,
+                &mut fixture.signatures,
+                &mut fixture.environment,
+                &mut ProofWork::Unmetered,
+            )
+            .map_err(|flow| match flow {
+                EvidenceFlow::Internal(error) => error,
+                EvidenceFlow::Interrupted => panic!("unmetered proof interrupted"),
+            })
     }
 }
 

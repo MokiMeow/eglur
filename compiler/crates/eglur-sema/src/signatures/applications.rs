@@ -84,13 +84,19 @@ pub(super) struct TypeApplicationFacts {
     poisons: BTreeMap<CanonicalTarget, Poison>,
 }
 
+impl TypeApplicationFacts {
+    pub(super) fn poison(&self, target: &CanonicalTarget) -> Option<&Poison> {
+        self.poisons.get(target)
+    }
+}
+
 impl DeclarationSignatures {
     pub(crate) fn type_applications(&self) -> impl Iterator<Item = &TypeApplication> {
         self.type_applications.applications.iter()
     }
 
     pub(super) fn application_poison(&self, target: &CanonicalTarget) -> Option<&Poison> {
-        self.type_applications.poisons.get(target)
+        self.type_applications.poison(target)
     }
 
     pub(super) fn has_invalid_applications(&self) -> bool {

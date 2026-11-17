@@ -47,6 +47,20 @@ impl From<AnalysisCallRegistryFailure> for BodyFlow {
     }
 }
 
+impl From<crate::AnalysisBodyInputFailure> for BodyFlow {
+    fn from(failure: crate::AnalysisBodyInputFailure) -> Self {
+        match failure {
+            crate::AnalysisBodyInputFailure::Call(AnalysisCallRegistryFailure::Input(
+                AnalysisCallInputFailure::Work(work),
+            ))
+            | crate::AnalysisBodyInputFailure::Proof(crate::AnalysisProofRegistryFailure::Input(
+                crate::AnalysisProofInputFailure::Work(work),
+            )) => work.into(),
+            error => Self::Internal(BodyTypingError::ProofInputs(error)),
+        }
+    }
+}
+
 macro_rules! internal_conversion {
     ($($ty:ty),* $(,)?) => {
         $(impl From<$ty> for BodyFlow {
@@ -120,11 +134,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 prefix,
                 demands: self.recorder.into_demands(),
                 internal_failures: self.internal_failures,
+                proof_inputs: self.proof_inputs,
             })));
         }
         match traversal {
             Ok(()) => Ok(BodyExecution::Completed(Box::new(
-                self.finish(CompletedBodyTraversal(())),
+                self.finish(CompletedBodyTraversal(()))?,
             ))),
             Err(BodyFlow::Internal(error)) => Err(error),
             Err(BodyFlow::Interrupted) => Err(BodyTypingError::MissingAnalysisStop),

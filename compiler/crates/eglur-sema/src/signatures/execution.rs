@@ -31,8 +31,7 @@ pub struct SignatureResolutionPrefix {
     pub(super) enum_variant_names:
         HashMap<crate::CanonicalTarget, crate::SemanticFact<HashSet<crate::NameKey>>>,
     pub(super) overload_family_poisons: BTreeMap<crate::DefId, Poison>,
-    pub(super) generic_parameters:
-        crate::FactTable<crate::GenericParameterId, GenericParameterSignature>,
+    pub(super) generic_parameters: GenericParameterRecords,
     pub(super) occurrences: crate::FactTable<TypeOccurrenceId, ResolvedTypeOccurrence>,
     pub(super) callables: Vec<CallableSignature>,
     pub(super) impl_headers: crate::FactTable<crate::CanonicalTarget, TraitImplHeader>,
@@ -108,7 +107,7 @@ impl SignatureResolutionPrefix {
             + self.declarations.iter().len()
             + self.enum_variant_names.len()
             + self.overload_family_poisons.len()
-            + self.generic_parameters.iter().len()
+            + self.generic_parameters.len()
             + self.occurrences.iter().len()
             + self.callables.len()
             + self.impl_headers.iter().len()

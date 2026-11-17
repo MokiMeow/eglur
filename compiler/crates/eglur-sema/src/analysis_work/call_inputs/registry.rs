@@ -110,7 +110,7 @@ impl<'hir> AnalysisCallInputRegistry<'hir> {
         self.selection_ticket_with(accounting, site, || allowance_ticks)
     }
 
-    pub(super) fn selection_ticket_with(
+    pub(in crate::analysis_work) fn selection_ticket_with(
         &mut self,
         accounting: &mut AnalysisWorkAccounting,
         site: ExpressionKey,
@@ -154,7 +154,7 @@ impl<'hir> AnalysisCallInputRegistry<'hir> {
     }
 
     /// Retrieves an existing selection without authorizing late admission.
-    pub(super) fn existing_selection_ticket(
+    pub(in crate::analysis_work) fn existing_selection_ticket(
         &self,
         accounting: &mut AnalysisWorkAccounting,
         site: ExpressionKey,
@@ -181,7 +181,7 @@ impl<'hir> AnalysisCallInputRegistry<'hir> {
         self.argument_ticket_with(accounting, site, written_index, || allowance_ticks)
     }
 
-    pub(super) fn argument_ticket_with(
+    pub(in crate::analysis_work) fn argument_ticket_with(
         &mut self,
         accounting: &mut AnalysisWorkAccounting,
         site: ExpressionKey,

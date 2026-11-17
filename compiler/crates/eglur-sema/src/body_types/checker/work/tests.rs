@@ -10,6 +10,7 @@ use crate::{
 };
 
 mod attachment;
+pub(in crate::body_types::checker) mod proof_attachment;
 
 const TEXT: &str = "fn id[T](value: T) -> T = value\nfn inspect(x: i32) -> i32 = id(x)";
 const ALLOWANCE: u64 = 1_000_000;
@@ -61,6 +62,9 @@ pub(in crate::body_types::checker) fn checkpoint(
                 BodyAnalysisInput::CallSelection(call) => work.selection_ticket(call)?,
                 BodyAnalysisInput::CallArgument { call, index } => {
                     work.argument_ticket(call, index)?
+                }
+                BodyAnalysisInput::ParameterBound { .. } | BodyAnalysisInput::MethodDispatch(_) => {
+                    unreachable!("proof inputs are observed at their actual preparation points")
                 }
             };
             probe.tickets.push(ticket);
@@ -140,10 +144,10 @@ fn run<'hir, 'source: 'hir>(
 }
 
 fn completed(execution: BodyExecution) -> BodyTypes {
-    let BodyExecution::Completed(phase) = execution else {
+    let BodyExecution::Completed(packet) = execution else {
         panic!("unexpected interruption")
     };
-    let PhaseProduct::Performed(product) = phase.into_parts().0 else {
+    let PhaseProduct::Performed(product) = packet.into_parts().0.into_parts().0 else {
         panic!("body phase did not perform")
     };
     product
@@ -505,12 +509,78 @@ fn body_input_setup_rejects_duplicate_modules_without_admitting_roots() {
         let source = &inputs.sources[0];
         assert!(matches!(
             AnalysisBodyInputs::new(&accounting, [(0, module, source), (0, module, source)]),
-            Err(AnalysisCallRegistryFailure::DuplicateModule(found)) if found == module.id()
+            Err(crate::AnalysisBodyInputFailure::Call(AnalysisCallRegistryFailure::DuplicateModule(found))) if found == module.id()
         ));
         let ticket = accounting.admit(0, ALLOWANCE).unwrap();
         assert_eq!(ticket.identity().requirement(), 0);
         assert!(accounting.incomplete().is_none());
     });
+}
+
+#[test]
+fn body_input_owner_retains_proof_tickets_without_changing_semantic_fingerprints() {
+    with_inputs(
+        "trait Mark {}\nfn id[T: Mark](value: T) -> T = value\nfn inspect[U: Mark](value: U) -> U = id(value)",
+        |mut inputs, external| {
+            let mut accounting = accounting();
+            let (mut sources, mut bodies) = analysis_inputs(&accounting, &inputs);
+            let call = first_call(&inputs);
+            let work =
+                BodyAnalysisWork::new(&mut accounting, &mut sources, &mut bodies, &|_| ALLOWANCE);
+            let product = completed(run(&mut inputs, external, work).unwrap());
+            let before = fingerprints(&mut inputs, &product);
+            let parameter = inputs
+                .collection
+                .modules()
+                .flat_map(|module| module.declarations())
+                .find(|declaration| declaration.name().is_some_and(|name| name.text() == "T"))
+                .unwrap()
+                .id();
+            let FactState::Known(parameter) = inputs
+                .declarations
+                .signatures()
+                .generic_parameter_record(&GenericParameterId::Source(parameter))
+            else {
+                panic!("original bound definition")
+            };
+            let bound = bodies
+                .bound_ticket(&mut accounting, call, parameter, 0, || ALLOWANCE)
+                .unwrap();
+            assert_eq!(
+                bodies
+                    .bound_ticket(&mut accounting, call, parameter, 0, || panic!(
+                        "bound replay"
+                    ))
+                    .unwrap(),
+                bound
+            );
+            assert_eq!(
+                bodies
+                    .existing_bound_ticket(&mut accounting, call, parameter.id(), 0)
+                    .unwrap(),
+                bound
+            );
+            let dispatch_site = MethodDispatchSite::Invocation(call);
+            let dispatch = bodies
+                .dispatch_ticket(&mut accounting, dispatch_site, || ALLOWANCE)
+                .unwrap();
+            assert_eq!(
+                bodies
+                    .dispatch_ticket(&mut accounting, dispatch_site, || panic!("dispatch replay"))
+                    .unwrap(),
+                dispatch
+            );
+            assert_eq!(
+                bodies
+                    .existing_dispatch_ticket(&mut accounting, dispatch_site)
+                    .unwrap(),
+                dispatch
+            );
+            assert_ne!(bound, dispatch);
+            assert_eq!(fingerprints(&mut inputs, &product), before);
+            assert!(!inputs.diagnostics.has_errors());
+        },
+    );
 }
 
 #[test]

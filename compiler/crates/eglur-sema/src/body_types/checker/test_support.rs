@@ -123,6 +123,9 @@ pub(super) fn with_checker_owned(
             control_path_barriers: Vec::new(),
             current_return: None,
             current_owner: None,
+            proof_inputs: BodyProofInputs::new(
+                analysis_work.as_ref().map(BodyAnalysisWork::accounting),
+            ),
             analysis_work,
             internal_failures: Vec::new(),
         };
@@ -143,6 +146,14 @@ pub(super) struct BodyPhaseInputs<'input, 'hir> {
 pub(super) fn fingerprints(
     inputs: &mut BodyPhaseInputs<'_, '_>,
     bodies: &BodyTypes,
+) -> crate::SemanticFingerprints {
+    fingerprints_with_effects(inputs, bodies, None)
+}
+
+pub(super) fn fingerprints_with_effects(
+    inputs: &mut BodyPhaseInputs<'_, '_>,
+    bodies: &BodyTypes,
+    trusted_effects: Option<&crate::TrustedEffectEnvironment>,
 ) -> crate::SemanticFingerprints {
     let evidence = crate::resolve_trait_evidence(
         inputs.collection,
@@ -167,13 +178,14 @@ pub(super) fn fingerprints(
         inputs.declarations.signatures(),
         bodies,
         &evidence,
-        None,
+        trusted_effects,
         inputs.diagnostics,
     )
     .unwrap()
     .into_parts()
     .0;
-    crate::SemanticFingerprints::compute(
+    let evidence = PhaseProduct::Performed(evidence);
+    let fingerprint = crate::SemanticFingerprints::compute(
         inputs.collection,
         inputs.imports,
         inputs.names,
@@ -181,11 +193,15 @@ pub(super) fn fingerprints(
         inputs.sources,
         bodies,
         inputs.trait_environment,
-        &PhaseProduct::Performed(evidence),
+        &evidence,
         &effects,
     )
-    .unwrap()
-    .expect("complete bodies must retain fingerprints")
+    .unwrap();
+    fingerprint.unwrap_or_else(|| {
+        let diagnostics =
+            std::mem::replace(inputs.diagnostics, DiagnosticStore::new()).finalize(None);
+        panic!("complete bodies must retain fingerprints: {diagnostics:?}");
+    })
 }
 
 pub(super) fn analysis_inputs<'hir>(

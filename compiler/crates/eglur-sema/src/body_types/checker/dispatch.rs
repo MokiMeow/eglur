@@ -166,6 +166,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         if concrete {
             return self.prepare_qualified_inherent_call(context, request, owner, &name);
         }
+        let dispatch_site =
+            MethodDispatchSite::Invocation(ExpressionKey::new(context.module, request.expression));
+        self.prepare_dispatch_work(dispatch_site)?;
+        #[cfg(test)]
+        work::tests::proof_attachment::before_dispatch_preparation(dispatch_site);
         let methods = self
             .signatures
             .trait_methods(&owner.target)
@@ -379,6 +384,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             };
         let (trait_tier, candidates) = match family {
             None => {
+                let dispatch_site = MethodDispatchSite::Invocation(ExpressionKey::new(
+                    module,
+                    frame.request.expression,
+                ));
+                self.prepare_dispatch_work(dispatch_site)?;
+                #[cfg(test)]
+                work::tests::proof_attachment::before_dispatch_preparation(dispatch_site);
                 let candidates = match self.trait_method_candidates(
                     module,
                     source,

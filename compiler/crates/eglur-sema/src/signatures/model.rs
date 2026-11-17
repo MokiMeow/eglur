@@ -4,7 +4,10 @@ use eglur_diagnostics::Poison;
 use eglur_hir::{BodyId, OriginId, PatternId, TypeRefId};
 use eglur_source::FileId;
 
-use super::{ConcreteOwnerHead, GenericParameterSignature, InherentMethodInventory};
+use super::{
+    ConcreteOwnerHead, GenericParameterRecord, GenericParameterRecords, GenericParameterSignature,
+    InherentMethodInventory,
+};
 use crate::type_rendering::{DiagnosticTypeFacts, DiagnosticTypeNames};
 use crate::{
     CallableSignatureId, CanonicalTarget, CanonicalTypeStore, DefId, FactState, FactTable,
@@ -476,7 +479,7 @@ pub struct DeclarationSignatures {
     pub(super) declarations: FactTable<CanonicalTarget, DeclarationSignature>,
     pub(super) enum_variant_names: HashMap<CanonicalTarget, SemanticFact<HashSet<NameKey>>>,
     pub(super) overload_family_poisons: BTreeMap<DefId, Poison>,
-    pub(super) generic_parameters: FactTable<GenericParameterId, GenericParameterSignature>,
+    pub(super) generic_parameters: GenericParameterRecords,
     pub(super) occurrences: FactTable<TypeOccurrenceId, ResolvedTypeOccurrence>,
     pub(super) callables: Box<[CallableSignature]>,
     pub(super) impl_headers: FactTable<CanonicalTarget, TraitImplHeader>,
@@ -559,17 +562,42 @@ impl DeclarationSignatures {
         &self,
         parameter: &GenericParameterId,
     ) -> FactState<'_, GenericParameterSignature> {
-        if let GenericParameterId::Source(parameter) = parameter
-            && let Some(poison) = self
-                .application_poison(&CanonicalTarget::Source(*parameter))
-                .or_else(|| {
-                    self.public_contract_poisons
-                        .get(&CanonicalTarget::Source(*parameter))
-                })
-        {
-            return FactState::Poisoned(poison);
+        match self.generic_parameter_record(parameter) {
+            FactState::Known(record) => FactState::Known(record.signature()),
+            FactState::Poisoned(poison) => FactState::Poisoned(poison),
+            FactState::NotApplicable => FactState::NotApplicable,
+            FactState::Unperformed => FactState::Unperformed,
         }
-        self.generic_parameters.state(parameter)
+    }
+
+    /// Retains original definition identity under the same effective poison as semantic queries.
+    #[must_use]
+    pub fn generic_parameter_record(
+        &self,
+        parameter: &GenericParameterId,
+    ) -> FactState<'_, GenericParameterRecord> {
+        effective_generic_parameter_record(
+            &self.generic_parameters,
+            &self.type_applications,
+            &self.public_contract_poisons,
+            parameter,
+        )
+    }
+
+    pub(crate) fn generic_parameter_record_with_types(
+        &mut self,
+        parameter: &GenericParameterId,
+    ) -> (
+        FactState<'_, GenericParameterRecord>,
+        &mut CanonicalTypeStore,
+    ) {
+        let record = effective_generic_parameter_record(
+            &self.generic_parameters,
+            &self.type_applications,
+            &self.public_contract_poisons,
+            parameter,
+        );
+        (record, &mut self.types)
     }
 
     #[must_use]
@@ -760,4 +788,22 @@ impl ResolvedDeclarationSemantics {
     pub fn into_parts(self) -> (DeclarationSignatures, InhabitanceFacts) {
         (self.signatures, self.inhabitance)
     }
+}
+
+fn effective_generic_parameter_record<'a>(
+    records: &'a GenericParameterRecords,
+    applications: &'a super::applications::TypeApplicationFacts,
+    public_contract_poisons: &'a BTreeMap<CanonicalTarget, Poison>,
+    parameter: &GenericParameterId,
+) -> FactState<'a, GenericParameterRecord> {
+    if let GenericParameterId::Source(parameter) = parameter {
+        let target = CanonicalTarget::Source(*parameter);
+        if let Some(poison) = applications
+            .poison(&target)
+            .or_else(|| public_contract_poisons.get(&target))
+        {
+            return FactState::Poisoned(poison);
+        }
+    }
+    records.record(parameter)
 }

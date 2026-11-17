@@ -5,6 +5,7 @@ struct CallableValueCandidate {
     callable: CallableSignature,
     replacements: BTreeMap<GenericParameterId, TypeId>,
     ty: TypeId,
+    preparation: Option<crate::AnalysisRootTicket>,
 }
 
 enum CandidateOutcome {
@@ -300,6 +301,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         ) {
             return Ok(Outcome::Unperformed);
         }
+        let dispatch_site =
+            MethodDispatchSite::CallableValue(ExpressionKey::new(module, expression));
+        self.prepare_dispatch_work(dispatch_site)?;
+        #[cfg(test)]
+        work::tests::proof_attachment::before_dispatch_preparation(dispatch_site);
         let methods = self
             .signatures
             .trait_methods(trait_target)
@@ -437,17 +443,21 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             else {
                 unreachable!("qualified trait method retains a trait dispatch");
             };
+            let ticket = self.existing_dispatch_work(dispatch_site)?;
             let trait_ref = self.specialize_trait_ref(&trait_ref, &selected.replacements)?;
-            self.method_dispatches.push(PendingMethodDispatch {
-                site: MethodDispatchSite::CallableValue(ExpressionKey::new(module, expression)),
-                owner: self
-                    .current_owner
-                    .ok_or(BodyTypingError::MissingDiagnosticOwner)?,
-                location: SemanticLocation::origin(source.file(), member.origin()),
-                subject,
-                trait_ref,
-                method,
-            });
+            self.record_method_dispatch(
+                PendingMethodDispatch {
+                    site: MethodDispatchSite::CallableValue(ExpressionKey::new(module, expression)),
+                    owner: self
+                        .current_owner
+                        .ok_or(BodyTypingError::MissingDiagnosticOwner)?,
+                    location: SemanticLocation::origin(source.file(), member.origin()),
+                    subject,
+                    trait_ref,
+                    method,
+                },
+                ticket,
+            )?;
         }
         Ok(result)
     }
@@ -609,6 +619,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             origin,
             selected.callable.generic_parameters(),
             &selected.replacements,
+            selected.preparation.as_ref(),
         )?;
         let arguments = selected
             .callable
@@ -711,9 +722,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .signatures
             .types_mut()
             .substitute(callable.result(), &replacements)?;
-        let result = match self
-            .normalize_callable_candidate_type(ExpectedType::new(result, custody).with_work(work))?
-        {
+        let result = match self.normalize_callable_candidate_type(
+            ExpectedType::new(result, custody).with_work(work.clone()),
+        )? {
             Ok(ty) => ty,
             Err(failure) => return Ok(CandidateOutcome::NormalizationFailed(failure)),
         };
@@ -722,6 +733,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             callable,
             replacements,
             ty,
+            preparation: work,
         }))
     }
 

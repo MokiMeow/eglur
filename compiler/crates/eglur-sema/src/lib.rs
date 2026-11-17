@@ -34,12 +34,14 @@ mod type_rendering;
 mod types;
 
 pub use analysis_work::{
-    AnalysisBodyInputs, AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
-    AnalysisCallRegistryFailure, AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity,
-    AnalysisRootScope, AnalysisRootStopReason, AnalysisRootTicket, AnalysisSourceInputFailure,
-    AnalysisSourceInputRegistry, AnalysisSourceInputs, AnalysisWork, AnalysisWorkAccounting,
-    AnalysisWorkCategory, AnalysisWorkFailure, AnalysisWorkIncomplete, AnalysisWorkOverflow,
-    AnalysisWorkPricing, AnalysisWorkUnits,
+    AnalysisBodyInputFailure, AnalysisBodyInputs, AnalysisBoundInputs, AnalysisCallInputFailure,
+    AnalysisCallInputRegistry, AnalysisCallInputs, AnalysisCallRegistryFailure,
+    AnalysisDispatchInputs, AnalysisProofInputFailure, AnalysisProofInputRegistry,
+    AnalysisProofRegistryFailure, AnalysisRootBalance, AnalysisRootClaimError,
+    AnalysisRootIdentity, AnalysisRootScope, AnalysisRootStopReason, AnalysisRootTicket,
+    AnalysisSourceInputFailure, AnalysisSourceInputRegistry, AnalysisSourceInputs, AnalysisWork,
+    AnalysisWorkAccounting, AnalysisWorkCategory, AnalysisWorkFailure, AnalysisWorkIncomplete,
+    AnalysisWorkOverflow, AnalysisWorkPricing, AnalysisWorkUnits,
 };
 pub use body_types::*;
 pub use capability::*;

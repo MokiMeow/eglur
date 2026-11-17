@@ -20,6 +20,10 @@ pub enum BodyTypingError {
     AnalysisRootClaim(crate::AnalysisRootClaimError),
     SourceInputs(crate::AnalysisSourceInputFailure),
     CallInputs(crate::AnalysisCallRegistryFailure),
+    ProofInputs(crate::AnalysisBodyInputFailure),
+    ProofInputModeMismatch,
+    ProofInputCardinalityMismatch,
+    MissingProofPreparation(ExpressionKey),
     DuplicateSource(FileId),
     MissingSource(FileId),
     MissingHir(FileId),
@@ -125,6 +129,16 @@ impl fmt::Display for BodyTypingError {
             }
             Self::SourceInputs(error) => error.fmt(formatter),
             Self::CallInputs(error) => error.fmt(formatter),
+            Self::ProofInputs(error) => error.fmt(formatter),
+            Self::ProofInputModeMismatch => {
+                formatter.write_str("body proof custody does not match the execution mode")
+            }
+            Self::ProofInputCardinalityMismatch => {
+                formatter.write_str("body proof custody does not match pending evidence")
+            }
+            Self::MissingProofPreparation(site) => {
+                write!(formatter, "missing upstream work for proof input {site:?}")
+            }
             Self::DuplicateSource(file) => write!(formatter, "duplicate semantic source {file:?}"),
             Self::MissingSource(file) => write!(formatter, "missing semantic source {file:?}"),
             Self::MissingHir(file) => write!(formatter, "semantic source {file:?} has no HIR"),
@@ -329,8 +343,12 @@ impl std::error::Error for BodyTypingError {
             Self::DiagnosticStore(error) => Some(error),
             Self::SourceInputs(error) => Some(error),
             Self::CallInputs(error) => Some(error),
+            Self::ProofInputs(error) => Some(error),
             Self::MissingAnalysisStop
             | Self::UnexpectedUnmeteredInterruption
+            | Self::ProofInputModeMismatch
+            | Self::ProofInputCardinalityMismatch
+            | Self::MissingProofPreparation(_)
             | Self::AnalysisRootClaim(_)
             | Self::DuplicateSource(_)
             | Self::MissingSource(_)
