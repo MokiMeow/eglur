@@ -286,7 +286,6 @@ impl ModuleAddress {
         })
     }
 
-    #[must_use]
     pub fn components(&self) -> impl ExactSizeIterator<Item = &str> {
         self.components.iter().map(AsRef::as_ref)
     }
