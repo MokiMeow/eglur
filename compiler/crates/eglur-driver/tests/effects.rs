@@ -291,6 +291,42 @@ fn imported_transitive_io_is_rejected_in_a_non_bang_caller() {
 }
 
 #[test]
+fn grouped_postfix_calls_keep_effect_rejection_on_the_written_surface() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for expression in [
+        "(\"payload\",).apply(emit!)",
+        "((\"payload\",)).apply(emit!)",
+        "((\"payload\",).apply)(emit!)",
+        "(\"payload\".then)(emit!)",
+    ] {
+        let source = format!("import std::test::emit!\nfn observe() -> Unit = {expression}\n");
+        let mut session = single(&source);
+        let analysis = session.resolve(&effect_profile(), Some(&catalog)).unwrap();
+        assert!(analysis.trace().missing().next().is_none());
+
+        let snapshot = session.into_diagnostics(None);
+        let diagnostics = snapshot.diagnostics();
+        assert_eq!(diagnostics.len(), 1, "{expression}: {diagnostics:?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code().as_str(), "EFFECT_VIOLATION");
+        assert_eq!(
+            diagnostic.data().get("callee"),
+            Some(&DiagnosticDataValue::from("emit!"))
+        );
+        let range = diagnostic
+            .primary_span()
+            .as_source()
+            .unwrap()
+            .file_span()
+            .range();
+        assert_eq!(
+            source[range.start().as_usize()..range.end().as_usize()].trim(),
+            expression
+        );
+    }
+}
+
+#[test]
 fn bounded_generic_bang_trait_call_has_unknown_summary() {
     let mut session = single(concat!(
         "trait Runnable { fn run!(self: &mut Self) -> Unit }\n",

@@ -1,5 +1,11 @@
 use crate::OriginId;
 
+/// Reserved value-constructor spellings, not a restriction on binding names.
+#[must_use]
+pub fn is_residual_constructor_name(name: &str) -> bool {
+    matches!(name, "Some" | "None" | "Ok" | "Err")
+}
+
 /// Source name spelling and effect marker.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Name {
@@ -91,6 +97,15 @@ impl Path {
     #[must_use]
     pub fn is_qualified(&self) -> bool {
         self.segments.len() > 1
+    }
+
+    /// Identifies heads whose match-pattern role is independent of name lookup.
+    #[must_use]
+    pub fn is_unqualified_residual_constructor(&self) -> bool {
+        let [name] = self.segments.as_ref() else {
+            return false;
+        };
+        !name.is_bang() && name.text().is_some_and(is_residual_constructor_name)
     }
 
     /// Returns the complete written path origin.

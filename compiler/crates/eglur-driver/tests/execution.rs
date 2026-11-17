@@ -6,6 +6,11 @@ use eglur_driver::{
 };
 use eglur_sema::{CompileCapability, ResolveCapability, TypecheckCapability};
 
+#[path = "execution/grouped_calls.rs"]
+mod grouped_calls;
+#[path = "execution/receiver_adjustment.rs"]
+mod receiver_adjustment;
+
 fn execution_profile() -> SupportProfile {
     SupportProfile::new(
         SupportSchemaVersion::V1,
@@ -26,6 +31,12 @@ fn execution_profile() -> SupportProfile {
             CompileCapability::Typecheck(TypecheckCapability::ResolveOverloads),
             CompileCapability::Typecheck(TypecheckCapability::AnalyzeInhabitance),
             CompileCapability::Typecheck(TypecheckCapability::CheckFailureFlow),
+            CompileCapability::Typecheck(
+                TypecheckCapability::EvaluateSelectedIntegerConstExpressions,
+            ),
+            CompileCapability::Typecheck(
+                TypecheckCapability::EvaluateSelectedIntegerConstDeclarations,
+            ),
             CompileCapability::Typecheck(
                 TypecheckCapability::CheckSelectedCheckedIntegerArithmetic,
             ),
@@ -196,6 +207,218 @@ fn match_and_question_short_circuit_preserve_carriers() {
         assert_eq!(payload.as_ref(), [Value::Str(expected.into())]);
         assert_eq!(result.process_status(), u8::from(!is_ok));
     }
+}
+
+#[test]
+fn residual_patterns_select_arms_independently_of_same_spelled_locals() {
+    for (input, pattern, expected) in [
+        ("None", "None", "7"),
+        ("None", "(None)", "7"),
+        ("None", "whole @ None", "7"),
+        ("Some(3)", "None", "3"),
+        ("Some(3)", "(None)", "3"),
+        ("Some(3)", "whole @ None", "3"),
+    ] {
+        let source = format!(
+            "fn choose(None: i64, Some: i64, input: Opt[i64]) -> i64 = match input {{ {pattern} => None, Some(value) => value }}\n\
+             fn main!() -> Res[Str, Str] = Ok(to_str(choose(7, 9, {input})))\n"
+        );
+        let (program, catalog, profile) = compile_single(&source);
+        assert_eq!(
+            ok_str(completed(&program, &catalog, &profile).value()),
+            expected,
+            "{source}"
+        );
+    }
+
+    for (input, expected) in [("Ok(3)", "7"), ("Err(4)", "9")] {
+        let source = format!(
+            "fn choose(Ok: i64, Err: i64, input: Res[i64, i64]) -> i64 = match input {{ Ok(value) => Ok, Err(error) => Err }}\n\
+             fn main!() -> Res[Str, Str] = Ok(to_str(choose(7, 9, {input})))\n"
+        );
+        let (program, catalog, profile) = compile_single(&source);
+        assert_eq!(
+            ok_str(completed(&program, &catalog, &profile).value()),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn unit_constructor_values_keep_canonical_identity_across_spellings() {
+    for expression in [
+        "None",
+        "(None)",
+        "std::opt::None",
+        "Absent",
+        "bridge::Absent",
+        "take(None, 7)",
+    ] {
+        let source = format!(
+            "import std::opt::None as Absent\n\
+             type Maybe = Opt[i64]\n\
+             fn take[T](left: Opt[T], right: T) -> Opt[T] = left\n\
+             fn make() -> Maybe = {expression}\n\
+             fn main!() -> Res[Opt[i64], Str] = Ok(make())\n"
+        );
+        let (program, catalog, profile) = compile_files(
+            [
+                ("bridge.eglur", "pub import std::opt::None as Absent\n"),
+                ("main.eglur", &source),
+            ],
+            "main.eglur",
+        );
+        let result = completed(&program, &catalog, &profile);
+        let payload = result.value().variant_payload().unwrap();
+        assert_eq!(
+            payload,
+            [Value::Variant {
+                declaration: eglur_sema::CanonicalTarget::External(
+                    eglur_sema::ExternalDefId::new("std::opt::None").unwrap(),
+                ),
+                payload: Box::new([]),
+            }],
+            "{expression}"
+        );
+        assert_eq!(result.process_status(), 0);
+        assert!(result.events().is_empty());
+    }
+}
+
+#[test]
+fn unit_constructor_values_short_circuit_optional_result_blocks() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn empty() -> Opt[i64] = result {\n",
+        "  let absent: Opt[i64] = None\n",
+        "  let value = absent?\n",
+        "  yield Some(value)\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] = Ok(match empty() { None => \"empty\", Some(_) => \"full\" })\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "empty"
+    );
+}
+
+#[test]
+fn unit_constructor_source_owners_preserve_identity_and_payload_form() {
+    for (expression, variant) in [
+        ("dep::Token::Stop", "Stop"),
+        ("bridge::Renamed::Stop", "Stop"),
+        ("dep::Token::Empty()", "Empty"),
+    ] {
+        let source = format!(
+            "fn make() -> dep::Token[i64] = {expression}\n\
+             fn main!() -> Res[dep::Token[i64], Str] = Ok(make())\n"
+        );
+        let (program, catalog, profile) = compile_files(
+            [
+                (
+                    "dep.eglur",
+                    "pub enum Token[T] {\n Stop\n Empty()\n Item(T)\n}\n",
+                ),
+                ("bridge.eglur", "pub import dep::Token as Renamed\n"),
+                ("main.eglur", &source),
+            ],
+            "main.eglur",
+        );
+        let declaration = program
+            .resolution()
+            .declarations()
+            .modules()
+            .flat_map(|module| module.declarations())
+            .find(|declaration| {
+                declaration
+                    .name()
+                    .is_some_and(|name| name.spelling() == variant)
+            })
+            .unwrap()
+            .id();
+        let result = completed(&program, &catalog, &profile);
+        assert_eq!(
+            result.value().variant_payload().unwrap(),
+            [Value::Variant {
+                declaration: eglur_sema::CanonicalTarget::Source(declaration),
+                payload: Box::new([]),
+            }],
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn unit_constructor_preflight_requires_the_selected_execution_capability() {
+    for (source, capability) in [
+        (
+            "fn main!() -> Unit { let value: Opt[i64] = None\n _ = value }\n",
+            ExecutionCapability::FailureFlow,
+        ),
+        (
+            "enum Token { Stop }\nfn main!() -> Unit { let value = Token::Stop\n _ = value }\n",
+            ExecutionCapability::Aggregates,
+        ),
+    ] {
+        let (program, catalog, profile) = compile_single(source);
+        let reduced = without_execution_capability(&profile, capability);
+        assert_eq!(
+            execute(&program, &reduced, &catalog, EvaluationLimits::default()),
+            ExecutionAttempt::Unsupported(SupportReason::MissingCapability(capability)),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn unit_constructor_missing_hook_is_refused_before_any_body_executes() {
+    struct WithoutNoneHook<'a>(&'a TrustedCatalog);
+
+    impl eglur_eval::RuntimeCatalog for WithoutNoneHook<'_> {
+        fn runtime_hook(
+            &self,
+            declaration: &eglur_sema::ExternalDefId,
+        ) -> Option<eglur_driver::RuntimeHook> {
+            self.0
+                .runtime_hook(declaration)
+                .filter(|hook| *hook != eglur_driver::RuntimeHook::OptNone)
+        }
+    }
+
+    let (program, catalog, profile) = compile_single(concat!(
+        "import std::test::abort!\n",
+        "fn main!() -> Unit {\n",
+        "  abort!(\"RUNTIME_ABORT\", \"must not execute\")\n",
+        "  let value: Opt[i64] = None\n",
+        "  _ = value\n",
+        "}\n",
+    ));
+    assert_eq!(
+        execute(
+            &program,
+            &profile,
+            &WithoutNoneHook(&catalog),
+            EvaluationLimits::default(),
+        ),
+        ExecutionAttempt::Unsupported(SupportReason::MissingRuntimeHook(
+            eglur_sema::ExternalDefId::new("std::opt::None").unwrap(),
+        ))
+    );
+}
+
+#[test]
+fn unit_constructor_spelling_does_not_change_local_or_constant_values() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "const number: i64 = 4\n",
+        "fn take(None: i64) -> i64 = None\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let None = take(number)\n",
+        "  yield Ok(to_str(None))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "4");
 }
 
 #[test]
@@ -436,6 +659,50 @@ fn source_order_is_preserved_when_calls_and_fields_bind_by_declaration_slot() {
             eglur_driver::RuntimeEvent::Emitted("call-first".into()),
         ]
     );
+}
+
+#[test]
+fn grouped_postfix_applications_preserve_values_and_effect_order() {
+    for (expression, marks) in [
+        ("(mark!(2), mark!(3)).apply(join!)", vec!["2", "3", "join"]),
+        (
+            "((mark!(2), mark!(3))).apply(join!)",
+            vec!["2", "3", "join"],
+        ),
+        (
+            "(((mark!(2), mark!(3))).apply)(join!)",
+            vec!["2", "3", "join"],
+        ),
+        ("((mark!(5)).then)(pass!)", vec!["5", "join"]),
+    ] {
+        let source = format!(
+            "import std::test::emit!\n\
+             fn mark!(value: i64) -> i64 {{ emit!(to_str(value))\nyield value }}\n\
+             fn join!(first: i64, second: i64) -> i64 {{ emit!(\"join\")\nyield wrapping_add(first, second) }}\n\
+             fn pass!(value: i64) -> i64 {{ emit!(\"join\")\nyield value }}\n\
+             fn main!() -> Res[Str, Str] = Ok(to_str({expression}))\n"
+        );
+        let (program, catalog, profile) = compile_single(&source);
+        let result = completed(&program, &catalog, &profile);
+        assert_eq!(ok_str(result.value()), "5", "{expression}");
+        assert_eq!(
+            result.events(),
+            marks
+                .into_iter()
+                .map(|mark| eglur_driver::RuntimeEvent::Emitted(mark.into()))
+                .collect::<Vec<_>>(),
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn grouped_apply_keeps_a_tuple_argument_inside_a_unary_tuple() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn first(pair: (i64, i64)) -> i64 = pair.0\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str((((2, 3),)).apply(first)))\n",
+    ));
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "2");
 }
 
 #[test]

@@ -800,9 +800,11 @@ impl Parser<'_> {
                 self.skip_newlines();
             } else if self.at(TokenKind::Newline) {
                 if let Some(expression) = expression {
-                    let statement = self.precede(expression);
                     self.skip_newlines();
-                    self.complete(statement, SyntaxKind::ExprStmt);
+                    if !self.at(TokenKind::RightBrace) {
+                        let statement = self.precede(expression);
+                        self.complete(statement, SyntaxKind::ExprStmt);
+                    }
                 }
             } else if !self.at(TokenKind::RightBrace) {
                 self.error_current(SyntaxDiagnosticKind::ParseUnexpectedToken);

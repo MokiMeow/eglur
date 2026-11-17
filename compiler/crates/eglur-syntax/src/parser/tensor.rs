@@ -106,7 +106,16 @@ impl Parser<'_> {
                 self.error_current(SyntaxDiagnosticKind::ParseUnexpectedToken);
                 break;
             }
-            self.parse_axis_expression(1);
+            if matches!(
+                self.current_kind(),
+                Some(TokenKind::AxisPackAnonymous | TokenKind::AxisPackNamed)
+            ) {
+                let pack = self.start();
+                self.bump();
+                self.complete(pack, SyntaxKind::AxisAtom);
+            } else {
+                self.parse_axis_expression(1);
+            }
         }
         self.complete(list, SyntaxKind::TransformAxisList);
     }
@@ -140,12 +149,7 @@ impl Parser<'_> {
     fn parse_axis_atom(&mut self) -> Option<CompletedMarker> {
         let atom = self.start();
         match self.current_kind() {
-            Some(
-                TokenKind::Identifier
-                | TokenKind::Integer
-                | TokenKind::AxisPackAnonymous
-                | TokenKind::AxisPackNamed,
-            ) => self.bump(),
+            Some(TokenKind::Identifier | TokenKind::Integer) => self.bump(),
             Some(TokenKind::LeftParen) => {
                 self.bump();
                 self.parse_axis_expression(1);

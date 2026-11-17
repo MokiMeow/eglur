@@ -353,8 +353,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             if !explicit.is_empty() && explicit.len() != candidate.explicit_parameters.len() {
                 continue;
             }
-            let Some(receiver_ty) =
-                self.adjusted_method_receiver_type(&candidate.callable, &selection.value)?
+            let Some((receiver_ty, passing)) =
+                self.adjusted_method_receiver(&candidate.callable, &selection.value)?
             else {
                 continue;
             };
@@ -379,7 +379,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 &actual,
                 &mut replacements,
             )? {
-                applicable.push(candidate.clone());
+                applicable.push((candidate.clone(), passing));
             }
         }
 
@@ -387,7 +387,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             [] => self
                 .method_not_found(source, &selection.member)
                 .map(InvocationPlan::Complete),
-            [candidate] => self.prepare_selected_method(
+            [(candidate, passing)] => self.prepare_selected_method(
                 context,
                 MethodCallRequest {
                     expression: request.expression,
@@ -398,9 +398,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     ty: request.ty,
                 },
                 candidate.clone(),
+                *passing,
             ),
             candidates => self
-                .method_ambiguous(source, &selection.member, candidates, selection.trait_tier)
+                .method_ambiguous(
+                    source,
+                    &selection.member,
+                    &candidates
+                        .iter()
+                        .map(|(candidate, _)| candidate.clone())
+                        .collect::<Vec<_>>(),
+                    selection.trait_tier,
+                )
                 .map(InvocationPlan::Complete),
         }
     }

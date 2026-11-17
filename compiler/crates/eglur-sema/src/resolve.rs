@@ -20,7 +20,7 @@ use crate::diagnostic::{
     record_name_not_found, record_visibility_violation,
 };
 use crate::{
-    CanonicalTarget, DeclarationCollection, DeclarationKind, DefId, DuplicateFact,
+    CanonicalTarget, DeclarationCollection, DeclarationKind, DefId, DuplicateFact, ExternalDefId,
     ExternalNameEnvironment, FactState, FactTable, IdentityOverflow, LocalBindingId, ModuleAddress,
     ModuleId, NameKey, Namespace, ResolvedImports, ScopeId, SemanticFact, SemanticLocation,
     SemanticSource,
@@ -750,24 +750,52 @@ impl Resolver<'_, '_> {
             .pattern(pattern_id)
             .ok_or(NameResolutionError::WrongBodyPattern(pattern_id))?;
         let mut outcome = match pattern.kind() {
-            PatternKind::Variant { path, .. } => self.resolve_path(
-                module,
-                source,
-                path,
-                PathLookup::Namespace(Namespace::Value),
-                ResolutionKey::Pattern {
+            PatternKind::Variant { path, .. } if path.is_unqualified_residual_constructor() => {
+                let name = &path.segments()[0];
+                let name_key =
+                    NameKey::from_hir(name).expect("residual constructor has a valid name");
+                let plan = self.plan_unqualified(
                     module,
-                    pattern: pattern_id,
-                },
-                LookupPurpose::Ordinary,
-            )?,
-            PatternKind::Struct {
+                    &name_key,
+                    UnqualifiedLookup::ResidualConstructor,
+                )?;
+                let outcome = self.materialize_lookup_plan(
+                    source,
+                    name.origin(),
+                    LookupPurpose::Ordinary,
+                    &plan,
+                )?;
+                self.record_fact(
+                    ResolutionKey::Pattern {
+                        module,
+                        pattern: pattern_id,
+                    },
+                    outcome.clone(),
+                )?;
+                outcome
+            }
+            PatternKind::Variant {
+                path,
+                payload: eglur_hir::PatternPayload::Named(_),
+            }
+            | PatternKind::Struct {
                 path: Some(path), ..
             } => self.resolve_path(
                 module,
                 source,
                 path,
                 PathLookup::BracedConstructor,
+                ResolutionKey::Pattern {
+                    module,
+                    pattern: pattern_id,
+                },
+                LookupPurpose::Ordinary,
+            )?,
+            PatternKind::Variant { path, .. } => self.resolve_path(
+                module,
+                source,
+                path,
+                PathLookup::Namespace(Namespace::Value),
                 ResolutionKey::Pattern {
                     module,
                     pattern: pattern_id,
@@ -878,7 +906,7 @@ impl Resolver<'_, '_> {
         let plan = if path.segments().len() == 1 {
             let name = &path.segments()[0];
             if let Some(name) = NameKey::from_hir(name) {
-                self.plan_unqualified(module, &name, Namespace::Value)?
+                self.plan_unqualified(module, &name, UnqualifiedLookup::Ordinary(Namespace::Value))?
             } else {
                 let poison = source.invalid_poison(name.origin()).cloned().ok_or(
                     NameResolutionError::MissingInvalidPoison {
@@ -1005,7 +1033,7 @@ impl Resolver<'_, '_> {
         origin: OriginId,
         purpose: LookupPurpose,
     ) -> Result<VisitOutcome, NameResolutionError> {
-        let plan = self.plan_unqualified(module, name, namespace)?;
+        let plan = self.plan_unqualified(module, name, UnqualifiedLookup::Ordinary(namespace))?;
         self.materialize_lookup_plan(source, origin, purpose, &plan)
     }
 
@@ -1013,8 +1041,9 @@ impl Resolver<'_, '_> {
         &self,
         module: ModuleId,
         name: &NameKey,
-        namespace: Namespace,
+        lookup: UnqualifiedLookup,
     ) -> Result<NameLookupPlan, NameResolutionError> {
+        let namespace = lookup.namespace();
         let mut requirements = Vec::with_capacity(3);
         if namespace == Namespace::Value {
             requirements.push(CompileCapability::Resolve(
@@ -1028,7 +1057,9 @@ impl Resolver<'_, '_> {
                         decision: Self::lookup_decision(barrier.outcome())?,
                     });
                 }
-                if let Some(binding) = scope.bindings.get(name) {
+                if matches!(lookup, UnqualifiedLookup::Ordinary(_))
+                    && let Some(binding) = scope.bindings.get(name)
+                {
                     return Ok(NameLookupPlan {
                         requirements: requirements.into_boxed_slice(),
                         name: name.clone(),
@@ -1049,12 +1080,12 @@ impl Resolver<'_, '_> {
             NameLookupDecision::Poisoned(poison.clone())
         } else {
             let candidates = module_declarations.candidates(namespace, name);
-            if !candidates.is_empty() {
+            if matches!(lookup, UnqualifiedLookup::Ordinary(_)) && !candidates.is_empty() {
                 self.source_candidate_decision(candidates, false)
             } else if let Some(poison) = module_declarations.import_poison() {
                 NameLookupDecision::Poisoned(poison.clone())
-            } else if let Some(decision) =
-                self.plan_imported_name(module, namespace, name, false)?
+            } else if matches!(lookup, UnqualifiedLookup::Ordinary(_))
+                && let Some(decision) = self.plan_imported_name(module, namespace, name, false)?
             {
                 decision
             } else {
@@ -1191,7 +1222,7 @@ impl Resolver<'_, '_> {
         source: &SemanticSource<'_>,
         target_module: ModuleId,
         name: &NameKey,
-        namespace: Namespace,
+        lookup: PathLookup,
         origin: OriginId,
         purpose: LookupPurpose,
     ) -> Result<VisitOutcome, NameResolutionError> {
@@ -1207,6 +1238,7 @@ impl Resolver<'_, '_> {
             .module_for_file(source.file())
             .ok_or(NameResolutionError::MissingSource(source.file()))?;
         let cross_module = current_module != target_module;
+        let namespace = lookup.direct_namespace();
         let candidates = target.candidates(namespace, name);
         if !candidates.is_empty() {
             return self.select_source_candidates(
@@ -1226,7 +1258,55 @@ impl Resolver<'_, '_> {
         {
             return Ok(outcome);
         }
+        if matches!(lookup, PathLookup::BracedConstructor)
+            && self.imported_name_may_be_variant(target_module, name)?
+            && let Some(outcome) = self.lookup_imported_name(
+                target_module,
+                source,
+                Namespace::Value,
+                name,
+                origin,
+                cross_module,
+            )?
+        {
+            return Ok(outcome);
+        }
         self.not_found(source, name, origin, purpose)
+    }
+
+    fn imported_name_may_be_variant(
+        &self,
+        module: ModuleId,
+        name: &NameKey,
+    ) -> Result<bool, NameResolutionError> {
+        let Some(decision) = self.plan_imported_name(module, Namespace::Value, name, false)? else {
+            return Ok(false);
+        };
+        Ok(match decision {
+            NameLookupDecision::Resolved(ResolvedName::Declarations(targets)) => {
+                targets.iter().all(|target| {
+                    let kind = match target {
+                        CanonicalTarget::Source(id) => self
+                            .collection
+                            .declaration(*id)
+                            .map(|declaration| declaration.kind()),
+                        CanonicalTarget::External(id) => self
+                            .external
+                            .and_then(|external| external.declaration(id))
+                            .map(|declaration| declaration.kind()),
+                    };
+                    kind.is_none_or(DeclarationKind::is_variant_constructor)
+                })
+            }
+            NameLookupDecision::Resolved(ResolvedName::Local(_))
+            | NameLookupDecision::NotApplicable
+            | NameLookupDecision::NotFound => false,
+            NameLookupDecision::Poisoned(_)
+            | NameLookupDecision::Unperformed
+            | NameLookupDecision::Ambiguous(_)
+            | NameLookupDecision::VisibilityViolation
+            | NameLookupDecision::MissingCapabilityInput(_) => true,
+        })
     }
 
     fn lookup_source_module_path(
@@ -1243,7 +1323,7 @@ impl Resolver<'_, '_> {
                 source,
                 target_module,
                 &remainder[0],
-                lookup.direct_namespace(),
+                lookup,
                 origin,
                 purpose,
             );
@@ -1253,7 +1333,7 @@ impl Resolver<'_, '_> {
                 source,
                 target_module,
                 &remainder[0],
-                Namespace::Type,
+                PathLookup::Namespace(Namespace::Type),
                 origin,
                 purpose,
             )?;
@@ -1298,9 +1378,7 @@ impl Resolver<'_, '_> {
                     .map(ExternalModuleLookup::Matched);
             }
             let name = &segments[prefix_len];
-            let candidates = external
-                .module_candidates(&module, lookup.direct_namespace(), name)
-                .to_vec();
+            let candidates = lookup.external_candidates(external, &module, name).to_vec();
             if candidates.len() == 1 {
                 return Ok(ExternalModuleLookup::Matched(VisitOutcome::Resolved(
                     ResolvedName::Declarations(Box::new([CanonicalTarget::External(
@@ -2181,6 +2259,21 @@ enum LookupPurpose {
 }
 
 #[derive(Clone, Copy)]
+enum UnqualifiedLookup {
+    Ordinary(Namespace),
+    ResidualConstructor,
+}
+
+impl UnqualifiedLookup {
+    const fn namespace(self) -> Namespace {
+        match self {
+            Self::Ordinary(namespace) => namespace,
+            Self::ResidualConstructor => Namespace::Value,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 enum PathLookup {
     Namespace(Namespace),
     BracedConstructor,
@@ -2199,6 +2292,29 @@ impl PathLookup {
             self,
             Self::Namespace(Namespace::Value) | Self::BracedConstructor
         )
+    }
+
+    fn external_candidates<'environment>(
+        self,
+        external: &'environment ExternalNameEnvironment,
+        module: &ModuleAddress,
+        name: &NameKey,
+    ) -> &'environment [ExternalDefId] {
+        let direct = external.module_candidates(module, self.direct_namespace(), name);
+        if !matches!(self, Self::BracedConstructor) || !direct.is_empty() {
+            return direct;
+        }
+
+        let variants = external.module_candidates(module, Namespace::Value, name);
+        if variants.iter().all(|id| {
+            external
+                .declaration(id)
+                .is_some_and(|declaration| declaration.kind().is_variant_constructor())
+        }) {
+            variants
+        } else {
+            direct
+        }
     }
 }
 

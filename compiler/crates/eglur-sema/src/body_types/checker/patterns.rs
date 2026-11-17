@@ -18,6 +18,40 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
         match pattern.kind() {
             PatternKind::Binding(name) => {
+                if let TypeKind::Nominal {
+                    head: NominalHead::Declaration(owner),
+                    ..
+                } = self.signatures.types().kind(expected)?
+                {
+                    match self.signatures.enum_variant_names(owner) {
+                        FactState::Known(names)
+                            if names.contains(
+                                &NameKey::from_hir(name).expect("valid binding name"),
+                            ) =>
+                        {
+                            let spelling = name.text().expect("valid binding name");
+                            let variant = format!("{}::{spelling}", self.format_type(expected)?);
+                            let span = source.origin_span(name.origin()).cloned().ok_or(
+                                BodyTypingError::MissingOriginSpan {
+                                    file: source.file(),
+                                    origin: name.origin(),
+                                },
+                            )?;
+                            let poison = crate::diagnostic::record_name_ambiguous(
+                                self.diagnostics,
+                                span,
+                                spelling,
+                                [format!("binding `{spelling}`"), variant],
+                            )?;
+                            return Ok(Outcome::Poisoned(poison));
+                        }
+                        FactState::Poisoned(poison) => {
+                            return Ok(Outcome::Poisoned(poison.clone()));
+                        }
+                        FactState::Unperformed => return Ok(Outcome::Unperformed),
+                        FactState::Known(_) | FactState::NotApplicable => {}
+                    }
+                }
                 let binding = self.local_binding(module, body.id(), name.origin())?;
                 Ok(Outcome::Known(PatternCheck::binding(binding, expected)))
             }
@@ -166,6 +200,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Outcome::Deferred => return Ok(Outcome::Deferred),
             Outcome::Unperformed | Outcome::NotApplicable => return Ok(Outcome::Unperformed),
         };
+        if matches!(payload, eglur_hir::PatternPayload::Named(_))
+            && target.kind.is_type_namespace_target()
+        {
+            return Ok(self.unsupported(
+                TypecheckCapability::CheckAdvancedPatterns,
+                source,
+                pattern.origin(),
+            ));
+        }
         if target.kind != ResolvedTargetKind::VariantConstructor {
             return self
                 .pattern_type_mismatch(source, pattern.origin(), "variant", expected, None)

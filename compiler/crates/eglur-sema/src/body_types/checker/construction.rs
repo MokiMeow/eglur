@@ -143,7 +143,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let mut slots = Vec::with_capacity(storage_fields.len());
         for field_target in &storage_fields {
             let template = match self.signatures.declaration(field_target) {
-                FactState::Known(DeclarationSignature::Field { ty }) => *ty,
+                FactState::Known(DeclarationSignature::Field { ty, .. }) => *ty,
                 FactState::Poisoned(poison) => {
                     return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
                 }
@@ -165,7 +165,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: initializer.origin,
                 related: self.target_span(field_target),
                 evaluation_order: initializers[field_target],
-                receiver_adjustment: false,
+                passing: ArgumentPassing::Value,
             });
         }
         let result_template = self.nominal_template(target.clone(), &generic_parameters)?;
@@ -258,7 +258,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     }
                 },
             ),
-            DeclarationSignature::EnumVariant { payload } => {
+            DeclarationSignature::EnumVariant { payload, .. } => {
                 let CanonicalTarget::Source(variant) = &target else {
                     return Err(BodyTypingError::UnexpectedSignatureKind {
                         target,
@@ -402,7 +402,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         origin: self.expression_origin(source, value)?,
                         related: None,
                         evaluation_order: index,
-                        receiver_adjustment: false,
+                        passing: ArgumentPassing::Value,
                     });
                 }
                 Ok(Outcome::Known(slots))
@@ -470,7 +470,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 let mut slots = Vec::with_capacity(declarations.len());
                 for declaration in declarations {
                     let template = match self.signatures.declaration(declaration) {
-                        FactState::Known(DeclarationSignature::Field { ty }) => *ty,
+                        FactState::Known(DeclarationSignature::Field { ty, .. }) => *ty,
                         FactState::Poisoned(poison) => {
                             return Ok(Outcome::Poisoned(poison.clone()));
                         }
@@ -490,7 +490,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         origin: initializer.origin,
                         related: self.target_span(declaration),
                         evaluation_order: initializers[declaration],
-                        receiver_adjustment: false,
+                        passing: ArgumentPassing::Value,
                     });
                 }
                 Ok(Outcome::Known(slots))
@@ -602,7 +602,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     }
                 },
             ),
-            DeclarationSignature::EnumVariant { payload } => {
+            DeclarationSignature::EnumVariant { payload, .. } => {
                 let CanonicalTarget::Source(variant) = &target.declaration else {
                     return Err(BodyTypingError::UnexpectedSignatureKind {
                         target: target.declaration.clone(),

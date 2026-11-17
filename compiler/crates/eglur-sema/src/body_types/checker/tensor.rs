@@ -23,9 +23,19 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         call: eglur_hir::DTypeCallExpr,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let BodyContext { module, source, .. } = context;
+        let (callee_id, callee) = context
+            .body
+            .grouping_chain(call.callee)
+            .last()
+            .ok_or(BodyTypingError::WrongBodyExpression(call.callee))?;
+        if !matches!(callee.kind(), ExprKind::Name(_)) {
+            return self
+                .dtype_bracket_forbidden(source, origin)
+                .map(InvocationPlan::Complete);
+        }
         let key = ResolutionKey::Expression {
             module,
-            expression: call.callee,
+            expression: callee_id,
         };
         match self.names.fact(key) {
             FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1 => {
@@ -179,27 +189,22 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             std::iter::repeat_n(frame.nat, frame.arguments.len()),
             frame.result,
         )?;
-        self.record_expression(
-            ExpressionKey::new(context.module, frame.callee),
-            Outcome::Known(self.value_expression(callee_ty)),
-        )?;
-        let arguments = frame
-            .arguments
-            .iter()
-            .map(|argument| argument.value)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+        self.record_callee_type(context, frame.callee, callee_ty)?;
         self.invocations.insert(
             ExpressionKey::new(context.module, frame.expression),
-            SemanticFact::Known(InvocationFact {
-                target: InvocationTarget::TensorConstructor {
+            SemanticFact::Known(InvocationFact::new(
+                InvocationTarget::TensorConstructor {
                     declaration: frame.declaration,
                     constructor: frame.constructor,
                     dtype: frame.dtype,
                 },
-                evaluation_order: arguments.clone(),
-                arguments,
-            }),
+                frame.arguments.iter().enumerate().map(|(order, argument)| {
+                    (
+                        order,
+                        InvocationArgument::new(argument.value, ArgumentPassing::Value),
+                    )
+                }),
+            )),
         )?;
         Ok(InvocationPlan::Complete(Outcome::Known(
             self.value_expression_with_continuation(frame.result, frame.normal_continuation),
@@ -225,7 +230,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: 0,
-                receiver_adjustment: false,
+                passing: ArgumentPassing::Value,
             };
             return self
                 .call_argument_mismatch(context.source, &slot, frame.nat, value.ty)

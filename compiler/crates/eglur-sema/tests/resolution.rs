@@ -19,6 +19,12 @@ mod traversal;
 #[path = "resolution/pattern_bindings.rs"]
 mod pattern_bindings;
 
+#[path = "resolution/braced_patterns.rs"]
+mod braced_patterns;
+
+#[path = "resolution/residual_patterns.rs"]
+mod residual_patterns;
+
 struct PreparedSource {
     file: FileId,
     module: ModuleAddress,

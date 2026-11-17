@@ -227,6 +227,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         source,
                         hir,
                         context,
+                        type_origin: occurrence.origin(),
                     },
                     path,
                     arguments,
@@ -307,6 +308,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             source,
             hir,
             context,
+            type_origin,
         } = site;
         let Some(path_text) = path.text() else {
             return Ok((self.invalid_path_resolution(source, path)?, None));
@@ -318,7 +320,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .is_some_and(|name| context.generics.contains_key(name))
             && !self.has_known_module_prefix(owner.module(), path);
         if segments.len() > 1 && (segments[0].text() == Some("Self") || generic_projection) {
-            return self.resolve_source_projection(source, hir, path, arguments, context);
+            return self.resolve_source_projection(source, type_origin, path, arguments, context);
         }
         if segments.len() == 1 {
             if path_text == "Never" {
@@ -326,7 +328,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     return Ok((
                         Resolution::Poisoned(self.record_arity_error(
                             source,
-                            path.origin(),
+                            type_origin,
                             0,
                             arguments.len(),
                         )?),
@@ -340,7 +342,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     return Ok((
                         Resolution::Poisoned(self.record_arity_error(
                             source,
-                            path.origin(),
+                            type_origin,
                             0,
                             arguments.len(),
                         )?),
@@ -354,7 +356,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     return Ok((
                         Resolution::Poisoned(self.record_arity_error(
                             source,
-                            path.origin(),
+                            type_origin,
                             intrinsic.arity(),
                             arguments.len(),
                         )?),
@@ -376,7 +378,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         let ty = self
                             .types
                             .nominal(NominalHead::Intrinsic(intrinsic), arguments)?;
-                        self.validate_source_slot(source, path.origin(), ty)?
+                        self.validate_source_slot(source, type_origin, ty)?
                     }
                     Resolution::Poisoned(poison) => Resolution::Poisoned(poison),
                     Resolution::Unperformed => Resolution::Unperformed,
@@ -387,7 +389,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 if arguments.len() < 2 {
                     let poison = self.source_error(
                         source,
-                        path.origin(),
+                        type_origin,
                         "UNION_TYPE_ARITY_MISMATCH",
                         format!(
                             "Union type argument arity mismatch: expected at least 2, found {}",
@@ -419,7 +421,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         )
                     };
                     let poison =
-                        self.source_error(source, path.origin(), code, message, BTreeMap::new())?;
+                        self.source_error(source, type_origin, code, message, BTreeMap::new())?;
                     return Ok((Resolution::Poisoned(poison), None));
                 }
                 let members = self.resolve_source_types(
@@ -433,7 +435,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let result = match members {
                     Resolution::Known(members) => {
                         let ty = self.types.error_union(members)?;
-                        self.validate_source_position(source, path.origin(), ty, position)?
+                        self.validate_source_position(source, type_origin, ty, position)?
                     }
                     Resolution::Poisoned(poison) => Resolution::Poisoned(poison),
                     Resolution::Unperformed => Resolution::Unperformed,
@@ -445,7 +447,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     return Ok((
                         Resolution::Poisoned(self.record_arity_error(
                             source,
-                            path.origin(),
+                            type_origin,
                             0,
                             arguments.len(),
                         )?),
@@ -455,7 +457,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let Some(binding) = &context.self_binding else {
                     let poison = self.source_error(
                         source,
-                        path.origin(),
+                        type_origin,
                         "SELF_TYPE_INVALID",
                         "Self type is invalid outside an owning method or associated binding",
                         BTreeMap::from([(
@@ -472,7 +474,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     return Ok((
                         Resolution::Poisoned(self.record_arity_error(
                             source,
-                            path.origin(),
+                            type_origin,
                             0,
                             arguments.len(),
                         )?),
@@ -492,7 +494,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     return Ok((
                         Resolution::Poisoned(self.projection_error(
                             source,
-                            path.origin(),
+                            type_origin,
                             "concrete base",
                         )?),
                         None,
@@ -538,7 +540,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     return Ok((
                         Resolution::Poisoned(self.record_arity_error(
                             source,
-                            path.origin(),
+                            type_origin,
                             expected,
                             arguments.len(),
                         )?),
@@ -556,7 +558,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let result = match arguments {
                     Resolution::Known(arguments) => {
                         let ty = self.types.nominal(head, arguments)?;
-                        self.validate_source_slot(source, path.origin(), ty)?
+                        self.validate_source_slot(source, type_origin, ty)?
                     }
                     Resolution::Poisoned(poison) => Resolution::Poisoned(poison),
                     Resolution::Unperformed => Resolution::Unperformed,
@@ -572,7 +574,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     return Ok((
                         Resolution::Poisoned(self.record_arity_error(
                             source,
-                            path.origin(),
+                            type_origin,
                             expected,
                             arguments.len(),
                         )?),
@@ -591,7 +593,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     Resolution::Known(arguments) => {
                         let arguments = match self.validate_source_abstraction_arguments(
                             source,
-                            path.origin(),
+                            type_origin,
                             arguments,
                         )? {
                             Resolution::Known(arguments) => arguments,
@@ -603,7 +605,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             }
                             Resolution::Unperformed => unreachable!(),
                         };
-                        match self.resolve_alias(alias, Some((source, path.origin())))? {
+                        match self.resolve_alias(alias, Some((source, type_origin)))? {
                             Resolution::Known(template) => {
                                 let replacements = template
                                     .generic_parameters
@@ -612,7 +614,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                     .zip(arguments)
                                     .collect::<BTreeMap<_, _>>();
                                 let ty = self.types.substitute(template.value, &replacements)?;
-                                self.validate_source_position(source, path.origin(), ty, position)?
+                                self.validate_source_position(source, type_origin, ty, position)?
                             }
                             Resolution::Poisoned(poison) => Resolution::Poisoned(poison),
                             Resolution::Unperformed => Resolution::Unperformed,
@@ -626,7 +628,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             DeclarationKind::Trait => Ok((
                 Resolution::Poisoned(self.source_error(
                     source,
-                    path.origin(),
+                    type_origin,
                     "DYN_MUST_BE_EXPLICIT",
                     format!("dyn must be explicit when using trait `{path_text}` as a type"),
                     BTreeMap::new(),
@@ -652,7 +654,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_projection(
         &mut self,
         source: &SemanticSource<'hir>,
-        _hir: &HirFile,
+        type_origin: OriginId,
         path: &eglur_hir::Path,
         arguments: &[TypeRefId],
         context: &SourceTypeContext,
@@ -660,7 +662,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let segments = path.segments();
         if segments.len() != 2 {
             return Ok((
-                Resolution::Poisoned(self.projection_error(source, path.origin(), "chained")?),
+                Resolution::Poisoned(self.projection_error(source, type_origin, "chained")?),
                 None,
             ));
         }
@@ -670,7 +672,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             let Some(binding) = &context.self_binding else {
                 let poison = self.source_error(
                     source,
-                    path.origin(),
+                    type_origin,
                     "SELF_TYPE_INVALID",
                     "Self type is invalid outside an owning method or associated binding",
                     BTreeMap::from([(
@@ -684,7 +686,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 return Ok((
                     Resolution::Poisoned(self.projection_error(
                         source,
-                        path.origin(),
+                        type_origin,
                         "Self has no declaring trait",
                     )?),
                     None,
@@ -743,7 +745,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 "ambiguous declaring bounds"
             };
             return Ok((
-                Resolution::Poisoned(self.projection_error(source, path.origin(), reason)?),
+                Resolution::Poisoned(self.projection_error(source, type_origin, reason)?),
                 None,
             ));
         }
@@ -751,7 +753,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             return Ok((
                 Resolution::Poisoned(self.record_arity_error(
                     source,
-                    path.origin(),
+                    type_origin,
                     0,
                     arguments.len(),
                 )?),
@@ -965,7 +967,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     source,
                     origin,
                     "REFERENCE_TYPE_POSITION_FORBIDDEN",
-                    "reference type is forbidden in this generic argument position",
+                    "reference type position is forbidden for a generic argument",
                     BTreeMap::new(),
                 )?));
             }
@@ -1007,7 +1009,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 source,
                 origin,
                 "REFERENCE_TYPE_POSITION_FORBIDDEN",
-                "reference type is forbidden in this generic argument position",
+                "reference type position is forbidden for a generic argument",
                 BTreeMap::new(),
             )?));
         }

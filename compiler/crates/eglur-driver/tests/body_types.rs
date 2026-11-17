@@ -16,11 +16,20 @@ mod application;
 #[path = "body_types/branch_traversal.rs"]
 mod branch_traversal;
 
+#[path = "body_types/braced_patterns.rs"]
+mod braced_patterns;
+
 #[path = "body_types/construction_traversal.rs"]
 mod construction_traversal;
 
+#[path = "body_types/enum_declarations.rs"]
+mod enum_declarations;
+
 #[path = "body_types/failure_traversal.rs"]
 mod failure_traversal;
+
+#[path = "body_types/grouped_calls.rs"]
+mod grouped_calls;
 
 #[path = "body_types/invocation_traversal.rs"]
 mod invocation_traversal;
@@ -30,6 +39,15 @@ mod numeric_traversal;
 
 #[path = "body_types/pattern_bindings.rs"]
 mod pattern_bindings;
+
+#[path = "body_types/residual_patterns.rs"]
+mod residual_patterns;
+
+#[path = "body_types/receiver_adjustment.rs"]
+mod receiver_adjustment;
+
+#[path = "body_types/reference_slots.rs"]
+mod reference_slots;
 
 #[path = "body_types/statements.rs"]
 mod statements;

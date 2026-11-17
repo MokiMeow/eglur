@@ -1,5 +1,6 @@
 use eglur_syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
+use super::pattern::PatternContext;
 use super::traversal::{Step, Traversal, take_tail};
 use super::{
     Builder, direct_child, direct_nodes, direct_token, direct_tokens, first_name_token,
@@ -191,8 +192,12 @@ impl Builder {
         let mut expressions = expression_children(&node).into_iter();
         let (finish, children) = match node.kind() {
             SyntaxKind::LetStmt => {
-                let pattern =
-                    self.lower_pattern(body, direct_child(&node, SyntaxKind::Pattern), node.span());
+                let pattern = self.lower_pattern(
+                    body,
+                    direct_child(&node, SyntaxKind::Pattern),
+                    node.span(),
+                    PatternContext::Binding,
+                );
                 let ty = direct_child(&node, SyntaxKind::TypeExpr)
                     .map(|ty| self.lower_type(Some(ty), node.span()));
                 let initializer = expressions.next();
@@ -270,9 +275,9 @@ impl Builder {
         let Some(expression) = expression_children(declaration).into_iter().next() else {
             return FunctionBody::Absent;
         };
-        let block = expression.kind() == SyntaxKind::BlockExpr;
+        let block_body = direct_token(declaration, SyntaxKind::Equal).is_none();
         let expression = self.lower_expr(body, Some(expression), declaration.span());
-        if block {
+        if block_body {
             FunctionBody::Block(expression)
         } else {
             FunctionBody::Expression(expression)
@@ -324,13 +329,6 @@ impl Builder {
         let name = self.lower_name_token(first_name_token(node), node.span());
         let origin = name.origin();
         crate::Path::new(vec![name].into_boxed_slice(), origin)
-    }
-
-    pub(super) fn expr_is_hole(&self, id: ExprId) -> bool {
-        matches!(
-            self.bodies[id.body().index()].expressions[id.index()].kind(),
-            ExprKind::Hole
-        )
     }
 
     pub(super) fn invalid_expr(

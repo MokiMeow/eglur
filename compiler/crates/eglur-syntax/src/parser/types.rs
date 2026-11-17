@@ -18,6 +18,15 @@ impl Parser<'_> {
         Some(completed)
     }
 
+    pub(super) fn parse_trait_ref(&mut self) -> Option<CompletedMarker> {
+        if !self.at(TokenKind::Identifier) || self.at_function_type() {
+            self.error_current(SyntaxDiagnosticKind::ParseUnexpectedToken);
+        }
+
+        // Consume an invalid type for recovery without admitting it as a trait bound.
+        self.parse_type()
+    }
+
     pub(super) fn parse_type_argument_list(&mut self) -> Option<CompletedMarker> {
         let arguments = self.start();
         let opening = self.logical_position();
@@ -70,17 +79,17 @@ impl Parser<'_> {
         match self.current_kind() {
             Some(TokenKind::DynKw) => self.parse_dynamic_type(),
             Some(TokenKind::LeftParen) => self.parse_parenthesized_type(),
-            Some(TokenKind::Identifier)
-                if self.at_contextual("Fn") && self.nth_at(1, TokenKind::LeftParen) =>
-            {
-                self.parse_function_type()
-            }
+            Some(TokenKind::Identifier) if self.at_function_type() => self.parse_function_type(),
             Some(TokenKind::Identifier) => self.parse_path_type(),
             _ => {
                 self.error_current(SyntaxDiagnosticKind::ParseUnexpectedToken);
                 None
             }
         }
+    }
+
+    fn at_function_type(&self) -> bool {
+        self.at_contextual("Fn") && self.nth_at(1, TokenKind::LeftParen)
     }
 
     fn parse_dynamic_type(&mut self) -> Option<CompletedMarker> {

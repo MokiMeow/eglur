@@ -11,15 +11,20 @@ use eglur_sema::{
     RawPointerMutability, ReferenceMutability, ResolveCapability, SemanticSource,
     SignatureResolutionError, SignatureResolutionInputs, TrustedAssociatedBinding,
     TrustedAssociatedType, TrustedCallableParameter, TrustedConstructorPayload,
-    TrustedDeclarationInputs, TrustedDeclarationSignature, TrustedGenericParameter,
-    TrustedImplMethod, TrustedInhabitanceEnvironment, TrustedInhabitanceFact,
-    TrustedInhabitanceProduct, TrustedLanguageItemEnvironment, TrustedNominalInhabitance,
+    TrustedDeclarationInputs, TrustedDeclarationSignature, TrustedEnumPayload, TrustedEnumVariant,
+    TrustedGenericParameter, TrustedImplMethod, TrustedInhabitanceEnvironment,
+    TrustedInhabitanceFact, TrustedLanguageItemEnvironment, TrustedNominalInhabitance,
     TrustedSignatureEnvironment, TrustedSignatureError, TrustedSignatureKind, TrustedTraitAdapter,
     TrustedTraitExpr, TrustedTraitMethod, TrustedTypeExpr, TypeKind, TypecheckCapability,
     collect_declarations, plan_imports, resolve_declaration_signatures, resolve_imports,
 };
 use eglur_source::{FileId, LineIndex, SourceFile};
 use eglur_syntax::parse_validated;
+
+#[path = "signatures/enums.rs"]
+mod enums;
+#[path = "signatures/impl_arguments.rs"]
+mod impl_arguments;
 
 struct PreparedSource {
     file: FileId,
@@ -233,6 +238,173 @@ fn diagnostic_codes(snapshot: &DiagnosticSnapshot) -> Vec<&str> {
         .iter()
         .map(|diagnostic| diagnostic.code().as_str())
         .collect()
+}
+
+#[test]
+fn explicit_variant_visibility_is_rejected_without_poisoning_valid_siblings() {
+    let external = empty_external();
+    for enum_visibility in ["", "pub "] {
+        for payload in ["", "()", "(Missing)", "{ value: Missing }"] {
+            let text = format!(
+                "{enum_visibility}enum Token {{\n pub /* modifier */ Hidden{payload}\n Good(i64)\n}}\n"
+            );
+            let prepared = prepare("main.eglur", &text);
+            let expected_span = prepared
+                .hir
+                .items()
+                .find_map(|(_, item)| {
+                    let eglur_hir::ItemKind::Enum(declaration) = item.kind() else {
+                        return None;
+                    };
+                    Some(prepared.hir.origin(declaration.variants[0].origin).source())
+                })
+                .unwrap();
+            let analysis = analyze(&text, &CapabilitySet::signatures(), Some(&external), None);
+            assert_eq!(
+                diagnostic_codes(&analysis.diagnostics),
+                ["ENUM_VARIANT_VISIBILITY_FORBIDDEN"],
+                "{text}"
+            );
+            assert_eq!(
+                analysis.diagnostics.diagnostics()[0]
+                    .primary_span()
+                    .as_source()
+                    .unwrap()
+                    .file_span(),
+                expected_span
+            );
+
+            let hidden = source_def(
+                &analysis.declarations,
+                "Hidden",
+                DeclarationKind::EnumVariant,
+            );
+            let good = source_def(&analysis.declarations, "Good", DeclarationKind::EnumVariant);
+            let signatures = analysis.signatures.unwrap();
+            assert!(matches!(
+                signatures.source_declaration(hidden),
+                FactState::Poisoned(_)
+            ));
+            assert!(matches!(
+                signatures.source_declaration(good),
+                FactState::Known(DeclarationSignature::EnumVariant {
+                    payload: EnumVariantPayloadSignature::Tuple(fields),
+                    ..
+                }) if fields.len() == 1
+            ));
+        }
+    }
+}
+
+#[test]
+fn type_lookup_diagnostics_select_the_name_path_without_its_arguments() {
+    for (prefix, spelling, name) in [
+        ("", "Missing[i64]", "Missing"),
+        ("", "pkg::Missing[i64]", "pkg::Missing"),
+        (
+            "",
+            "pkg /* path */ :: Missing[i64]",
+            "pkg /* path */ :: Missing",
+        ),
+        ("struct Parcel[T] {}\n", "Parcel[Missing[i64]]", "Missing"),
+    ] {
+        let text = format!("{prefix}type Target = {spelling}\n");
+        let external = empty_external();
+        let analysis = analyze(&text, &CapabilitySet::signatures(), Some(&external), None);
+        assert_eq!(diagnostic_codes(&analysis.diagnostics), ["NAME_NOT_FOUND"]);
+        let range = analysis.diagnostics.diagnostics()[0]
+            .primary_span()
+            .as_source()
+            .unwrap()
+            .file_span()
+            .range();
+        assert_eq!(
+            &text[range.start().as_usize()..range.end().as_usize()],
+            name
+        );
+    }
+}
+
+#[test]
+fn applied_type_diagnostics_keep_the_complete_type_occurrence() {
+    let arity = "TYPE_ARG_ARITY_MISMATCH";
+    let cases = [
+        ("type Target = Never[i64]\n", "Never[i64]", arity),
+        ("type Target = i64[i64]\n", "i64[i64]", arity),
+        ("type Target = Opt[i64, i64]\n", "Opt[i64, i64]", arity),
+        (
+            "struct Parcel[T] {}\ntype Target = Parcel[i64, i64]\n",
+            "Parcel[i64, i64]",
+            arity,
+        ),
+        (
+            "type Id[T] = T\ntype Target = Id[i64, i64]\n",
+            "Id[i64, i64]",
+            arity,
+        ),
+        (
+            "trait Read[T] {}\ntrait Target[X: Read[i64, i64]] {}\n",
+            "Read[i64, i64]",
+            arity,
+        ),
+        ("fn value[T]() -> T[i64] = 0\n", "T[i64]", arity),
+        (
+            "struct S { fn value() -> Self[i64] = 0\n}\n",
+            "Self[i64]",
+            arity,
+        ),
+        (
+            "trait Read { type Item\n}\nfn value[T: Read](x: T::Item[i64]) -> Unit {}\n",
+            "T::Item[i64]",
+            arity,
+        ),
+        (
+            "type Target = Union[i64]\n",
+            "Union[i64]",
+            "UNION_TYPE_ARITY_MISMATCH",
+        ),
+        (
+            "type Target = Union[i64, Bool]\n",
+            "Union[i64, Bool]",
+            "UNION_TYPE_UNSUPPORTED",
+        ),
+        (
+            "trait Read[T] {}\ntype Target = Read[i64]\n",
+            "Read[i64]",
+            "DYN_MUST_BE_EXPLICIT",
+        ),
+        (
+            "fn value[T](x: T::Item[i64]) -> Unit {}\n",
+            "T::Item[i64]",
+            "ASSOCIATED_TYPE_PROJECTION_INVALID",
+        ),
+    ];
+    for (text, spelling, code) in cases {
+        let prepared = prepare("main.eglur", text);
+        let expected = prepared
+            .hir
+            .type_refs()
+            .find_map(|(_, ty)| {
+                let span = prepared.hir.origin(ty.origin()).source();
+                let range = span.range();
+                (text[range.start().as_usize()..range.end().as_usize()].trim() == spelling)
+                    .then_some(span)
+            })
+            .expect("the source contains the tested type occurrence");
+
+        let external = empty_external();
+        let analysis = analyze(text, &CapabilitySet::signatures(), Some(&external), None);
+        assert_eq!(diagnostic_codes(&analysis.diagnostics), [code], "{text}");
+        assert_eq!(
+            analysis.diagnostics.diagnostics()[0]
+                .primary_span()
+                .as_source()
+                .unwrap()
+                .file_span(),
+            expected,
+            "{text}"
+        );
+    }
 }
 
 #[test]
@@ -469,8 +641,24 @@ fn trusted_product_and_sum_inhabitance_rules_bind_to_canonical_types() {
         ),
         TrustedDeclarationSignature::new(
             choice.clone(),
-            TrustedSignatureKind::Nominal {
+            TrustedSignatureKind::Enum {
                 generic_parameters: Box::new([generic("T"), generic("E")]),
+                variants: Box::new([
+                    TrustedEnumVariant {
+                        id: ExternalDefId::new("std::shape::Choice::Left").unwrap(),
+                        name: NameKey::new("Left", false).unwrap(),
+                        payload: TrustedEnumPayload::Tuple(Box::new([
+                            TrustedTypeExpr::GenericParameter(0),
+                        ])),
+                    },
+                    TrustedEnumVariant {
+                        id: ExternalDefId::new("std::shape::Choice::Right").unwrap(),
+                        name: NameKey::new("Right", false).unwrap(),
+                        payload: TrustedEnumPayload::Tuple(Box::new([
+                            TrustedTypeExpr::GenericParameter(1),
+                        ])),
+                    },
+                ]),
             },
         ),
         TrustedDeclarationSignature::new(
@@ -485,13 +673,6 @@ fn trusted_product_and_sum_inhabitance_rules_bind_to_canonical_types() {
         TrustedInhabitanceFact::new(
             wrapper,
             TrustedNominalInhabitance::Product(Box::new([TrustedTypeExpr::GenericParameter(0)])),
-        ),
-        TrustedInhabitanceFact::new(
-            choice,
-            TrustedNominalInhabitance::Sum(Box::new([
-                TrustedInhabitanceProduct::new([TrustedTypeExpr::GenericParameter(0)]),
-                TrustedInhabitanceProduct::new([TrustedTypeExpr::GenericParameter(1)]),
-            ])),
         ),
         TrustedInhabitanceFact::new(empty_seq, TrustedNominalInhabitance::Inhabited),
     ])
@@ -615,14 +796,16 @@ enum Token {
     assert!(matches!(
         signatures.source_declaration(end),
         FactState::Known(DeclarationSignature::EnumVariant {
-            payload: EnumVariantPayloadSignature::Absent
+            payload: EnumVariantPayloadSignature::Absent,
+            ..
         })
     ));
     let pair = source_def(&analysis.declarations, "Pair", DeclarationKind::EnumVariant);
     assert!(matches!(
         signatures.source_declaration(pair),
         FactState::Known(DeclarationSignature::EnumVariant {
-            payload: EnumVariantPayloadSignature::Tuple(elements)
+            payload: EnumVariantPayloadSignature::Tuple(elements),
+            ..
         }) if elements.len() == 2
     ));
     let number = source_def(
@@ -633,7 +816,8 @@ enum Token {
     assert!(matches!(
         signatures.source_declaration(number),
         FactState::Known(DeclarationSignature::EnumVariant {
-            payload: EnumVariantPayloadSignature::Named(fields)
+            payload: EnumVariantPayloadSignature::Named(fields),
+            ..
         }) if fields.len() == 1
     ));
 }

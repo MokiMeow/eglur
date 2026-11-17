@@ -59,6 +59,7 @@ pub enum TypecheckCapability {
     CheckClosures,
     CheckContainers,
     CheckOwnershipFlow,
+    CheckCompleteOwnershipFlow,
     CheckUnsafeExpressions,
     AnalyzeInhabitance,
     AnalyzeTensorSource,
@@ -95,6 +96,7 @@ impl TypecheckCapability {
             Self::CheckClosures => "typecheck.closures",
             Self::CheckContainers => "typecheck.containers",
             Self::CheckOwnershipFlow => "typecheck.ownership_flow",
+            Self::CheckCompleteOwnershipFlow => "typecheck.complete_ownership_flow",
             Self::CheckUnsafeExpressions => "typecheck.unsafe_expressions",
             Self::AnalyzeInhabitance => "typecheck.inhabitance",
             Self::AnalyzeTensorSource => "typecheck.tensor_source",
@@ -112,7 +114,7 @@ pub enum CompileCapability {
 
 impl CompileCapability {
     /// Complete closed capability vocabulary for this compiler revision.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::Resolve(ResolveCapability::CollectDeclarations),
         Self::Resolve(ResolveCapability::ResolveFileSetImports),
         Self::Resolve(ResolveCapability::ResolveLexicalValues),
@@ -144,6 +146,7 @@ impl CompileCapability {
         Self::Typecheck(TypecheckCapability::CheckClosures),
         Self::Typecheck(TypecheckCapability::CheckContainers),
         Self::Typecheck(TypecheckCapability::CheckOwnershipFlow),
+        Self::Typecheck(TypecheckCapability::CheckCompleteOwnershipFlow),
         Self::Typecheck(TypecheckCapability::CheckUnsafeExpressions),
         Self::Typecheck(TypecheckCapability::AnalyzeInhabitance),
         Self::Typecheck(TypecheckCapability::AnalyzeTensorSource),
@@ -193,6 +196,9 @@ impl CompileCapability {
             Self::Typecheck(TypecheckCapability::ResolveTraitEnvironment) => DECLARATION_SIGNATURES,
             Self::Typecheck(TypecheckCapability::CheckBodies) => TRAIT_ENVIRONMENT,
             Self::Typecheck(TypecheckCapability::ResolveTraitEvidence) => BODIES,
+            Self::Typecheck(TypecheckCapability::CheckCompleteOwnershipFlow) => {
+                &[Self::Typecheck(TypecheckCapability::CheckOwnershipFlow)]
+            }
             Self::Typecheck(TypecheckCapability::ComputeEffectSummaries) => TRAIT_EVIDENCE,
             Self::Typecheck(TypecheckCapability::CheckSelectedCheckedIntegerArithmetic) => {
                 FAILURE_FLOW

@@ -22,8 +22,8 @@ fn deferred_named_argument_uses_later_evidence_without_reordering_evaluation() {
             .expect("consume invocation is fully inferred");
 
         assert_eq!(
-            invocation.evaluation_order(),
-            [invocation.arguments()[1], invocation.arguments()[0]]
+            invocation.evaluation_order().collect::<Vec<_>>(),
+            [&invocation.arguments()[1], &invocation.arguments()[0]]
         );
         let snapshot = session.into_diagnostics(None);
         assert!(

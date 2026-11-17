@@ -3,8 +3,8 @@ use eglur_hir::{ExprId, Mutability};
 use crate::{
     CallableInstanceId, CallableSignatureId, CanonicalTarget, CheckedNumericOperation,
     ControlRegion, ControlRegionKey, ControlTransfer, DefId, ExpressionKey, FactState, FactTable,
-    GenericParameterId, IntegerValue, LocalBindingId, NormalContinuation, SemanticFact,
-    SemanticLocation, SubstId, TraitRef, TypeId, WitnessSlotId,
+    GenericParameterId, IntegerValue, LocalBindingId, NormalContinuation, ReferenceMutability,
+    SemanticFact, SemanticLocation, SubstId, TraitRef, TypeId, WitnessSlotId,
 };
 
 /// Stable storage identity retained for a typed place expression.
@@ -199,29 +199,83 @@ pub enum InvocationTarget {
     },
 }
 
+/// Evaluation selected by typing, before a value is bound to a parameter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArgumentPassing {
+    Value,
+    BorrowPlace(ReferenceMutability),
+    BorrowTemporary(ReferenceMutability),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvocationArgument {
+    expression: ExprId,
+    passing: ArgumentPassing,
+}
+
+impl InvocationArgument {
+    pub(super) const fn new(expression: ExprId, passing: ArgumentPassing) -> Self {
+        Self {
+            expression,
+            passing,
+        }
+    }
+
+    #[must_use]
+    pub const fn expression(self) -> ExprId {
+        self.expression
+    }
+
+    #[must_use]
+    pub const fn passing(self) -> ArgumentPassing {
+        self.passing
+    }
+}
+
 /// Evaluator-facing invocation fact; no lookup or argument rebinding remains.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InvocationFact {
-    pub(super) target: InvocationTarget,
-    pub(super) arguments: Box<[ExprId]>,
-    pub(super) evaluation_order: Box<[ExprId]>,
+    target: InvocationTarget,
+    arguments: Box<[InvocationArgument]>,
+    evaluation_order: Box<[usize]>,
 }
 
 impl InvocationFact {
+    pub(super) fn new(
+        target: InvocationTarget,
+        arguments: impl IntoIterator<Item = (usize, InvocationArgument)>,
+    ) -> Self {
+        let (source_order, arguments): (Vec<_>, Vec<_>) = arguments.into_iter().unzip();
+        let mut evaluation_order = (0..arguments.len()).collect::<Vec<_>>();
+        evaluation_order.sort_by_key(|&index| source_order[index]);
+        debug_assert!(
+            evaluation_order
+                .windows(2)
+                .all(|pair| source_order[pair[0]] != source_order[pair[1]]),
+            "checked invocation slots must have distinct evaluation order"
+        );
+        Self {
+            target,
+            arguments: arguments.into_boxed_slice(),
+            evaluation_order: evaluation_order.into_boxed_slice(),
+        }
+    }
+
     #[must_use]
     pub const fn target(&self) -> &InvocationTarget {
         &self.target
     }
 
     #[must_use]
-    pub fn arguments(&self) -> &[ExprId] {
+    pub fn arguments(&self) -> &[InvocationArgument] {
         &self.arguments
     }
 
     /// Returns arguments in normative source evaluation order.
-    #[must_use]
-    pub fn evaluation_order(&self) -> &[ExprId] {
-        &self.evaluation_order
+    pub fn evaluation_order(&self) -> impl ExactSizeIterator<Item = &InvocationArgument> {
+        self.evaluation_order
+            .iter()
+            .map(|&index| &self.arguments[index])
     }
 }
 

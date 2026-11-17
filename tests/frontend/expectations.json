@@ -16848,6 +16848,114 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-parser",
+        "test_id": "PAR-axis-anonymous-pack-cannot-be-parenthesized"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn main!() -> Res[Str, Str] {\n  let op = view{ (...) -> a }\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-parser",
+        "test_id": "PAR-axis-named-pack-cannot-be-parenthesized"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn main!() -> Res[Str, Str] {\n  let op = rearrange{ a -> (...tail) }\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-parser",
+        "test_id": "PAR-axis-pack-cannot-complete-a-product"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn main!() -> Res[Str, Str] {\n  let op = einop{ a -> a * ... }\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-parser",
+        "test_id": "PAR-axis-pack-cannot-complete-a-sum"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn main!() -> Res[Str, Str] {\n  let op = reduce{ a -> a + ...tail }\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-parser",
+        "test_id": "PAR-axis-pack-cannot-start-a-product"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn main!() -> Res[Str, Str] {\n  let op = contract{ ...tail * a -> b }\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-parser",
+        "test_id": "PAR-axis-pack-cannot-start-a-sum"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn main!() -> Res[Str, Str] {\n  let op = inflate{ ... + a -> a }\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": "PARSE_UNEXPECTED_TOKEN",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-parser",
         "test_id": "PAR-bare-brace-key-value-form-is-not-a-map-literal"
       },
       "public_examples": [],
@@ -38388,6 +38496,40 @@
     {
       "entrypoint": "expression",
       "expectation": {
+        "diagnostic_code": "PARSE_INVALID_REST_POSITION",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "named-pattern-separated-rests-are-rejected",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Record { .., first, .. } => first }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "named-variant-pattern-leading-rest",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Owner::Case { .., value } => value }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
         "diagnostic_code": null,
         "kind": "success",
         "primary_span": null
@@ -38400,6 +38542,40 @@
       "source": {
         "kind": "utf8",
         "text": "add((1\n+ 2), 3)"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": "PARSE_INVALID_REST_POSITION",
+        "kind": "parse_failure",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "nested-named-pattern-duplicate-rest-is-rejected",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Outer { .., child: Inner { .., leaf, .. } } => leaf }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "nested-pattern-payloads-have-independent-rests",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Owner::Case { .., child: { .., leaf }, pair: (first, ..) } => leaf }"
       }
     },
     {
@@ -38580,6 +38756,23 @@
         "primary_span": null
       },
       "origin": {
+        "case_id": "pathless-named-pattern-leading-rest",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { { .., value } => value }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
         "case_id": "reduce-canonical-axis-set-selects-phase",
         "kind": "syntax_case"
       },
@@ -38709,6 +38902,40 @@
       }
     },
     {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "struct-pattern-interior-rest",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Record { first, .., last: renamed } => renamed }"
+      }
+    },
+    {
+      "entrypoint": "expression",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "case_id": "struct-pattern-leading-rest",
+        "kind": "syntax_case"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "match input { Record { .., value } => value }"
+      }
+    },
+    {
       "entrypoint": "expression_sequence",
       "expectation": {
         "diagnostic_code": null,
@@ -38777,6 +39004,6 @@
       }
     }
   ],
-  "input_digest": "sha256:0b2be25928b0234cfe6b73be442349e7dfc18414bb74d3305a77f602209caf54",
+  "input_digest": "sha256:3857ef96ef9252405b7b2fdef6687bf8577f44ff4fa1976a008e3fe248efbec2",
   "schema_version": "0.1"
 }

@@ -149,6 +149,9 @@ impl<'a> Evaluator<'a> {
             }
             ExprKind::Literal(literal) => self.eval_literal(frame.module, expression, &literal),
             ExprKind::Unit => Flow::Value(RuntimeValue::Value(Value::Unit)),
+            ExprKind::Name(_) if self.view.invocation(frame.module, expression).is_some() => {
+                self.eval_invocation(frame, expression)
+            }
             ExprKind::Name(_) => self.eval_name(frame, expression),
             ExprKind::Group(inner) | ExprKind::Unsafe(inner) => self.eval_expr(frame, inner),
             ExprKind::Tuple(values) => {
@@ -444,14 +447,14 @@ impl<'a> Evaluator<'a> {
         };
         let mut evaluated = BTreeMap::new();
         for argument in invocation.evaluation_order() {
-            let value = flow_value!(self.eval_expr(frame, *argument));
-            if evaluated.insert(*argument, value).is_some() {
+            let value = flow_value!(self.eval_argument(frame, *argument));
+            if evaluated.insert(argument.expression(), value).is_some() {
                 return invalid_flow();
             }
         }
         let mut arguments = Vec::with_capacity(invocation.arguments().len());
         for argument in invocation.arguments() {
-            let Some(value) = evaluated.remove(argument) else {
+            let Some(value) = evaluated.remove(&argument.expression()) else {
                 return invalid_flow();
             };
             arguments.push(value);
@@ -479,14 +482,24 @@ impl<'a> Evaluator<'a> {
                 else {
                     return invalid_flow();
                 };
-                let target = match self.view.trait_adapter_target(
+                let target = match self.view.trait_adapter_dispatch(
                     &direct_target,
                     frame.module,
                     invocation.arguments(),
                     environment,
                     &frame.witnesses,
                 ) {
-                    Ok(Some(target)) => target,
+                    Ok(Some(adapter)) => {
+                        if let Some(index) = adapter.borrow_argument {
+                            let Some(argument) = arguments.get_mut(index) else {
+                                return invalid_flow();
+                            };
+                            let value =
+                                std::mem::replace(argument, RuntimeValue::Value(Value::Unit));
+                            *argument = self.store.borrow_temporary(value);
+                        }
+                        adapter.target
+                    }
                     Ok(None) => direct_target,
                     Err(_) => return invalid_flow(),
                 };
@@ -500,6 +513,23 @@ impl<'a> Evaluator<'a> {
                         arguments,
                     ),
                 }
+            }
+        }
+    }
+
+    fn eval_argument(&mut self, frame: &mut Frame, argument: InvocationArgument) -> Flow {
+        match argument.passing() {
+            ArgumentPassing::Value => self.eval_expr(frame, argument.expression()),
+            ArgumentPassing::BorrowPlace(_) => {
+                match self.resolve_place(frame, argument.expression()) {
+                    Ok(Some(place)) => Flow::Value(RuntimeValue::Reference(place)),
+                    Ok(None) => invalid_flow(),
+                    Err(flow) => flow,
+                }
+            }
+            ArgumentPassing::BorrowTemporary(_) => {
+                let value = flow_value!(self.eval_expr(frame, argument.expression()));
+                Flow::Value(self.store.borrow_temporary(value))
             }
         }
     }
@@ -589,6 +619,15 @@ impl<'a> Evaluator<'a> {
         };
         let mut values = Vec::with_capacity(arguments.len());
         for argument in arguments {
+            let argument = match (hook, argument) {
+                (RuntimeHook::ToStr, RuntimeValue::Reference(place)) => {
+                    let Some(value) = self.store.read(&place) else {
+                        return invalid_flow();
+                    };
+                    value
+                }
+                (_, value) => value,
+            };
             let Some(value) = argument.into_public() else {
                 return invalid_flow();
             };

@@ -110,9 +110,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             )));
         }
 
-        let callee = context
+        let (callee_id, callee) = context
             .body
-            .expression(call.callee)
+            .grouping_chain(call.callee)
+            .last()
             .ok_or(BodyTypingError::WrongBodyExpression(call.callee))?;
         if let ExprKind::Member { receiver, member } = callee.kind() {
             return self.prepare_method_call(
@@ -127,10 +128,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 },
             );
         }
+        if !matches!(callee.kind(), ExprKind::Name(_)) {
+            return Ok(InvocationPlan::Complete(self.unsupported(
+                TypecheckCapability::CheckClosures,
+                source,
+                origin,
+            )));
+        }
 
         let callee_key = ResolutionKey::Expression {
             module,
-            expression: call.callee,
+            expression: callee_id,
         };
         let targets = match self.names.fact(callee_key) {
             FactState::Known(ResolvedName::Declarations(targets)) => targets,
@@ -346,12 +354,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: index,
-                receiver_adjustment: false,
+                passing: ArgumentPassing::Value,
             })
             .collect::<Vec<_>>();
         let qualified = body
-            .expression(call.callee)
-            .and_then(|callee| match callee.kind() {
+            .grouping_chain(call.callee)
+            .last()
+            .and_then(|(_, callee)| match callee.kind() {
                 ExprKind::Name(path) => Some(path.is_qualified()),
                 _ => None,
             })
@@ -392,6 +401,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         request: MethodCallRequest<'_>,
         candidate: MethodCandidate,
+        passing: ArgumentPassing,
     ) -> Result<InvocationPlan, BodyTypingError> {
         let source = context.source;
         let bindings =
@@ -408,7 +418,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             origin: self.expression_origin(source, request.receiver)?,
             related: self.parameter_span(&candidate.callable, receiver_parameter)?,
             evaluation_order: 0,
-            receiver_adjustment: true,
+            passing,
         });
         for (parameter_index, parameter) in candidate.callable.parameters()[1..].iter().enumerate()
         {
@@ -424,7 +434,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: self.parameter_span(&candidate.callable, parameter)?,
                 evaluation_order: argument_index + 1,
-                receiver_adjustment: false,
+                passing: ArgumentPassing::Value,
             });
         }
         let plan = self.prepare_application(
@@ -550,15 +560,31 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 application.specialized_slots.iter().copied(),
                 application.result,
             )?;
-            self.record_expression(
-                ExpressionKey::new(module, callee),
-                Outcome::Known(self.value_expression(callee_ty)),
-            )?;
+            self.record_callee_type(context, callee, callee_ty)?;
         }
         Ok(Outcome::Known(self.value_expression_with_continuation(
             application.result,
             application.normal_continuation,
         )))
+    }
+
+    pub(super) fn record_callee_type(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        callee: ExprId,
+        ty: TypeId,
+    ) -> Result<(), BodyTypingError> {
+        let mut chain = context.body.grouping_chain(callee).peekable();
+        if chain.peek().is_none() {
+            return Err(BodyTypingError::WrongBodyExpression(callee));
+        }
+        for (expression, _) in chain {
+            self.record_expression(
+                ExpressionKey::new(context.module, expression),
+                Outcome::Known(self.value_expression(ty)),
+            )?;
+        }
+        Ok(())
     }
 
     pub(super) fn prepare_reduce_by_candidate(
@@ -575,19 +601,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             body,
             ..
         } = context;
-        let mut receiver = candidate.receiver;
-        let canonical = loop {
-            let receiver_expression = body
-                .expression(receiver)
-                .ok_or(BodyTypingError::WrongBodyExpression(receiver))?;
-            match receiver_expression.kind() {
-                ExprKind::TensorSchema(schema) => {
-                    break schema.family == TensorSchemaFamily::Reduce;
-                }
-                ExprKind::Group(inner) => receiver = *inner,
-                _ => break false,
-            }
-        };
+        let (_, receiver) = body
+            .grouping_chain(candidate.receiver)
+            .last()
+            .ok_or(BodyTypingError::WrongBodyExpression(candidate.receiver))?;
+        let canonical = matches!(receiver.kind(), ExprKind::TensorSchema(schema) if schema.family == TensorSchemaFamily::Reduce);
 
         if canonical {
             let commitment = if candidate

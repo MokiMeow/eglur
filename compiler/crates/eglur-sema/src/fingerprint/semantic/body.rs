@@ -1071,11 +1071,22 @@ impl NodeHasher<'_> {
         }
         builder.write_len(invocation.arguments().len());
         for &argument in invocation.arguments() {
-            builder.write_digest(self.expression_digest(argument)?);
+            builder.write_digest(self.expression_digest(argument.expression())?);
+            match argument.passing() {
+                crate::ArgumentPassing::Value => builder.write_u8(0),
+                crate::ArgumentPassing::BorrowPlace(mutability) => {
+                    builder.write_u8(1);
+                    builder.write_bool(mutability == crate::ReferenceMutability::Mutable);
+                }
+                crate::ArgumentPassing::BorrowTemporary(mutability) => {
+                    builder.write_u8(2);
+                    builder.write_bool(mutability == crate::ReferenceMutability::Mutable);
+                }
+            }
         }
         builder.write_len(invocation.evaluation_order().len());
-        for &argument in invocation.evaluation_order() {
-            builder.write_digest(self.expression_digest(argument)?);
+        for argument in invocation.evaluation_order() {
+            builder.write_digest(self.expression_digest(argument.expression())?);
         }
         Ok(())
     }

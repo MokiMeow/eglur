@@ -2,6 +2,11 @@ use super::*;
 
 pub(super) struct InvalidTraitAdapterDispatch;
 
+pub(super) struct TraitAdapterDispatch {
+    pub(super) target: CanonicalTarget,
+    pub(super) borrow_argument: Option<usize>,
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct ProgramView<'a> {
     pub(super) program: &'a CheckedProgram,
@@ -56,6 +61,19 @@ impl<'a> ProgramView<'a> {
         Some(self.source_for_module(module)?.hir().body(body))
     }
 
+    pub(super) fn callable_signature(
+        &self,
+        target: &CanonicalTarget,
+    ) -> Option<&'a CallableSignature> {
+        let signatures = self.program.resolution().signatures();
+        let FactState::Known(DeclarationSignature::Callable(signature)) =
+            signatures.declaration(target)
+        else {
+            return None;
+        };
+        signatures.callable(*signature)
+    }
+
     pub(super) fn trait_evidence(&self) -> Option<&'a TraitEvidence> {
         match self.program.resolution().trait_evidence() {
             PhaseProduct::Performed(evidence) => Some(evidence),
@@ -93,14 +111,14 @@ impl<'a> ProgramView<'a> {
         Some((invocation, checked))
     }
 
-    pub(super) fn trait_adapter_target(
+    pub(super) fn trait_adapter_dispatch(
         &self,
         callable: &CanonicalTarget,
         module: ModuleId,
-        arguments: &[ExprId],
+        arguments: &[InvocationArgument],
         environment: &EvidenceEnvironment,
         witnesses: &Witnesses,
-    ) -> Result<Option<CanonicalTarget>, InvalidTraitAdapterDispatch> {
+    ) -> Result<Option<TraitAdapterDispatch>, InvalidTraitAdapterDispatch> {
         let resolution = self.program.resolution();
         let Some(adapter) = resolution.signatures().trait_adapter(callable) else {
             return Ok(None);
@@ -110,7 +128,7 @@ impl<'a> ProgramView<'a> {
             .ok_or(InvalidTraitAdapterDispatch)?;
         let FactState::Known(typed) = resolution
             .body_types()
-            .expression(ExpressionKey::new(module, *argument))
+            .expression(ExpressionKey::new(module, argument.expression()))
         else {
             return Err(InvalidTraitAdapterDispatch);
         };
@@ -138,12 +156,24 @@ impl<'a> ProgramView<'a> {
         let [implementation] = implementations.as_slice() else {
             return Err(InvalidTraitAdapterDispatch);
         };
-        resolution
+        let target = resolution
             .trait_environment()
             .checked_impl_method(implementation, adapter.method())
             .cloned()
-            .map(Some)
-            .ok_or(InvalidTraitAdapterDispatch)
+            .ok_or(InvalidTraitAdapterDispatch)?;
+        let parameter = self
+            .callable_signature(adapter.method())
+            .and_then(|signature| signature.parameters().get(adapter.argument()))
+            .ok_or(InvalidTraitAdapterDispatch)?;
+        let borrow_argument = match resolution.signatures().types().kind(parameter.ty()) {
+            Ok(TypeKind::Reference { .. }) => Some(adapter.argument()),
+            Ok(_) => None,
+            Err(_) => return Err(InvalidTraitAdapterDispatch),
+        };
+        Ok(Some(TraitAdapterDispatch {
+            target,
+            borrow_argument,
+        }))
     }
 }
 

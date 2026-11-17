@@ -515,7 +515,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     &context,
                 )?;
                 merge_resolution_poison(
-                    resolved.map(|ty| DeclarationSignature::Field { ty }),
+                    resolved.map(|ty| DeclarationSignature::Field {
+                        name: NameKey::from_hir(&value.name).expect("valid field name"),
+                        ty,
+                    }),
                     poison,
                 )?
             }
@@ -1014,7 +1017,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     } else if self.types.contains_reference(ty)? {
                         Some((
                             "REFERENCE_TYPE_POSITION_FORBIDDEN",
-                            "reference type is forbidden in an associated type binding",
+                            "reference type position is forbidden for an associated type binding",
                         ))
                     } else {
                         None
@@ -1215,16 +1218,29 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         if !variant.name.is_valid() {
             return self.invalid_resolution(source, variant.name.origin());
         }
+        if variant.visibility == eglur_hir::Visibility::Public {
+            return Ok(Resolution::Poisoned(self.source_error(
+                source,
+                variant.origin,
+                "ENUM_VARIANT_VISIBILITY_FORBIDDEN",
+                "enum variant visibility modifiers are forbidden in v0.1",
+                BTreeMap::new(),
+            )?));
+        }
         let context = self.source_context(parent, false)?;
         match &variant.payload {
             EnumVariantPayload::Absent => {
                 Ok(Resolution::Known(DeclarationSignature::EnumVariant {
+                    owner: CanonicalTarget::Source(parent),
+                    name: NameKey::from_hir(&variant.name).expect("valid variant name"),
                     payload: EnumVariantPayloadSignature::Absent,
                 }))
             }
             EnumVariantPayload::Tuple(types) => Ok(self
                 .resolve_source_types(parent, source, hir, types, TypePosition::Ordinary, &context)?
                 .map(|fields| DeclarationSignature::EnumVariant {
+                    owner: CanonicalTarget::Source(parent),
+                    name: NameKey::from_hir(&variant.name).expect("valid variant name"),
                     payload: EnumVariantPayloadSignature::Tuple(fields.into_boxed_slice()),
                 })),
             EnumVariantPayload::Named(fields) => {
@@ -1245,6 +1261,20 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         .ok_or(SignatureResolutionError::WrongDeclarationItem(
                             declaration_id,
                         ))?;
+                    if !field.name.is_valid() {
+                        let found = source.invalid_poison(field.name.origin()).cloned().ok_or(
+                            SignatureResolutionError::MissingInvalidPoison {
+                                file: source.file(),
+                                origin: field.name.origin(),
+                            },
+                        )?;
+                        self.declarations.insert(
+                            CanonicalTarget::Source(field_id),
+                            SemanticFact::Poisoned(found.clone()),
+                        )?;
+                        merge_poison(&mut poison, &found)?;
+                        continue;
+                    }
                     match self.resolve_source_type(
                         parent,
                         source,
@@ -1257,7 +1287,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             resolved.push(CanonicalTarget::Source(field_id));
                             self.declarations.insert(
                                 CanonicalTarget::Source(field_id),
-                                SemanticFact::Known(DeclarationSignature::Field { ty }),
+                                SemanticFact::Known(DeclarationSignature::Field {
+                                    name: NameKey::from_hir(&field.name).expect("valid field name"),
+                                    ty,
+                                }),
                             )?;
                         }
                         Resolution::Poisoned(found) => {
@@ -1276,6 +1309,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     Resolution::Unperformed
                 } else {
                     Resolution::Known(DeclarationSignature::EnumVariant {
+                        owner: CanonicalTarget::Source(parent),
+                        name: NameKey::from_hir(&variant.name).expect("valid variant name"),
                         payload: EnumVariantPayloadSignature::Named(resolved.into_boxed_slice()),
                     })
                 })
@@ -1341,7 +1376,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             TypePosition::Ordinary,
             &context,
         )
-        .map(|result| result.map(|ty| DeclarationSignature::Field { ty }))
+        .map(|result| {
+            result.map(|ty| DeclarationSignature::Field {
+                name: NameKey::from_hir(&field.name).expect("valid field name"),
+                ty,
+            })
+        })
     }
 
     pub(super) fn is_method(&self, declaration_id: DefId) -> bool {

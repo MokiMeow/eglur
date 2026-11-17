@@ -11,6 +11,7 @@ enum ContractMatch {
     Matches,
     Mismatch,
     Poisoned(Poison),
+    InvalidArgument(crate::ImplArgumentViolation),
 }
 
 pub(super) fn validate_impl_methods(
@@ -153,6 +154,18 @@ pub(super) fn validate_impl_methods(
                 )? {
                     ContractMatch::Matches => matching.push(candidate),
                     ContractMatch::Mismatch => {}
+                    ContractMatch::InvalidArgument(violation) => {
+                        let (code, message) =
+                            crate::diagnostic::impl_argument_diagnostic(violation);
+                        let poison = crate::diagnostic::record_type_error(
+                            diagnostics,
+                            code,
+                            message,
+                            source_declaration_span(collection, &source_map, candidate)?,
+                            BTreeMap::new(),
+                        )?;
+                        merge_optional_poison(&mut candidate_poison, &poison)?;
+                    }
                     ContractMatch::Poisoned(poison) => {
                         merge_optional_poison(&mut candidate_poison, &poison)?;
                     }
@@ -421,6 +434,10 @@ fn method_contract_matches(
             (ContractType::Poisoned(poison), _) | (_, ContractType::Poisoned(poison)) => {
                 return Ok(ContractMatch::Poisoned(poison));
             }
+            (ContractType::InvalidArgument(violation), _)
+            | (_, ContractType::InvalidArgument(violation)) => {
+                return Ok(ContractMatch::InvalidArgument(violation));
+            }
             _ => return Ok(ContractMatch::Mismatch),
         }
     }
@@ -439,6 +456,10 @@ fn method_contract_matches(
         (ContractType::Known(expected), ContractType::Known(actual)) if expected == actual => {}
         (ContractType::Poisoned(poison), _) | (_, ContractType::Poisoned(poison)) => {
             return Ok(ContractMatch::Poisoned(poison));
+        }
+        (ContractType::InvalidArgument(violation), _)
+        | (_, ContractType::InvalidArgument(violation)) => {
+            return Ok(ContractMatch::InvalidArgument(violation));
         }
         _ => return Ok(ContractMatch::Mismatch),
     }
@@ -478,6 +499,10 @@ fn method_contract_matches(
             (ContractBounds::Poisoned(poison), _) | (_, ContractBounds::Poisoned(poison)) => {
                 return Ok(ContractMatch::Poisoned(poison));
             }
+            (ContractBounds::InvalidArgument(violation), _)
+            | (_, ContractBounds::InvalidArgument(violation)) => {
+                return Ok(ContractMatch::InvalidArgument(violation));
+            }
             _ => return Ok(ContractMatch::Mismatch),
         }
     }
@@ -489,6 +514,7 @@ enum ContractType {
     Known(TypeId),
     Unresolved,
     Poisoned(Poison),
+    InvalidArgument(crate::ImplArgumentViolation),
 }
 
 #[derive(Clone, Debug)]
@@ -496,6 +522,7 @@ enum ContractBounds {
     Known(Vec<TraitRef>),
     Unresolved,
     Poisoned(Poison),
+    InvalidArgument(crate::ImplArgumentViolation),
 }
 
 #[derive(Clone, Debug)]
@@ -539,6 +566,7 @@ fn normalize_contract_type(
             ContractType::Known(ty)
         }
         TraitNormalization::Poisoned(poison) => ContractType::Poisoned(poison),
+        TraitNormalization::InvalidArgument(violation) => ContractType::InvalidArgument(violation),
         TraitNormalization::Unsatisfied(_)
         | TraitNormalization::Ambiguous(_)
         | TraitNormalization::Cyclic(_) => ContractType::Unresolved,
@@ -585,6 +613,9 @@ fn normalize_contract_bounds(
             match normalize_contract_type(environment, signatures, implementation, argument)? {
                 ContractType::Known(argument) => normalized_arguments.push(argument),
                 ContractType::Unresolved => return Ok(ContractBounds::Unresolved),
+                ContractType::InvalidArgument(violation) => {
+                    return Ok(ContractBounds::InvalidArgument(violation));
+                }
                 ContractType::Poisoned(poison) => {
                     return Ok(ContractBounds::Poisoned(poison));
                 }

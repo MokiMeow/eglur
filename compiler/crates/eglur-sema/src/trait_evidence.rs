@@ -238,6 +238,15 @@ pub fn resolve_trait_evidence(
                     poison = Some(found);
                     break;
                 }
+                TraitProof::InvalidArgument(violation) => {
+                    poison = Some(record_invalid_impl_argument(
+                        &source_map,
+                        pending.location(),
+                        violation,
+                        diagnostics,
+                    )?);
+                    break;
+                }
                 TraitProof::Unsatisfied(failed) | TraitProof::Ambiguous(failed) => {
                     poison = Some(record_unsatisfied_bound(
                         collection,
@@ -268,6 +277,16 @@ pub fn resolve_trait_evidence(
                 }
                 TraitProof::Poisoned(found) => {
                     checked.insert(key, SemanticFact::Poisoned(found))?;
+                    continue;
+                }
+                TraitProof::InvalidArgument(violation) => {
+                    let poison = record_invalid_impl_argument(
+                        &source_map,
+                        pending.location(),
+                        violation,
+                        diagnostics,
+                    )?;
+                    checked.insert(key, SemanticFact::Poisoned(poison))?;
                     continue;
                 }
                 TraitProof::Unsatisfied(failed) | TraitProof::Ambiguous(failed) => {
@@ -447,6 +466,37 @@ fn record_unsatisfied_bound(
         "trait bound is not satisfied",
         span,
         data,
+    )?)
+}
+
+fn record_invalid_impl_argument(
+    sources: &BTreeMap<FileId, &SemanticSource<'_>>,
+    location: SemanticLocation,
+    violation: crate::ImplArgumentViolation,
+    diagnostics: &mut DiagnosticStore,
+) -> Result<Poison, TraitEvidenceError> {
+    let source = sources
+        .get(&location.file())
+        .copied()
+        .ok_or(TraitEvidenceError::MissingSource(location.file()))?;
+    let origin = location
+        .hir_origin()
+        .ok_or(TraitEvidenceError::MissingOrigin(location.file()))?;
+    let span =
+        source
+            .origin_span(origin)
+            .cloned()
+            .ok_or(TraitEvidenceError::MissingOriginSpan {
+                file: location.file(),
+                origin,
+            })?;
+    let (code, message) = crate::diagnostic::impl_argument_diagnostic(violation);
+    Ok(record_type_error(
+        diagnostics,
+        code,
+        message,
+        span,
+        BTreeMap::new(),
     )?)
 }
 

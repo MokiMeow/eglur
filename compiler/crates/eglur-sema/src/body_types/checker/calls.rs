@@ -372,11 +372,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .collect()
     }
 
-    pub(super) fn adjusted_method_receiver_type(
+    pub(super) fn adjusted_method_receiver(
         &mut self,
         callable: &CallableSignature,
         receiver: &TypedExpression,
-    ) -> Result<Option<TypeId>, BodyTypingError> {
+    ) -> Result<Option<(TypeId, ArgumentPassing)>, BodyTypingError> {
         let Some(parameter) = callable.parameters().first() else {
             return Ok(None);
         };
@@ -385,7 +385,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ..
         } = self.signatures.types().kind(parameter.ty())?
         else {
-            return Ok(Some(receiver.ty));
+            return Ok(Some((receiver.ty, ArgumentPassing::Value)));
         };
         let expected = *expected;
         if let TypeKind::Reference {
@@ -396,14 +396,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             let actual = *actual;
             let referent = *referent;
             if actual == expected {
-                return Ok(Some(receiver.ty));
+                return Ok(Some((receiver.ty, ArgumentPassing::Value)));
             }
             if expected == ReferenceMutability::Shared && actual == ReferenceMutability::Mutable {
-                return Ok(Some(
+                return Ok(Some((
                     self.signatures
                         .types_mut()
                         .reference(ReferenceMutability::Shared, referent)?,
-                ));
+                    ArgumentPassing::Value,
+                )));
             }
             return Ok(None);
         }
@@ -412,11 +413,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         {
             return Ok(None);
         }
-        Ok(Some(
+        let passing = if receiver.place.is_some() {
+            ArgumentPassing::BorrowPlace(expected)
+        } else {
+            ArgumentPassing::BorrowTemporary(expected)
+        };
+        Ok(Some((
             self.signatures
                 .types_mut()
                 .reference(expected, receiver.ty)?,
-        ))
+            passing,
+        )))
     }
 
     pub(super) fn specialize_trait_ref(
@@ -871,7 +878,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: self.parameter_span(callable, parameter)?,
                 evaluation_order: argument_index,
-                receiver_adjustment: false,
+                passing: ArgumentPassing::Value,
             });
         }
         Ok(Outcome::Known(slots))
@@ -903,24 +910,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         slot: &ApplicationSlot,
         mut value: TypedExpression,
     ) -> Result<TypedExpression, BodyTypingError> {
-        if !slot.receiver_adjustment
-            || matches!(
-                self.signatures.types().kind(value.ty)?,
-                TypeKind::Reference { .. }
-            )
-        {
+        if matches!(
+            self.signatures.types().kind(value.ty)?,
+            TypeKind::Reference { .. }
+        ) {
             return Ok(value);
         }
-        let TypeKind::Reference { mutability, .. } = self.signatures.types().kind(slot.template)?
-        else {
-            return Ok(value);
+        let mutability = match slot.passing {
+            ArgumentPassing::Value => return Ok(value),
+            ArgumentPassing::BorrowPlace(mutability)
+            | ArgumentPassing::BorrowTemporary(mutability) => mutability,
         };
-        let mutability = *mutability;
-        if mutability == ReferenceMutability::Mutable
-            && !value.place.as_ref().is_some_and(TypedPlace::is_writable)
-        {
-            return Ok(value);
-        }
         value.ty = self
             .signatures
             .types_mut()

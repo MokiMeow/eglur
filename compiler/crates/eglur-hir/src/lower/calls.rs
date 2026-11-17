@@ -16,7 +16,7 @@ pub(super) struct PostfixApplication {
 
 impl PostfixApplication {
     pub(super) fn from_syntax(node: &SyntaxNode) -> Option<Self> {
-        let callee = expression_children(node).into_iter().next()?;
+        let callee = Self::without_groups(expression_children(node).into_iter().next()?)?;
         if callee.kind() != SyntaxKind::MemberExpr
             || direct_child(node, SyntaxKind::TypeArgumentList).is_some()
         {
@@ -35,8 +35,12 @@ impl PostfixApplication {
         let receiver = expression_children(&callee).into_iter().next()?;
         let inputs = match syntax {
             CallSyntax::PostfixThen => vec![receiver],
-            CallSyntax::PostfixApply if receiver.kind() == SyntaxKind::TupleExpr => {
-                expression_children(&receiver)
+            CallSyntax::PostfixApply => {
+                let tuple = Self::without_groups(receiver)?;
+                if tuple.kind() != SyntaxKind::TupleExpr {
+                    return None;
+                }
+                expression_children(&tuple)
             }
             _ => return None,
         };
@@ -45,6 +49,13 @@ impl PostfixApplication {
             callable: arguments.into_iter().next()?,
             inputs,
         })
+    }
+
+    fn without_groups(mut expression: SyntaxNode) -> Option<SyntaxNode> {
+        while expression.kind() == SyntaxKind::GroupExpr {
+            expression = expression_children(&expression).into_iter().next()?;
+        }
+        Some(expression)
     }
 }
 
@@ -63,6 +74,16 @@ pub(super) enum CallStep {
 }
 
 impl Builder {
+    pub(super) fn call_has_holes(&self, callee: ExprId, arguments: &[CallArgument]) -> bool {
+        std::iter::once(callee)
+            .chain(arguments.iter().map(|argument| argument.value))
+            .any(|id| {
+                crate::body::grouping_chain(&self.bodies[id.body().index()].expressions, id)
+                    .last()
+                    .is_some_and(|(_, expression)| matches!(expression.kind(), ExprKind::Hole))
+            })
+    }
+
     pub(super) fn schedule_arguments(
         &mut self,
         body: BodyId,
@@ -204,9 +225,7 @@ impl Builder {
             }
             CallStep::Finish(node, callee, type_arguments, count, syntax) => {
                 let arguments = take_tail(&mut traversal.arguments, count);
-                let partial_application = arguments
-                    .iter()
-                    .any(|argument| self.expr_is_hole(argument.value));
+                let partial_application = self.call_has_holes(callee, &arguments);
                 let origin = if let Some(kind) = syntax.call_desugaring() {
                     self.derived(node.span(), kind)
                 } else if partial_application {

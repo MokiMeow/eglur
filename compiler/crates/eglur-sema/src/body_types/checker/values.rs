@@ -242,7 +242,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let property = self.find_named_target(&properties, member_name);
         let (declaration, kind, template) = if let Some(declaration) = stored {
             let template = match self.signatures.declaration(&declaration) {
-                FactState::Known(DeclarationSignature::Field { ty }) => *ty,
+                FactState::Known(DeclarationSignature::Field { ty, .. }) => *ty,
                 FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
                 FactState::Unperformed => return Ok(Outcome::Unperformed),
                 FactState::Known(_) | FactState::NotApplicable => {

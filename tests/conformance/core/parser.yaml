@@ -473,6 +473,102 @@ tests:
     value:
       kind: Ok
       repr: '"[3,4,2]"'
+- id: PAR-axis-anonymous-pack-cannot-be-parenthesized
+  category: parser
+  title: anonymous axis pack cannot be parenthesized
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let op = view{ (...) -> a }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-axis-named-pack-cannot-be-parenthesized
+  category: parser
+  title: named output axis pack cannot be parenthesized
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let op = rearrange{ a -> (...tail) }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-axis-pack-cannot-start-a-sum
+  category: parser
+  title: axis pack cannot start an axis sum
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let op = inflate{ ... + a -> a }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-axis-pack-cannot-complete-a-sum
+  category: parser
+  title: axis pack cannot complete an output axis sum
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let op = reduce{ a -> a + ...tail }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-axis-pack-cannot-start-a-product
+  category: parser
+  title: axis pack cannot start an axis product
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let op = contract{ ...tail * a -> b }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
+- id: PAR-axis-pack-cannot-complete-a-product
+  category: parser
+  title: axis pack cannot complete an output axis product
+  code: |
+    fn main!() -> Res[Str, Str] {
+      let op = einop{ a -> a * ... }
+      yield Ok("x")
+    }
+  expect:
+    compile_error:
+      code: PARSE_UNEXPECTED_TOKEN
+      message_contains:
+      - parse
+      - unexpected
+      - token
+      data_keys: []
 - id: PAR-named-arguments-parse-in-general-call-surface
   category: parser
   title: named arguments parse in general call surface

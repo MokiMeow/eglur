@@ -8,16 +8,17 @@ use eglur_sema::{
     IntrinsicNominal, KnownEffectSummary, LanguageItem, ModuleAddress, NameKey, PrimitiveType,
     ReferenceMutability, StateScope, TensorSourceConstructor, TrustedCallableParameter,
     TrustedCallableRequirement, TrustedConstructorPayload, TrustedDeclarationSignature,
-    TrustedEffectEnvironment, TrustedEffectError, TrustedEffectSummary, TrustedGenericParameter,
-    TrustedImplMethod, TrustedInhabitanceEnvironment, TrustedInhabitanceError,
-    TrustedInhabitanceFact, TrustedLanguageItemEnvironment, TrustedLanguageItemError,
-    TrustedNominalInhabitance, TrustedSignatureEnvironment, TrustedSignatureError,
-    TrustedSignatureKind, TrustedTraitAdapter, TrustedTraitExpr, TrustedTraitMethod,
-    TrustedTypeExpr,
+    TrustedEffectEnvironment, TrustedEffectError, TrustedEffectSummary, TrustedEnumPayload,
+    TrustedEnumVariant, TrustedGenericParameter, TrustedImplMethod, TrustedInhabitanceEnvironment,
+    TrustedInhabitanceError, TrustedInhabitanceFact, TrustedLanguageItemEnvironment,
+    TrustedLanguageItemError, TrustedNominalInhabitance, TrustedSignatureEnvironment,
+    TrustedSignatureError, TrustedSignatureKind, TrustedTraitAdapter, TrustedTraitExpr,
+    TrustedTraitMethod, TrustedTypeExpr,
 };
 
 const NUMERIC_ERROR: &str = "std::prelude::NumericError";
 const TEXT_ERROR: &str = "std::io::TextError";
+const IO_ERROR: &str = "std::io::IoError";
 const DISPLAY: &str = "std::prelude::Display";
 const DISPLAY_TO_STR: &str = "std::prelude::Display.to_str";
 const SOME: &str = "std::opt::Some";
@@ -98,6 +99,13 @@ impl TrustedCatalog {
                 "TextError",
                 false,
                 DeclarationKind::Enum,
+            )?,
+            declaration(
+                external_id(IO_ERROR),
+                io.clone(),
+                "IoError",
+                false,
+                DeclarationKind::OpaqueType,
             )?,
             declaration(
                 display.clone(),
@@ -238,6 +246,27 @@ impl TrustedCatalog {
             ),
             TrustedDeclarationSignature::new(
                 text_error.clone(),
+                TrustedSignatureKind::Enum {
+                    generic_parameters: Box::new([]),
+                    variants: Box::new([
+                        TrustedEnumVariant {
+                            id: external_id("std::io::TextError::Io"),
+                            name: name("Io", false),
+                            payload: TrustedEnumPayload::Tuple(Box::new([nominal(
+                                external_id(IO_ERROR),
+                                [],
+                            )])),
+                        },
+                        TrustedEnumVariant {
+                            id: external_id("std::io::TextError::InvalidUtf8"),
+                            name: name("InvalidUtf8", false),
+                            payload: TrustedEnumPayload::Absent,
+                        },
+                    ]),
+                },
+            ),
+            TrustedDeclarationSignature::new(
+                external_id(IO_ERROR),
                 TrustedSignatureKind::Nominal {
                     generic_parameters: Box::new([]),
                 },
@@ -420,10 +449,7 @@ impl TrustedCatalog {
                 external_id(NUMERIC_ERROR),
                 TrustedNominalInhabitance::Unknown,
             ),
-            TrustedInhabitanceFact::new(
-                external_id(TEXT_ERROR),
-                TrustedNominalInhabitance::Inhabited,
-            ),
+            TrustedInhabitanceFact::new(external_id(IO_ERROR), TrustedNominalInhabitance::Unknown),
         ])?;
 
         let mut effects = vec![
@@ -634,9 +660,10 @@ fn matching_kinds(kind: DeclarationKind, signature: &TrustedSignatureKind) -> bo
     matches!(
         (kind, signature),
         (
-            DeclarationKind::Struct | DeclarationKind::Enum | DeclarationKind::OpaqueType,
+            DeclarationKind::Struct | DeclarationKind::OpaqueType,
             TrustedSignatureKind::Nominal { .. }
-        ) | (DeclarationKind::Trait, TrustedSignatureKind::Trait { .. })
+        ) | (DeclarationKind::Enum, TrustedSignatureKind::Enum { .. })
+            | (DeclarationKind::Trait, TrustedSignatureKind::Trait { .. })
             | (
                 DeclarationKind::Function | DeclarationKind::ExternFunction,
                 TrustedSignatureKind::Callable { .. }

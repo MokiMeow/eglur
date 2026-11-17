@@ -40,6 +40,15 @@ impl Body {
         (id.body() == self.id).then(|| &self.expressions[id.index()])
     }
 
+    /// Visits outer groups through the enclosed non-group expression, retaining occurrence IDs.
+    /// An ID from another body produces an empty iterator.
+    pub fn grouping_chain(&self, id: ExprId) -> impl Iterator<Item = (ExprId, &Expr)> {
+        (id.body() == self.id)
+            .then(|| grouping_chain(&self.expressions, id))
+            .into_iter()
+            .flatten()
+    }
+
     pub fn expressions(&self) -> impl ExactSizeIterator<Item = (ExprId, &Expr)> {
         self.expressions
             .iter()
@@ -82,6 +91,19 @@ impl Body {
             .enumerate()
             .map(|(index, axis)| (AxisExprId::from_index(self.id, index), axis))
     }
+}
+
+pub(crate) fn grouping_chain(
+    expressions: &[Expr],
+    id: ExprId,
+) -> impl Iterator<Item = (ExprId, &Expr)> {
+    std::iter::successors(
+        Some((id, &expressions[id.index()])),
+        |(_, expression)| match expression.kind() {
+            ExprKind::Group(inner) => Some((*inner, &expressions[inner.index()])),
+            _ => None,
+        },
+    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

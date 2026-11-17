@@ -279,9 +279,7 @@ impl Builder {
             body,
             Expr::new(origin, ExprKind::Member { receiver, member }),
         );
-        let partial_application = arguments
-            .iter()
-            .any(|argument| self.expr_is_hole(argument.value));
+        let partial_application = self.call_has_holes(callee, &arguments);
         ReduceByOrdinaryCandidate {
             call: CallExpr {
                 callee,

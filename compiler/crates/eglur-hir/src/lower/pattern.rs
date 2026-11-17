@@ -7,12 +7,19 @@ use crate::{
     FieldPattern, InvalidCategory, Pattern, PatternElement, PatternId, PatternKind, PatternPayload,
 };
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum PatternContext {
+    Binding,
+    Match,
+}
+
 impl Builder {
     pub(super) fn lower_pattern(
         &mut self,
         body: crate::BodyId,
         node: Option<SyntaxNode>,
         fallback: eglur_source::FileSpan,
+        context: PatternContext,
     ) -> PatternId {
         let Some(node) = node else {
             return self.invalid_pattern(body, fallback);
@@ -23,12 +30,12 @@ impl Builder {
                 let nested = direct_nodes(&node)
                     .into_iter()
                     .find(|child| is_pattern_kind(child.kind()));
-                return self.lower_pattern(body, nested, node.span());
+                return self.lower_pattern(body, nested, node.span(), context);
             }
             SyntaxKind::OrPattern => PatternKind::Or(
                 direct_nodes(&node)
                     .into_iter()
-                    .map(|child| self.lower_pattern(body, Some(child), node.span()))
+                    .map(|child| self.lower_pattern(body, Some(child), node.span(), context))
                     .collect::<Vec<_>>()
                     .into_boxed_slice(),
             ),
@@ -42,24 +49,31 @@ impl Builder {
                 let nested = direct_nodes(&node).into_iter().find(|child| {
                     is_pattern_kind(child.kind()) && child.kind() != SyntaxKind::Path
                 });
-                let pattern = self.lower_pattern(body, nested, node.span());
+                let pattern = self.lower_pattern(body, nested, node.span(), context);
                 PatternKind::Alias { name, pattern }
             }
             SyntaxKind::BindingPattern => {
                 let path = self.lower_path(direct_child(&node, SyntaxKind::Path), node.span());
-                PatternKind::Binding(
-                    path.segments()
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| self.invalid_name(node.span())),
-                )
+                if context == PatternContext::Match && path.is_unqualified_residual_constructor() {
+                    PatternKind::Variant {
+                        path,
+                        payload: PatternPayload::Absent,
+                    }
+                } else {
+                    PatternKind::Binding(
+                        path.segments()
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| self.invalid_name(node.span())),
+                    )
+                }
             }
             SyntaxKind::WildcardPattern => PatternKind::Wildcard,
             SyntaxKind::GroupPattern => {
                 let nested = direct_nodes(&node)
                     .into_iter()
                     .find(|child| child.kind() == SyntaxKind::Pattern);
-                PatternKind::Group(self.lower_pattern(body, nested, node.span()))
+                PatternKind::Group(self.lower_pattern(body, nested, node.span(), context))
             }
             SyntaxKind::LiteralPattern => {
                 let literal = self.lower_literal_token(
@@ -73,19 +87,31 @@ impl Builder {
                 PatternKind::Literal(literal)
             }
             SyntaxKind::UnitPattern => PatternKind::Unit,
-            SyntaxKind::VariantPattern => self.lower_variant_pattern(body, &node),
-            SyntaxKind::TuplePattern => {
-                PatternKind::Tuple(self.lower_pattern_elements(body, &node).into_boxed_slice())
-            }
+            SyntaxKind::VariantPattern => self.lower_variant_pattern(body, &node, context),
+            SyntaxKind::TuplePattern => PatternKind::Tuple(
+                self.lower_pattern_elements(body, &node, context)
+                    .into_boxed_slice(),
+            ),
             SyntaxKind::StructPattern => {
                 let path = direct_child(&node, SyntaxKind::Path)
                     .map(|path| self.lower_path(Some(path), node.span()));
                 let fields = direct_child(&node, SyntaxKind::FieldPatternList)
-                    .map(|list| self.lower_field_patterns(body, &list))
+                    .map(|list| self.lower_field_patterns(body, &list, context))
                     .unwrap_or_default();
-                PatternKind::Struct {
-                    path,
-                    fields: fields.into_boxed_slice(),
+                match path {
+                    Some(path)
+                        if context == PatternContext::Match
+                            && path.is_unqualified_residual_constructor() =>
+                    {
+                        PatternKind::Variant {
+                            path,
+                            payload: PatternPayload::Named(fields.into_boxed_slice()),
+                        }
+                    }
+                    path => PatternKind::Struct {
+                        path,
+                        fields: fields.into_boxed_slice(),
+                    },
                 }
             }
             SyntaxKind::ErrorNode => {
@@ -124,13 +150,19 @@ impl Builder {
         self.alloc_pattern(body, Pattern::new(origin, kind))
     }
 
-    fn lower_variant_pattern(&mut self, body: crate::BodyId, node: &SyntaxNode) -> PatternKind {
+    fn lower_variant_pattern(
+        &mut self,
+        body: crate::BodyId,
+        node: &SyntaxNode,
+        context: PatternContext,
+    ) -> PatternKind {
         let path = self.lower_path(direct_child(node, SyntaxKind::Path), node.span());
         if let Some(list) = direct_child(node, SyntaxKind::PatternList) {
             return PatternKind::Variant {
                 path,
                 payload: PatternPayload::Positional(
-                    self.lower_pattern_elements(body, &list).into_boxed_slice(),
+                    self.lower_pattern_elements(body, &list, context)
+                        .into_boxed_slice(),
                 ),
             };
         }
@@ -138,7 +170,8 @@ impl Builder {
             return PatternKind::Variant {
                 path,
                 payload: PatternPayload::Named(
-                    self.lower_field_patterns(body, &list).into_boxed_slice(),
+                    self.lower_field_patterns(body, &list, context)
+                        .into_boxed_slice(),
                 ),
             };
         }
@@ -156,6 +189,7 @@ impl Builder {
         &mut self,
         body: crate::BodyId,
         node: &SyntaxNode,
+        context: PatternContext,
     ) -> Vec<PatternElement> {
         let mut elements = Vec::new();
         for element in node.children_with_tokens() {
@@ -165,10 +199,11 @@ impl Builder {
                         body,
                         Some(child),
                         node.span(),
+                        context,
                     )));
                 }
                 SyntaxElement::Node(child) if child.kind() == SyntaxKind::PatternList => {
-                    elements.extend(self.lower_pattern_elements(body, &child));
+                    elements.extend(self.lower_pattern_elements(body, &child, context));
                 }
                 SyntaxElement::Token(token) if token.kind() == SyntaxKind::Range => {
                     elements.push(PatternElement::Rest(self.written(token.span())));
@@ -178,6 +213,7 @@ impl Builder {
                         body,
                         Some(child),
                         node.span(),
+                        context,
                     )));
                 }
                 SyntaxElement::Token(_) => {}
@@ -190,6 +226,7 @@ impl Builder {
         &mut self,
         body: crate::BodyId,
         node: &SyntaxNode,
+        context: PatternContext,
     ) -> Vec<FieldPattern> {
         direct_nodes(node)
             .into_iter()
@@ -200,7 +237,7 @@ impl Builder {
                 let origin = self.written(field.span());
                 let name = self.lower_name_token(first_name_token(&field), field.span());
                 let pattern = direct_child(&field, SyntaxKind::Pattern)
-                    .map(|pattern| self.lower_pattern(body, Some(pattern), field.span()));
+                    .map(|pattern| self.lower_pattern(body, Some(pattern), field.span(), context));
                 FieldPattern::Field {
                     name,
                     pattern,

@@ -29,7 +29,7 @@ pub use frontend::{
     ObservedParse, Parse, parse, parse_observed, parse_validated, parse_validated_observed,
 };
 pub use kind::TokenKind;
-pub use lexer::{Lexed, lex};
+pub use lexer::{Lexed, is_identifier_spelling, lex};
 pub use syntax_kind::SyntaxKind;
 pub use token::Token;
 pub use tree::{SyntaxElement, SyntaxNode, SyntaxToken};

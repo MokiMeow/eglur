@@ -476,8 +476,16 @@ fn write_declaration_signature(
             write_generic_contract(builder, generic_parameters, signatures, keys, &binders)?;
             write_targets(builder, variants, keys)?;
         }
-        DeclarationSignature::EnumVariant { payload } => {
+        DeclarationSignature::EnumVariant {
+            owner,
+            name,
+            payload,
+        } => {
             builder.write_u8(7);
+            keys.target(owner)
+                .ok_or_else(|| target_error(owner))?
+                .write_to(builder);
+            write_name(builder, name);
             match payload {
                 crate::EnumVariantPayloadSignature::Absent => builder.write_u8(0),
                 crate::EnumVariantPayloadSignature::Tuple(types) => {
@@ -490,8 +498,9 @@ fn write_declaration_signature(
                 }
             }
         }
-        DeclarationSignature::Field { ty } => {
+        DeclarationSignature::Field { name, ty } => {
             builder.write_u8(8);
+            write_name(builder, name);
             keys.stable_type(signatures, *ty, &binders)?
                 .write_to(builder);
         }

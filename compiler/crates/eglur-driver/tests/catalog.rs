@@ -150,9 +150,10 @@ fn first_slice_catalog_keeps_constructor_callable_effect_and_hook_facts_distinct
         catalog.inhabitance().rule(&numeric_error),
         Some(TrustedNominalInhabitance::Unknown)
     ));
+    assert!(catalog.inhabitance().rule(&text_error).is_none());
     assert!(matches!(
-        catalog.inhabitance().rule(&text_error),
-        Some(TrustedNominalInhabitance::Inhabited)
+        catalog.signatures().declaration(&text_error).unwrap().kind(),
+        TrustedSignatureKind::Enum { variants, .. } if variants.len() == 2
     ));
     assert_eq!(catalog.runtime_hook(&none), Some(RuntimeHook::OptNone));
     assert_eq!(catalog.runtime_hook(&emit), Some(RuntimeHook::TestEmit));

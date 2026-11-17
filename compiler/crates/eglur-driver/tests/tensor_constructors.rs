@@ -45,6 +45,63 @@ fn reject(source: &str, expected: &str) {
 }
 
 #[test]
+fn grouped_dtype_callees_preserve_constructor_identity_and_completion() {
+    for callee in ["filled", "(filled)", "((filled))"] {
+        accept(&format!(
+            "import std::tensor::ones as filled\nimport std::tensor::Tensor\n\
+             fn make(n: Nat) -> Tensor[f32] = {callee}[f32](n, 2)\n"
+        ));
+    }
+}
+
+#[test]
+fn grouped_dtype_callees_keep_type_and_shadowing_errors() {
+    for callee in ["ones", "(ones)", "((ones))"] {
+        reject(
+            &format!(
+                "import std::tensor::ones\nfn make() -> Unit {{ let t = {callee}[Str](2)\nyield () }}\n"
+            ),
+            "CALL_ARG_TYPE_MISMATCH",
+        );
+        reject(
+            &format!(
+                "import std::tensor::ones\nfn make() -> Unit {{ let ones = 0\nlet t = {callee}[f32](2)\nyield () }}\n"
+            ),
+            "TYPE_ARG_BRACKET_SYNTAX_FORBIDDEN",
+        );
+    }
+}
+
+#[test]
+fn grouped_non_name_dtype_callees_are_not_tensor_constructors() {
+    for callee in ["(1)", "({ || () })", "((1, 2).0)"] {
+        reject(
+            &format!("fn make() -> Unit {{ let t = {callee}[f32]()\nyield () }}\n"),
+            "TYPE_ARG_BRACKET_SYNTAX_FORBIDDEN",
+        );
+    }
+}
+
+#[test]
+fn grouped_dtype_callees_keep_the_tensor_typing_capability_requirement() {
+    let source =
+        "import std::tensor::ones\nfn make() -> Unit { let t = ((ones))[f32](2)\nyield () }\n";
+    let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
+    let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let analysis = session
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+    assert!(analysis.trace().missing().any(|entry| entry.capability()
+        == eglur_sema::CompileCapability::Typecheck(
+            eglur_sema::TypecheckCapability::CheckTensorConstructors
+        )));
+    let sealed = session.seal(None).unwrap();
+    assert!(sealed.checked_program().is_none());
+    assert!(sealed.diagnostics().diagnostics().is_empty());
+}
+
+#[test]
 fn supported_dtypes_and_dynamic_dimensions_produce_tensor_results() {
     for (dtype, element) in [
         ("bool", "Bool"),
@@ -164,33 +221,37 @@ fn random_and_argument_effects_cannot_hide_in_pure_constructors() {
 
 #[test]
 fn checked_constructors_are_refused_before_execution() {
-    let source = "import std::tensor::ones\nimport std::test::emit!\nfn main!() -> Unit { emit!(\"must not execute\")\nlet t = ones[f32](2)\nyield () }\n";
-    let catalog = TrustedCatalog::first_slice().unwrap();
-    let profile = SupportProfile::tensor_constructors_v1();
-    let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
-    let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
-    session
-        .resolve_for(
-            eglur_driver::ProgramMode::Executable,
-            &profile,
-            Some(&catalog),
-        )
-        .unwrap();
-    let sealed = session.seal(None).unwrap();
-    let program = sealed
-        .checked_program()
-        .expect("constructors statically check");
-    assert_eq!(
-        eglur_driver::execute(
-            program,
-            &profile,
-            &catalog,
-            eglur_driver::EvaluationLimits::default()
-        ),
-        eglur_driver::ExecutionAttempt::Unsupported(eglur_driver::SupportReason::Feature(
-            eglur_driver::UnsupportedFeature::Tensor
-        ))
-    );
+    for callee in ["ones", "((ones))"] {
+        let source = format!(
+            "import std::tensor::ones\nimport std::test::emit!\nfn main!() -> Unit {{ emit!(\"must not execute\")\nlet t = {callee}[f32](2)\nyield () }}\n"
+        );
+        let catalog = TrustedCatalog::first_slice().unwrap();
+        let profile = SupportProfile::tensor_constructors_v1();
+        let request = FileSetRequest::single("main.eglur", source.as_bytes().to_vec()).unwrap();
+        let mut session = CompilerSession::build(request, SessionOptions::default()).unwrap();
+        session
+            .resolve_for(
+                eglur_driver::ProgramMode::Executable,
+                &profile,
+                Some(&catalog),
+            )
+            .unwrap();
+        let sealed = session.seal(None).unwrap();
+        let program = sealed
+            .checked_program()
+            .expect("constructors statically check");
+        assert_eq!(
+            eglur_driver::execute(
+                program,
+                &profile,
+                &catalog,
+                eglur_driver::EvaluationLimits::default()
+            ),
+            eglur_driver::ExecutionAttempt::Unsupported(eglur_driver::SupportReason::Feature(
+                eglur_driver::UnsupportedFeature::Tensor
+            ))
+        );
+    }
 }
 
 #[test]
@@ -256,7 +317,10 @@ fn dimension_invocations_preserve_source_order_and_divergence() {
         })
         .unwrap();
     assert_eq!(invocation.arguments().len(), 2);
-    assert_eq!(invocation.arguments(), invocation.evaluation_order());
+    assert_eq!(
+        invocation.arguments().iter().collect::<Vec<_>>(),
+        invocation.evaluation_order().collect::<Vec<_>>()
+    );
     accept(
         "import std::tensor::ones\nimport std::tensor::Tensor\nfn stop() -> Never = stop()\nfn make() -> Tensor[f32] = ones[f32](stop(), { return ones[f32](2) })\n",
     );

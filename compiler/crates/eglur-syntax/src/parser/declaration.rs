@@ -274,9 +274,9 @@ impl Parser<'_> {
                 self.expect_identifier();
                 if self.eat(TokenKind::Colon) {
                     let bounds = self.start();
-                    self.parse_type();
+                    self.parse_trait_ref();
                     while self.eat(TokenKind::Plus) {
-                        self.parse_type();
+                        self.parse_trait_ref();
                     }
                     self.complete(bounds, SyntaxKind::TraitBoundList);
                 }
