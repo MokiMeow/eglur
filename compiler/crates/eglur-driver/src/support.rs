@@ -49,10 +49,26 @@ pub struct SupportProfile {
 }
 
 impl SupportProfile {
+    /// Extends the core profile with static tensor constructor checks, not execution.
+    #[must_use]
+    pub fn tensor_constructors_v1() -> Self {
+        let core = Self::semantic_core_v1();
+        Self::new(
+            core.schema(),
+            SupportProfileId::new("tensor-constructors-v1").expect("valid profile id"),
+            core.compile_capabilities()
+                .chain([CompileCapability::Typecheck(
+                    TypecheckCapability::CheckTensorConstructors,
+                )]),
+            core.execution_capabilities(),
+        )
+        .expect("the tensor constructor profile is prerequisite-closed")
+    }
+
     /// Returns the exact compile and execution profile for the first semantic slice.
     #[must_use]
     pub fn semantic_core_v1() -> Self {
-        const COMPILE: [CompileCapability; 20] = [
+        const COMPILE: [CompileCapability; 22] = [
             CompileCapability::Resolve(ResolveCapability::CollectDeclarations),
             CompileCapability::Resolve(ResolveCapability::ResolveFileSetImports),
             CompileCapability::Resolve(ResolveCapability::ResolveLexicalValues),
@@ -70,6 +86,12 @@ impl SupportProfile {
             CompileCapability::Typecheck(TypecheckCapability::CheckFailureFlow),
             CompileCapability::Typecheck(
                 TypecheckCapability::CheckSelectedCheckedIntegerArithmetic,
+            ),
+            CompileCapability::Typecheck(
+                TypecheckCapability::EvaluateSelectedIntegerConstExpressions,
+            ),
+            CompileCapability::Typecheck(
+                TypecheckCapability::EvaluateSelectedIntegerConstDeclarations,
             ),
             CompileCapability::Typecheck(TypecheckCapability::CheckBranching),
             CompileCapability::Typecheck(TypecheckCapability::CheckOwnershipFlow),

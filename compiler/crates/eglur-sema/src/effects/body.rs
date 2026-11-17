@@ -592,6 +592,14 @@ impl BodyCollector<'_> {
             }
         };
         let (dispatch, bang) = match invocation.target() {
+            InvocationTarget::TensorConstructor {
+                declaration,
+                constructor,
+                ..
+            } => (
+                EffectDispatch::Target(declaration.clone()),
+                constructor.is_bang(),
+            ),
             InvocationTarget::Constructor { .. } => (EffectDispatch::Constructor, false),
             InvocationTarget::Callable(_) => match checked.dispatch() {
                 CheckedDispatch::Direct(target) => {
@@ -622,6 +630,7 @@ impl BodyCollector<'_> {
             },
         };
         let mutable_paths = match invocation.target() {
+            InvocationTarget::TensorConstructor { .. } => Vec::new(),
             InvocationTarget::Constructor { .. } => Vec::new(),
             InvocationTarget::Callable(instance) => {
                 let instance = self

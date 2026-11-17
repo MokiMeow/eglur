@@ -33,6 +33,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         TypedExpression {
             ty,
             place: None,
+            integer_constant: None,
             normal_continuation: self.continuation_for_type(ty),
         }
     }
@@ -45,6 +46,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         TypedExpression {
             ty,
             place: None,
+            integer_constant: None,
             normal_continuation: self.continuation_for_type(ty).strict(normal_continuation),
         }
     }

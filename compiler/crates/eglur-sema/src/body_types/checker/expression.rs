@@ -138,6 +138,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             hir,
             body,
         };
+        if !self.preparing_numeric_tree
+            && matches!(
+                kind,
+                ExprKind::Binary { .. }
+                    | ExprKind::Unary {
+                        operator: UnaryOperator::Negate,
+                        ..
+                    }
+                    | ExprKind::Group(_)
+            )
+            && let Some(outcome) = self.type_numeric_tree(context, expression_id, request)?
+        {
+            return Ok(outcome);
+        }
         let outcome = match kind {
             ExprKind::Block { statements } => {
                 self.type_block_expression(context, expression_id, &statements, request.expected)?
@@ -169,7 +183,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ExprKind::Call(call) => {
                 self.type_call(context, expression_id, origin, &call, request)?
             }
-            ExprKind::DTypeCall(call) => self.type_dtype_call(context, origin, &call)?,
+            ExprKind::DTypeCall(call) => {
+                self.type_dtype_call(context, expression_id, origin, &call)?
+            }
             ExprKind::Member { receiver, member } => {
                 self.type_member(context, expression_id, receiver, &member)?
             }
@@ -215,7 +231,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 operator,
                 left,
                 right,
-            } if self.has_active_checked_context() => self.type_checked_binary(
+            } => self.type_checked_binary(
                 context,
                 CheckedBinaryRequest {
                     expression: expression_id,
@@ -229,10 +245,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ExprKind::Unary {
                 operator: UnaryOperator::Negate,
                 operand,
-            } if self.has_active_checked_context() => {
-                self.type_checked_negation(context, expression_id, origin, operand, request)?
-            }
-            ExprKind::Binary { .. } | ExprKind::Unary { .. } => {
+            } => self.type_checked_negation(context, expression_id, origin, operand, request)?,
+            ExprKind::Unary { .. } => {
                 self.unsupported(TypecheckCapability::CheckOperators, source, origin)
             }
             ExprKind::Match(match_expression) if match_expression.arms.is_empty() => {
@@ -432,8 +446,28 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             (self.primitive(PrimitiveType::I64)?, PrimitiveType::I64)
         };
 
-        if let Some(maximum) = fixed_width_integer_max(primitive)
-            && !decimal_literal_fits(literal.spelling(), maximum)
+        let (negative, magnitude) = literal
+            .spelling()
+            .strip_prefix('-')
+            .map_or((false, literal.spelling()), |digits| (true, digits));
+        let zero = decimal_literal_is_zero(magnitude);
+        let maximum = if negative && !zero {
+            match primitive {
+                PrimitiveType::I8 => Some("128"),
+                PrimitiveType::I16 => Some("32768"),
+                PrimitiveType::I32 => Some("2147483648"),
+                PrimitiveType::I64 => Some("9223372036854775808"),
+                PrimitiveType::U8
+                | PrimitiveType::U16
+                | PrimitiveType::U32
+                | PrimitiveType::U64 => Some("0"),
+                _ => None,
+            }
+        } else {
+            fixed_width_integer_max(primitive)
+        };
+        if let Some(maximum) = maximum
+            && !decimal_literal_fits(magnitude, maximum)
         {
             let poison = self.type_error(
                 source,
@@ -455,9 +489,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
 
         if matches!(primitive, PrimitiveType::Nat | PrimitiveType::PositiveNat) {
-            let in_range = decimal_literal_fits(literal.spelling(), "9223372036854775807")
-                && (primitive == PrimitiveType::Nat
-                    || !decimal_literal_is_zero(literal.spelling()));
+            let in_range = (!negative || zero)
+                && decimal_literal_fits(magnitude, "9223372036854775807")
+                && (primitive == PrimitiveType::Nat || !zero);
             if !in_range {
                 let poison = self.type_error(
                     source,
@@ -479,7 +513,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
         }
 
-        Ok(Outcome::Known(self.value_expression(ty)))
+        let value = literal
+            .spelling()
+            .replace('_', "")
+            .parse::<i128>()
+            .ok()
+            .and_then(|value| IntegerValue::new(primitive, value))
+            .ok_or(BodyTypingError::InvalidIntegerConstant)?;
+        let mut typed = self.value_expression(ty);
+        typed.integer_constant = Some(value);
+        Ok(Outcome::Known(typed))
     }
 
     pub(super) fn type_name(
@@ -546,6 +589,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ResolvedName::Local(binding) => match self.locals.state(binding) {
                 FactState::Known(local) => Ok(Outcome::Known(TypedExpression {
                     ty: local.ty,
+                    integer_constant: None,
                     place: Some(TypedPlace {
                         kind: TypedPlaceKind::Local(*binding),
                         writable: local.mutability == Mutability::Mutable,
@@ -579,7 +623,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 };
                 match signature {
                     DeclarationSignature::Const { ty } => {
-                        Ok(Outcome::Known(self.value_expression(ty)))
+                        self.type_constant_reference(source, expression, &target, ty)
                     }
                     DeclarationSignature::Constructor(constructor)
                         if matches!(constructor.payload(), ConstructorPayloadSignature::Unit) =>
@@ -611,6 +655,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     fn type_dtype_call(
         &mut self,
         context: BodyContext<'_, '_>,
+        expression: ExprId,
         origin: OriginId,
         call: &eglur_hir::DTypeCallExpr,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
@@ -621,11 +666,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
         match self.names.fact(key) {
             FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1 => {
-                if matches!(
-                    self.external_semantic_owner(&targets[0]),
-                    Some(ExternalSemanticOwner::TensorSource(_))
-                ) {
-                    Ok(self.unsupported(TypecheckCapability::AnalyzeTensorSource, source, origin))
+                if let Some(ExternalSemanticOwner::TensorSource(constructor)) =
+                    self.external_semantic_owner(&targets[0])
+                {
+                    let target = targets[0].clone();
+                    self.type_tensor_constructor(
+                        context,
+                        expression,
+                        origin,
+                        call,
+                        target,
+                        constructor,
+                    )
                 } else {
                     self.dtype_bracket_forbidden(source, origin)
                 }

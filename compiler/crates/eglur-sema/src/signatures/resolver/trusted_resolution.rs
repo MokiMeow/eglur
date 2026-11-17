@@ -118,6 +118,11 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         item: LanguageItem,
         signature: &DeclarationSignature,
     ) -> Result<bool, SignatureResolutionError> {
+        if item == LanguageItem::Tensor {
+            return Ok(matches!(signature,
+                DeclarationSignature::Nominal { generic_parameters }
+                    if generic_parameters.len() == 1));
+        }
         if item == LanguageItem::NumericError {
             return Ok(matches!(
                 signature,
@@ -131,7 +136,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let expected_head = match item {
             LanguageItem::OptSome | LanguageItem::OptNone => IntrinsicNominal::Opt,
             LanguageItem::ResOk | LanguageItem::ResErr => IntrinsicNominal::Res,
-            LanguageItem::NumericError => unreachable!("numeric error was handled above"),
+            LanguageItem::NumericError | LanguageItem::Tensor => {
+                unreachable!("nominal item was handled above")
+            }
         };
         let TypeKind::Nominal {
             head: NominalHead::Intrinsic(head),
@@ -160,7 +167,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             LanguageItem::OptNone => None,
             LanguageItem::OptSome | LanguageItem::ResOk => Some(0),
             LanguageItem::ResErr => Some(1),
-            LanguageItem::NumericError => unreachable!("numeric error was handled above"),
+            LanguageItem::NumericError | LanguageItem::Tensor => {
+                unreachable!("nominal item was handled above")
+            }
         };
         match (payload_parameter, constructor.payload()) {
             (None, ConstructorPayloadSignature::Unit) => Ok(true),

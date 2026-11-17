@@ -7,14 +7,15 @@ use eglur_hir::{
 use eglur_sema::{
     CallableSignature, CanonicalTarget, CheckedDispatch, CheckedEntryResult,
     CheckedNumericOperator, CheckedProgram, DeclarationSignature, DefId, EvidenceEnvironment,
-    EvidenceSource, ExpressionKey, ExternalDefId, FactState, InvocationFact, InvocationTarget,
-    LanguageItem, LocalBindingId, MemberKind, ModuleId, PhaseProduct, PrimitiveType, ResolutionKey,
-    ResolvedName, SubstId, TraitEvidence, TypeId, TypeKind, TypedPlaceKind, WitnessSlotId,
+    EvidenceSource, ExpressionKey, ExternalDefId, FactState, IntegerEvaluation, InvocationFact,
+    InvocationTarget, LanguageItem, LocalBindingId, MemberKind, ModuleId, NumericFaultCause,
+    PhaseProduct, PrimitiveType, ResolutionKey, ResolvedName, SubstId, TraitEvidence, TypeId,
+    TypeKind, TypedPlaceKind, WitnessSlotId,
 };
 
 use crate::{
-    ExecutionCapability, ExecutionSupport, IntegerValue, RuntimeCatalog, RuntimeDiagnostic,
-    RuntimeEvent, RuntimeHook, Value,
+    ExecutionCapability, ExecutionSupport, RuntimeCatalog, RuntimeDiagnostic, RuntimeEvent,
+    RuntimeHook, Value,
 };
 
 /// Deterministic out-of-band evaluator limits.
@@ -270,9 +271,7 @@ mod runtime;
 mod store;
 
 use checked_program::{ProgramView, WitnessValue, Witnesses, child_witnesses};
-use numeric::{
-    IntegerEvaluation, checked_integer, is_fixed_width_integer, numeric_fault, wrapping_add,
-};
+use numeric::numeric_fault;
 use preflight::Planner;
 use runtime::{Evaluator, Flow};
 use store::{Place, Projection, RuntimeValue, Store};

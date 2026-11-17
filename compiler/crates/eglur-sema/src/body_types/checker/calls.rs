@@ -2065,6 +2065,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .types_mut()
             .reference(mutability, value.ty)?;
         value.place = None;
+        value.integer_constant = None;
         Ok(value)
     }
 

@@ -47,6 +47,8 @@ pub enum TypecheckCapability {
     ResolveOverloads,
     CheckOperators,
     CheckSelectedCheckedIntegerArithmetic,
+    EvaluateSelectedIntegerConstExpressions,
+    EvaluateSelectedIntegerConstDeclarations,
     EvaluateScalarConstExpressions,
     CheckBranching,
     AnalyzePatternCoverage,
@@ -60,6 +62,7 @@ pub enum TypecheckCapability {
     CheckUnsafeExpressions,
     AnalyzeInhabitance,
     AnalyzeTensorSource,
+    CheckTensorConstructors,
 }
 
 impl TypecheckCapability {
@@ -79,6 +82,10 @@ impl TypecheckCapability {
                 "typecheck.selected_checked_integer_arithmetic"
             }
             Self::EvaluateScalarConstExpressions => "typecheck.scalar_const_evaluation",
+            Self::EvaluateSelectedIntegerConstExpressions => "typecheck.integer_const_expressions",
+            Self::EvaluateSelectedIntegerConstDeclarations => {
+                "typecheck.integer_const_declarations"
+            }
             Self::CheckBranching => "typecheck.branching",
             Self::AnalyzePatternCoverage => "typecheck.pattern_coverage",
             Self::CheckAdvancedPatterns => "typecheck.advanced_patterns",
@@ -91,6 +98,7 @@ impl TypecheckCapability {
             Self::CheckUnsafeExpressions => "typecheck.unsafe_expressions",
             Self::AnalyzeInhabitance => "typecheck.inhabitance",
             Self::AnalyzeTensorSource => "typecheck.tensor_source",
+            Self::CheckTensorConstructors => "typecheck.tensor_constructors",
         }
     }
 }
@@ -104,7 +112,7 @@ pub enum CompileCapability {
 
 impl CompileCapability {
     /// Complete closed capability vocabulary for this compiler revision.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 35] = [
         Self::Resolve(ResolveCapability::CollectDeclarations),
         Self::Resolve(ResolveCapability::ResolveFileSetImports),
         Self::Resolve(ResolveCapability::ResolveLexicalValues),
@@ -125,6 +133,8 @@ impl CompileCapability {
         Self::Typecheck(TypecheckCapability::CheckOperators),
         Self::Typecheck(TypecheckCapability::CheckSelectedCheckedIntegerArithmetic),
         Self::Typecheck(TypecheckCapability::EvaluateScalarConstExpressions),
+        Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstExpressions),
+        Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstDeclarations),
         Self::Typecheck(TypecheckCapability::CheckBranching),
         Self::Typecheck(TypecheckCapability::AnalyzePatternCoverage),
         Self::Typecheck(TypecheckCapability::CheckAdvancedPatterns),
@@ -137,6 +147,7 @@ impl CompileCapability {
         Self::Typecheck(TypecheckCapability::CheckUnsafeExpressions),
         Self::Typecheck(TypecheckCapability::AnalyzeInhabitance),
         Self::Typecheck(TypecheckCapability::AnalyzeTensorSource),
+        Self::Typecheck(TypecheckCapability::CheckTensorConstructors),
     ];
 
     #[must_use]
@@ -187,6 +198,16 @@ impl CompileCapability {
                 FAILURE_FLOW
             }
             Self::Typecheck(TypecheckCapability::InferResultBlockType) => FAILURE_FLOW,
+            Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstExpressions) => {
+                &[Self::Typecheck(
+                    TypecheckCapability::CheckSelectedCheckedIntegerArithmetic,
+                )]
+            }
+            Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstDeclarations) => {
+                &[Self::Typecheck(
+                    TypecheckCapability::EvaluateSelectedIntegerConstExpressions,
+                )]
+            }
             Self::Typecheck(
                 TypecheckCapability::ResolveMembers
                 | TypecheckCapability::ResolveMethods
@@ -203,7 +224,8 @@ impl CompileCapability {
                 | TypecheckCapability::CheckOwnershipFlow
                 | TypecheckCapability::CheckUnsafeExpressions
                 | TypecheckCapability::AnalyzeInhabitance
-                | TypecheckCapability::AnalyzeTensorSource,
+                | TypecheckCapability::AnalyzeTensorSource
+                | TypecheckCapability::CheckTensorConstructors,
             ) => BODIES,
         }
     }
@@ -222,10 +244,13 @@ impl CompileCapability {
                 | Self::Typecheck(TypecheckCapability::ResolveMethods)
                 | Self::Typecheck(TypecheckCapability::ResolveOverloads)
                 | Self::Typecheck(TypecheckCapability::CheckSelectedCheckedIntegerArithmetic)
+                | Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstExpressions)
+                | Self::Typecheck(TypecheckCapability::EvaluateSelectedIntegerConstDeclarations)
                 | Self::Typecheck(TypecheckCapability::CheckBranching)
                 | Self::Typecheck(TypecheckCapability::CheckFailureFlow)
                 | Self::Typecheck(TypecheckCapability::CheckOwnershipFlow)
                 | Self::Typecheck(TypecheckCapability::AnalyzeInhabitance)
+                | Self::Typecheck(TypecheckCapability::CheckTensorConstructors)
                 | Self::Resolve(
                     ResolveCapability::CollectDeclarations
                         | ResolveCapability::ResolveFileSetImports

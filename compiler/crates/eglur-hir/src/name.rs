@@ -113,7 +113,7 @@ pub enum LiteralKind {
     Invalid,
 }
 
-/// Lexical literal spelling retained for later semantic decoding.
+/// Literal spelling for semantic decoding, including a directly applied integer minus.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Literal {
     kind: LiteralKind,

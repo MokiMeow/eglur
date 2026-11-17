@@ -356,7 +356,8 @@ fn direct_dispatch(
         InvocationTarget::Callable(instance) => {
             callable_declaration(*instance, body_types, signatures)?
         }
-        InvocationTarget::Constructor { declaration, .. } => declaration.clone(),
+        InvocationTarget::Constructor { declaration, .. }
+        | InvocationTarget::TensorConstructor { declaration, .. } => declaration.clone(),
     };
     Ok(CheckedDispatch::Direct(declaration))
 }

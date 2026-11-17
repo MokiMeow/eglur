@@ -285,6 +285,7 @@ fn write_language_items(builder: &mut CanonicalFingerprintBuilder, catalog: &Tru
     for (item, declaration) in items.items() {
         builder.write_u8(match item {
             LanguageItem::NumericError => 0,
+            LanguageItem::Tensor => 5,
             LanguageItem::OptSome => 1,
             LanguageItem::OptNone => 2,
             LanguageItem::ResOk => 3,

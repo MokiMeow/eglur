@@ -3,11 +3,11 @@ use std::fmt;
 
 use crate::DefId;
 
-/// Returns source-callable SCCs in callee-first order.
-pub(super) fn dependency_first_sccs(
+/// Returns source-declaration SCCs in dependency-first order.
+pub(crate) fn dependency_first_sccs(
     nodes: impl IntoIterator<Item = DefId>,
     dependencies: impl IntoIterator<Item = (DefId, DefId)>,
-) -> Result<Box<[Box<[DefId]>]>, EffectGraphError> {
+) -> Result<Box<[Box<[DefId]>]>, DeclarationGraphError> {
     let nodes = nodes.into_iter().collect::<BTreeSet<_>>();
     let node_by_index = nodes.iter().copied().collect::<Vec<_>>();
     let index_by_node = node_by_index
@@ -21,11 +21,11 @@ pub(super) fn dependency_first_sccs(
         let caller_index = index_by_node
             .get(&caller)
             .copied()
-            .ok_or(EffectGraphError::UnknownNode(caller))?;
+            .ok_or(DeclarationGraphError::UnknownNode(caller))?;
         let callee_index = index_by_node
             .get(&callee)
             .copied()
-            .ok_or(EffectGraphError::UnknownNode(callee))?;
+            .ok_or(DeclarationGraphError::UnknownNode(callee))?;
         forward[caller_index].push(callee_index);
         reverse[callee_index].push(caller_index);
     }
@@ -119,30 +119,30 @@ fn finishing_order(adjacency: &[Vec<usize>]) -> Vec<usize> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum EffectGraphError {
+pub(crate) enum DeclarationGraphError {
     UnknownNode(DefId),
 }
 
-impl fmt::Display for EffectGraphError {
+impl fmt::Display for DeclarationGraphError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownNode(node) => {
                 write!(
                     formatter,
-                    "effect dependency references unknown callable {node:?}"
+                    "declaration dependency references unknown node {node:?}"
                 )
             }
         }
     }
 }
 
-impl std::error::Error for EffectGraphError {}
+impl std::error::Error for DeclarationGraphError {}
 
 #[cfg(test)]
 mod tests {
     use crate::{DefId, ModuleId};
 
-    use super::{EffectGraphError, dependency_first_sccs};
+    use super::{DeclarationGraphError, dependency_first_sccs};
 
     fn node(local: usize) -> DefId {
         DefId::from_index(ModuleId::from_index(0).unwrap(), local).unwrap()
@@ -201,7 +201,7 @@ mod tests {
     fn unknown_dependency_endpoint_is_rejected() {
         assert_eq!(
             dependency_first_sccs([node(0)], [(node(0), node(1))]),
-            Err(EffectGraphError::UnknownNode(node(1)))
+            Err(DeclarationGraphError::UnknownNode(node(1)))
         );
     }
 

@@ -442,6 +442,7 @@ struct SelfBinding {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum TypePosition {
     Ordinary,
+    ConstructorDType,
     CallableBoundary,
     LocalBoundary,
     ConditionalOwnership,

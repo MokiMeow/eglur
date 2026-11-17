@@ -99,6 +99,35 @@ cargo build --workspace --locked
 
 ## Semantic Integration Tests
 
+The core profile evaluates fixed-width integer expressions and top-level
+integer constants, recording their exact values for execution. Constant
+dependencies are checked for cycles and same-module forward references before
+evaluation; function bodies may refer to later constants. Arithmetic failures remain
+compile errors, including inside `checked`. Dynamic arithmetic retains its
+`checked` boundary, with the specified total division and remainder exceptions.
+Mixed fixed-width integer operands use the shared numeric promotion rules;
+conversion overflow is checked before arithmetic. Total division and remainder
+exceptions apply only when the operand conversions are also statically safe.
+The scalar `wrapping_add`, `wrapping_sub`, and `wrapping_mul` helpers accept
+same-dtype fixed-width integers and wrap modulo `2^bits` without `checked`.
+Floating/complex arithmetic and Bool numeric operators remain unsupported.
+Arithmetic with known nonnumeric operands reports `NUMERIC_OPERAND_NOT_NUMERIC`,
+including unary minus and fractional division. Diagnostics retain canonical
+operand types before promotion and suppress errors derived from poisoned operands.
+Constant initializers cannot execute general function calls.
+
+`SupportProfile::tensor_constructors_v1()` adds static checks for positional
+`zeros[T](...)`, `ones[T](...)`, `nan[f32](...)`, and `rand![f32](...)` calls.
+It resolves dtype aliases, checks dimensions against `Nat`, and records the
+`Tensor[T]` result and call effects. Dynamic dimensions do not require shape
+inference. The evaluator rejects these calls before executing the program.
+Direct negative integer literals share the core range checks: `-0` is a valid
+`Nat`, while negative nonzero dimensions report `DOMAIN_INVALID_VALUE`.
+Other dimension expressions still require supported core operations.
+Ordinary-call constructor forms, named dimensions, tensor operations, and
+storage or backend implementation remain unsupported; the core profile does
+not enable constructor checks.
+
 The end-to-end tests read the 23-fixture corpus in
 [`core-v1.expectations.json`](../tests/semantic/core-v1.expectations.json),
 runs each fixture through `FileSetRequest`, `CompilerSession`, the selected

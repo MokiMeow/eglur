@@ -157,6 +157,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Ok(Outcome::Known(TypedExpression {
             ty,
             place,
+            integer_constant: None,
             normal_continuation: self
                 .continuation_for_type(ty)
                 .strict(receiver_value.normal_continuation),
@@ -1255,6 +1256,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 kind: TypedPlaceKind::Dereference { reference: operand },
                 writable: *mutability == ReferenceMutability::Mutable,
             }),
+            integer_constant: None,
             normal_continuation: self
                 .continuation_for_type(ty)
                 .strict(operand_value.normal_continuation),
@@ -1316,6 +1318,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Ok(Outcome::Known(TypedExpression {
             ty,
             place,
+            integer_constant: None,
             normal_continuation: self
                 .continuation_for_type(ty)
                 .strict(receiver_value.normal_continuation),

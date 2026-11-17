@@ -54,6 +54,7 @@ pub enum BodyTypingError {
         actual: &'static str,
     },
     DiagnosticCountOutOfRange(usize),
+    InvalidIntegerConstant,
     MissingDiagnosticOwner,
     MissingCapabilityInput(CompileCapability),
     UnavailableGenericParameter(GenericParameterId),
@@ -189,6 +190,7 @@ impl fmt::Display for BodyTypingError {
             Self::DiagnosticCountOutOfRange(count) => {
                 write!(formatter, "diagnostic count {count} does not fit i64")
             }
+            Self::InvalidIntegerConstant => formatter.write_str("invalid typed integer constant"),
             Self::MissingDiagnosticOwner => {
                 formatter.write_str("diagnostic type rendering has no source declaration owner")
             }
@@ -331,6 +333,7 @@ impl std::error::Error for BodyTypingError {
             | Self::EmptyNamedConstructorPayload(_)
             | Self::InconsistentConstructorPayloadForm { .. }
             | Self::DiagnosticCountOutOfRange(_)
+            | Self::InvalidIntegerConstant
             | Self::MissingDiagnosticOwner
             | Self::UnavailableGenericParameter(_)
             | Self::MissingBoundWitness(_)

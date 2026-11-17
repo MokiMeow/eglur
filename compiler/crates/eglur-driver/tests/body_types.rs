@@ -737,7 +737,7 @@ fn unsupported_failure_inference_and_const_evaluation_are_capability_gaps() {
                 "  yield value + 1\n",
                 "}\n",
             ),
-            TypecheckCapability::EvaluateScalarConstExpressions,
+            TypecheckCapability::EvaluateSelectedIntegerConstExpressions,
         ),
     ] {
         let mut unsupported = session(source);

@@ -108,6 +108,16 @@ impl<'a> Planner<'a> {
         witnesses: &Witnesses,
     ) -> Result<(), SupportReason> {
         self.require(ExecutionCapability::CoreValues)?;
+        if let FactState::Known(typed) = self
+            .view
+            .program
+            .resolution()
+            .body_types()
+            .expression(ExpressionKey::new(module, expression))
+            && typed.integer_constant().is_some()
+        {
+            return Ok(());
+        }
         let body = self
             .view
             .body(module, expression.body())
@@ -332,7 +342,7 @@ impl<'a> Planner<'a> {
                 UnsupportedFeature::InvalidCheckedProgram,
             ));
         };
-        if !is_fixed_width_integer(result) {
+        if !result.is_fixed_width_integer() {
             return Err(SupportReason::Feature(
                 UnsupportedFeature::InvalidCheckedProgram,
             ));
@@ -532,6 +542,9 @@ impl<'a> Planner<'a> {
             UnsupportedFeature::InvalidCheckedProgram,
         ))?;
         match invocation.target() {
+            InvocationTarget::TensorConstructor { .. } => {
+                Err(SupportReason::Feature(UnsupportedFeature::Tensor))
+            }
             InvocationTarget::Constructor { declaration, .. } => {
                 self.plan_constructor(declaration, checked.dispatch())
             }

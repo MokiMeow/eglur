@@ -351,157 +351,6 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Ok(outcome)
     }
 
-    pub(super) fn type_checked_binary(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        request: CheckedBinaryRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        let CheckedBinaryRequest {
-            expression,
-            origin,
-            operator,
-            left,
-            right,
-            ty: request,
-        } = request;
-        if !self.recorder.require(
-            CompileCapability::Typecheck(
-                TypecheckCapability::CheckSelectedCheckedIntegerArithmetic,
-            ),
-            SemanticLocation::origin(source.file(), origin),
-        ) {
-            return Ok(Outcome::Unperformed);
-        }
-        let Some(operator) = CheckedNumericOperator::from_binary(operator) else {
-            self.demand_unimplemented(TypecheckCapability::CheckOperators, source, origin);
-            return Ok(Outcome::Unperformed);
-        };
-        if self.is_const_evaluable_expression(module, body, left)?
-            || self.is_const_evaluable_expression(module, body, right)?
-        {
-            return Ok(self.unsupported(
-                TypecheckCapability::EvaluateScalarConstExpressions,
-                source,
-                origin,
-            ));
-        }
-        let expected = match request.expected {
-            Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
-            _ => None,
-        };
-        let left = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
-            left,
-            TypeRequest::definitive(expected),
-        )?;
-        let right_expected = match &left {
-            Outcome::Known(left) if self.is_fixed_width_integer(left.ty)? => Some(left.ty),
-            _ => expected,
-        };
-        let left_continuation = match &left {
-            Outcome::Known(left) => left.normal_continuation,
-            Outcome::Poisoned(_)
-            | Outcome::Deferred
-            | Outcome::Unperformed
-            | Outcome::NotApplicable => NormalContinuation::Absent,
-        };
-        let right = self.with_control_path(left_continuation, |checker| {
-            checker.type_expression(
-                module,
-                source,
-                hir,
-                body,
-                right,
-                TypeRequest::definitive(right_expected),
-            )
-        })?;
-        let (left, right) = match self.known_binary_operands(left, right)? {
-            Outcome::Known(operands) => operands,
-            Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
-            Outcome::Deferred => return Ok(Outcome::Deferred),
-            Outcome::Unperformed | Outcome::NotApplicable => return Ok(Outcome::Unperformed),
-        };
-        if left.ty != right.ty || !self.is_fixed_width_integer(left.ty)? {
-            self.demand_unimplemented(TypecheckCapability::CheckOperators, source, origin);
-            return Ok(Outcome::Unperformed);
-        }
-        let continuation = left.normal_continuation.strict(right.normal_continuation);
-        self.record_checked_numeric_operation(module, expression, operator, left.ty, continuation)?;
-        Ok(Outcome::Known(
-            self.value_expression_with_continuation(left.ty, continuation),
-        ))
-    }
-
-    pub(super) fn type_checked_negation(
-        &mut self,
-        context: BodyContext<'_, '_>,
-        expression: ExprId,
-        origin: OriginId,
-        operand: ExprId,
-        request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext {
-            module,
-            source,
-            hir,
-            body,
-        } = context;
-        if !self.recorder.require(
-            CompileCapability::Typecheck(
-                TypecheckCapability::CheckSelectedCheckedIntegerArithmetic,
-            ),
-            SemanticLocation::origin(source.file(), origin),
-        ) {
-            return Ok(Outcome::Unperformed);
-        }
-        if self.is_const_evaluable_expression(module, body, operand)? {
-            return Ok(self.unsupported(
-                TypecheckCapability::EvaluateScalarConstExpressions,
-                source,
-                origin,
-            ));
-        }
-        let expected = match request.expected {
-            Some(ty) if self.is_signed_fixed_width_integer(ty)? => Some(ty),
-            _ => None,
-        };
-        let operand = self.type_expression(
-            module,
-            source,
-            hir,
-            body,
-            operand,
-            TypeRequest::definitive(expected),
-        )?;
-        let Outcome::Known(operand) = operand else {
-            return Ok(operand);
-        };
-        if !self.is_signed_fixed_width_integer(operand.ty)? {
-            self.demand_unimplemented(TypecheckCapability::CheckOperators, source, origin);
-            return Ok(Outcome::Unperformed);
-        }
-        self.record_checked_numeric_operation(
-            module,
-            expression,
-            CheckedNumericOperator::Negate,
-            operand.ty,
-            operand.normal_continuation,
-        )?;
-        Ok(Outcome::Known(self.value_expression_with_continuation(
-            operand.ty,
-            operand.normal_continuation,
-        )))
-    }
-
     pub(super) fn known_binary_operands(
         &mut self,
         left: Outcome<TypedExpression>,
@@ -523,17 +372,24 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
     pub(super) fn record_checked_numeric_operation(
         &mut self,
-        module: ModuleId,
-        expression: ExprId,
+        key: ExpressionKey,
         operator: CheckedNumericOperator,
         result: TypeId,
         continuation: NormalContinuation,
+        total: bool,
+        conversion_can_fail: bool,
     ) -> Result<(), BodyTypingError> {
-        let faults = operator
-            .faults(self.is_signed_fixed_width_integer(result)?)
-            .to_vec()
-            .into_boxed_slice();
-        let key = ExpressionKey::new(module, expression);
+        let faults = if total {
+            Box::new([]) as Box<[NumericFaultCause]>
+        } else {
+            operator
+                .faults(
+                    self.is_signed_fixed_width_integer(result)?,
+                    conversion_can_fail,
+                )
+                .to_vec()
+                .into_boxed_slice()
+        };
         let operation = CheckedNumericOperation::new(operator, result, faults.clone());
         match self.checked_numeric.state(&key) {
             FactState::Unperformed => self
@@ -544,7 +400,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 return Err(DuplicateFact.into());
             }
         }
-        if !continuation.is_present() {
+        if !continuation.is_present() || faults.is_empty() {
             return Ok(());
         }
         let context_index = self
@@ -555,7 +411,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let target = self.checked_contexts[context_index].region.clone();
         for fault in faults {
             self.record_control_transfer(
-                ControlTransferSource::Expression(ExpressionKey::new(module, expression)),
+                ControlTransferSource::Expression(key),
                 ControlTransferKind::CheckedFault(fault),
                 target.clone(),
             )?;
@@ -659,93 +515,63 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     }
 
     pub(super) fn is_const_evaluable_expression(
-        &self,
+        &mut self,
         module: ModuleId,
         body: &Body,
         expression: ExprId,
     ) -> Result<bool, BodyTypingError> {
-        let expression_value = body
-            .expression(expression)
-            .ok_or(BodyTypingError::WrongBodyExpression(expression))?;
-        Ok(match expression_value.kind() {
-            ExprKind::Literal(_) | ExprKind::Unit => true,
-            ExprKind::Name(_) => {
-                let key = ResolutionKey::Expression { module, expression };
-                match self.names.fact(key) {
-                    FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1 => {
-                        matches!(
-                            self.signatures.declaration(&targets[0]),
-                            FactState::Known(DeclarationSignature::Const { .. })
-                        )
+        let mut pending = vec![(expression, false)];
+        while let Some((current, visited)) = pending.pop() {
+            let key = ExpressionKey::new(module, current);
+            if self.const_eligibility.contains_key(&key) {
+                continue;
+            }
+            let value = body
+                .expression(current)
+                .ok_or(BodyTypingError::WrongBodyExpression(current))?;
+            if !visited {
+                pending.push((current, true));
+                match value.kind() {
+                    ExprKind::Group(inner) | ExprKind::Unary { operand: inner, .. } => {
+                        pending.push((*inner, false))
                     }
-                    FactState::Unperformed
-                    | FactState::Poisoned(_)
-                    | FactState::NotApplicable
-                    | FactState::Known(_) => false,
+                    ExprKind::Binary { left, right, .. } => {
+                        pending.push((*right, false));
+                        pending.push((*left, false));
+                    }
+                    _ => {}
                 }
+                continue;
             }
-            ExprKind::Group(inner)
-            | ExprKind::Unary {
-                operator: UnaryOperator::Not | UnaryOperator::Negate,
-                operand: inner,
-            } => self.is_const_evaluable_expression(module, body, *inner)?,
-            ExprKind::Binary {
-                operator:
-                    BinaryOperator::LogicalOr
-                    | BinaryOperator::LogicalAnd
-                    | BinaryOperator::Equal
-                    | BinaryOperator::NotEqual
-                    | BinaryOperator::Less
-                    | BinaryOperator::LessEqual
-                    | BinaryOperator::Greater
-                    | BinaryOperator::GreaterEqual
-                    | BinaryOperator::Add
-                    | BinaryOperator::Subtract
-                    | BinaryOperator::Multiply
-                    | BinaryOperator::Divide
-                    | BinaryOperator::FractionalDivide
-                    | BinaryOperator::Remainder,
-                left,
-                right,
-            } => {
-                self.is_const_evaluable_expression(module, body, *left)?
-                    && self.is_const_evaluable_expression(module, body, *right)?
-            }
-            ExprKind::Block { .. }
-            | ExprKind::Tuple(_)
-            | ExprKind::Array(_)
-            | ExprKind::Map(_)
-            | ExprKind::Call(_)
-            | ExprKind::Member { .. }
-            | ExprKind::TupleProjection { .. }
-            | ExprKind::Binary {
-                operator: BinaryOperator::Range | BinaryOperator::RangeInclusive,
-                ..
-            }
-            | ExprKind::Unary {
-                operator: UnaryOperator::Dereference,
-                ..
-            }
-            | ExprKind::Reference { .. }
-            | ExprKind::StructLiteral { .. }
-            | ExprKind::VariantConstructor { .. }
-            | ExprKind::If(_)
-            | ExprKind::Match(_)
-            | ExprKind::Try(_)
-            | ExprKind::Result(_)
-            | ExprKind::Checked(_)
-            | ExprKind::Lambda(_)
-            | ExprKind::Own(_)
-            | ExprKind::Move(_)
-            | ExprKind::DropOwn { .. }
-            | ExprKind::Unsafe(_)
-            | ExprKind::CatalogCall(_)
-            | ExprKind::DTypeCall(_)
-            | ExprKind::ReduceByCandidate(_)
-            | ExprKind::TensorSchema(_)
-            | ExprKind::Hole
-            | ExprKind::Invalid => false,
-        })
+            let child = |id| self.const_eligibility[&ExpressionKey::new(module, id)];
+            let eligible = match value.kind() {
+                ExprKind::Literal(_) | ExprKind::Unit => true,
+                ExprKind::Name(_) => {
+                    matches!(self.names.fact(ResolutionKey::Expression { module, expression: current }),
+                    FactState::Known(ResolvedName::Declarations(targets)) if targets.len() == 1
+                        && matches!(self.signatures.declaration(&targets[0]), FactState::Known(DeclarationSignature::Const { .. })))
+                }
+                ExprKind::Group(inner) => child(*inner),
+                ExprKind::Unary {
+                    operator: UnaryOperator::Negate | UnaryOperator::Not,
+                    operand,
+                } => child(*operand),
+                ExprKind::Binary {
+                    operator,
+                    left,
+                    right,
+                } => {
+                    !matches!(
+                        operator,
+                        BinaryOperator::Range | BinaryOperator::RangeInclusive
+                    ) && child(*left)
+                        && child(*right)
+                }
+                _ => false,
+            };
+            self.const_eligibility.insert(key, eligible);
+        }
+        Ok(self.const_eligibility[&ExpressionKey::new(module, expression)])
     }
 
     pub(super) fn apply_additional_poison<T>(

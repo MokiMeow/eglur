@@ -3,8 +3,8 @@ use eglur_hir::{ExprId, Mutability};
 use crate::{
     CallableInstanceId, CallableSignatureId, CanonicalTarget, CheckedNumericOperation,
     ControlRegion, ControlRegionKey, ControlTransfer, DefId, ExpressionKey, FactState, FactTable,
-    GenericParameterId, LocalBindingId, NormalContinuation, SemanticFact, SemanticLocation,
-    SubstId, TraitRef, TypeId, WitnessSlotId,
+    GenericParameterId, IntegerValue, LocalBindingId, NormalContinuation, SemanticFact,
+    SemanticLocation, SubstId, TraitRef, TypeId, WitnessSlotId,
 };
 
 /// Stable storage identity retained for a typed place expression.
@@ -47,11 +47,18 @@ impl TypedPlace {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedExpression {
     pub(super) ty: TypeId,
+    pub(super) integer_constant: Option<IntegerValue>,
     pub(super) place: Option<TypedPlace>,
     pub(super) normal_continuation: NormalContinuation,
 }
 
 impl TypedExpression {
+    /// Exact integer result established without executing source effects.
+    #[must_use]
+    pub const fn integer_constant(&self) -> Option<IntegerValue> {
+        self.integer_constant
+    }
+
     #[must_use]
     pub const fn ty(&self) -> TypeId {
         self.ty
@@ -181,6 +188,11 @@ impl CallableInstance {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InvocationTarget {
     Callable(CallableInstanceId),
+    TensorConstructor {
+        declaration: CanonicalTarget,
+        constructor: crate::TensorSourceConstructor,
+        dtype: TypeId,
+    },
     Constructor {
         declaration: CanonicalTarget,
         substitution: SubstId,

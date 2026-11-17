@@ -5,7 +5,6 @@ use crate::ExternalDefId;
 
 mod authorization;
 mod body;
-mod graph;
 mod inference;
 
 pub use inference::{EffectAnalysisError, EffectFacts, EffectScc, analyze_effects};

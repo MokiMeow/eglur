@@ -11,7 +11,6 @@ pub struct ModulePath {
 
 impl ModulePath {
     /// Returns canonical components in source order.
-    #[must_use]
     pub fn components(&self) -> impl ExactSizeIterator<Item = &str> {
         self.components.iter().map(AsRef::as_ref)
     }

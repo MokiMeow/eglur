@@ -34,7 +34,27 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .flat_map(|module| module.declarations())
             .map(|declaration| declaration.id())
             .collect::<Vec<_>>();
+        let constants = declarations
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.collection
+                    .declaration(*id)
+                    .is_some_and(|declaration| declaration.kind() == DeclarationKind::Const)
+            })
+            .collect::<Vec<_>>();
+        if self.evaluate_constant_declarations {
+            self.check_constant_declarations(&constants)?;
+        }
         for declaration in declarations {
+            if self.evaluate_constant_declarations
+                && self
+                    .collection
+                    .declaration(declaration)
+                    .is_some_and(|declaration| declaration.kind() == DeclarationKind::Const)
+            {
+                continue;
+            }
             self.check_declaration(declaration)?;
         }
         Ok(())
@@ -164,6 +184,42 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Err(BodyTypingError::WrongDeclarationKind(declaration));
         };
         let body = hir.body(value.body);
+        if self.evaluate_constant_declarations {
+            self.require_constant_declarations(source, item.origin());
+            let mut name_poison: Option<Poison> = None;
+            for (expression, _) in body.expressions() {
+                if let FactState::Poisoned(poison) = self
+                    .names
+                    .fact(ResolutionKey::Expression { module, expression })
+                {
+                    name_poison = Some(match name_poison {
+                        Some(previous) => previous.merge(poison)?,
+                        None => poison.clone(),
+                    });
+                }
+            }
+            if let Some(poison) = name_poison {
+                return self.record_body_outcome(declaration, expected, Outcome::Poisoned(poison));
+            }
+            if !self.is_const_evaluable_expression(module, body, value.value)? {
+                if !self.has_nonconstant_call(module, body) {
+                    let outcome = self.unsupported(
+                        TypecheckCapability::EvaluateScalarConstExpressions,
+                        source,
+                        item.origin(),
+                    );
+                    return self.record_body_outcome(declaration, expected, outcome);
+                }
+                return self.reject_constant(
+                    declaration,
+                    body.expression(value.value)
+                        .ok_or(BodyTypingError::WrongBodyExpression(value.value))?
+                        .origin(),
+                    "CONST_INIT_NOT_CONST",
+                    "const initializer is not const-evaluable",
+                );
+            }
+        }
         let expected = match self.normalize_type_at(source, item.origin(), expected)? {
             Outcome::Known(ty) => ty,
             Outcome::Poisoned(poison) => {
@@ -193,6 +249,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Outcome::Poisoned(self.assignment_mismatch(source, origin, expected, actual.ty)?)
             }
             other => other,
+        };
+        let outcome = if self.evaluate_constant_declarations
+            && matches!(&outcome, Outcome::Known(value) if value.integer_constant.is_none())
+        {
+            self.unsupported(
+                TypecheckCapability::EvaluateScalarConstExpressions,
+                source,
+                item.origin(),
+            )
+        } else {
+            outcome
         };
         self.record_body_outcome(declaration, expected, outcome)
     }

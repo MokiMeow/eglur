@@ -143,6 +143,21 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         context: &SourceTypeContext,
     ) -> Result<Resolution<TypeId>, SignatureResolutionError> {
         let occurrence = hir.type_ref(type_ref);
+        if position == TypePosition::ConstructorDType
+            && let TypeRefKind::Path { path, arguments } = occurrence.kind()
+            && arguments.is_empty()
+            && let [name] = path.segments()
+            && name.text() == Some("bool")
+        {
+            let ty = self.types.primitive(crate::PrimitiveType::Bool)?;
+            return self.record_type_occurrence(
+                source,
+                type_ref,
+                occurrence.origin(),
+                None,
+                Resolution::Known(ty),
+            );
+        }
         let (result, written) =
             self.resolve_source_type_inner(owner, source, hir, type_ref, position, context)?;
         self.record_type_occurrence(source, type_ref, occurrence.origin(), written, result)
@@ -886,6 +901,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             )),
             TypePosition::BorrowedOwnership => Ok(self.types.ownership_root(ty)?.is_some()),
             TypePosition::Ordinary
+            | TypePosition::ConstructorDType
             | TypePosition::ExternParameter
             | TypePosition::ExternReturn
             | TypePosition::ExternNested

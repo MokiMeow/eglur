@@ -189,6 +189,21 @@ pub enum BinaryOperator {
     Remainder,
 }
 
+impl BinaryOperator {
+    #[must_use]
+    pub const fn numeric_symbol(self) -> Option<&'static str> {
+        match self {
+            Self::Add => Some("+"),
+            Self::Subtract => Some("-"),
+            Self::Multiply => Some("*"),
+            Self::Divide => Some("/"),
+            Self::FractionalDivide => Some("/."),
+            Self::Remainder => Some("%"),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum UnaryOperator {
     Not,

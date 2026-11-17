@@ -184,6 +184,18 @@ pub enum CheckedNumericOperator {
 
 impl CheckedNumericOperator {
     #[must_use]
+    pub const fn diagnostic_operation(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Subtract => "subtract",
+            Self::Multiply => "multiply",
+            Self::Divide => "divide",
+            Self::Remainder => "remainder",
+            Self::Negate => "negate",
+        }
+    }
+
+    #[must_use]
     pub const fn from_binary(operator: BinaryOperator) -> Option<Self> {
         match operator {
             BinaryOperator::Add => Some(Self::Add),
@@ -206,16 +218,24 @@ impl CheckedNumericOperator {
     }
 
     #[must_use]
-    pub(crate) const fn faults(self, signed: bool) -> &'static [NumericFaultCause] {
+    pub(crate) const fn faults(
+        self,
+        signed: bool,
+        conversion_can_fail: bool,
+    ) -> &'static [NumericFaultCause] {
         match self {
             Self::Add | Self::Subtract | Self::Multiply | Self::Negate => {
                 &[NumericFaultCause::Overflow]
             }
-            Self::Divide if signed => &[
+            Self::Divide if signed || conversion_can_fail => &[
                 NumericFaultCause::DivisionByZero,
                 NumericFaultCause::Overflow,
             ],
             Self::Divide => &[NumericFaultCause::DivisionByZero],
+            Self::Remainder if conversion_can_fail => &[
+                NumericFaultCause::RemainderByZero,
+                NumericFaultCause::Overflow,
+            ],
             Self::Remainder => &[NumericFaultCause::RemainderByZero],
         }
     }

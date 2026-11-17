@@ -78,6 +78,8 @@ pub enum RuntimeHook {
     ResErr,
     ToStr,
     WrappingAdd,
+    WrappingSub,
+    WrappingMul,
     TestEmit,
     TestAbort,
 }
@@ -89,7 +91,9 @@ impl RuntimeHook {
             Self::OptSome | Self::OptNone | Self::ResOk | Self::ResErr => {
                 ExecutionCapability::FailureFlow
             }
-            Self::ToStr | Self::WrappingAdd => ExecutionCapability::TrustedScalarHooks,
+            Self::ToStr | Self::WrappingAdd | Self::WrappingSub | Self::WrappingMul => {
+                ExecutionCapability::TrustedScalarHooks
+            }
             Self::TestEmit | Self::TestAbort => ExecutionCapability::TestEffects,
         }
     }

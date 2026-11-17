@@ -122,6 +122,16 @@ impl<'a> Evaluator<'a> {
         let Some(body) = self.view.body(frame.module, expression.body()) else {
             return invalid_flow();
         };
+        if let FactState::Known(typed) = self
+            .view
+            .program
+            .resolution()
+            .body_types()
+            .expression(ExpressionKey::new(frame.module, expression))
+            && let Some(value) = typed.integer_constant()
+        {
+            return Flow::Value(RuntimeValue::Value(Value::Integer(value)));
+        }
         let Some(expression_node) = body.expression(expression) else {
             return invalid_flow();
         };
@@ -374,26 +384,19 @@ impl<'a> Evaluator<'a> {
                 None => return invalid_flow(),
             },
             LiteralKind::Integer => {
-                let key = ExpressionKey::new(module, expression);
-                let FactState::Known(typed) =
-                    self.view.program.resolution().body_types().expression(key)
-                else {
-                    return invalid_flow();
-                };
-                let Ok(TypeKind::Primitive(primitive)) = self
+                let FactState::Known(typed) = self
                     .view
                     .program
                     .resolution()
-                    .signatures()
-                    .types()
-                    .kind(typed.ty())
+                    .body_types()
+                    .expression(ExpressionKey::new(module, expression))
                 else {
                     return invalid_flow();
                 };
-                let Some(value) = parse_integer(literal.spelling()) else {
+                let Some(value) = typed.integer_constant() else {
                     return invalid_flow();
                 };
-                Value::Integer(IntegerValue::new(*primitive, value))
+                Value::Integer(value)
             }
             LiteralKind::Float
             | LiteralKind::FormatString
@@ -466,6 +469,7 @@ impl<'a> Evaluator<'a> {
             return invalid_flow();
         };
         match invocation.target() {
+            InvocationTarget::TensorConstructor { .. } => invalid_flow(),
             InvocationTarget::Constructor { declaration, .. } => {
                 self.eval_constructor(declaration, checked.dispatch(), arguments)
             }
@@ -618,16 +622,23 @@ impl<'a> Evaluator<'a> {
                 },
                 _ => invalid_flow(),
             },
-            RuntimeHook::WrappingAdd => match values.as_slice() {
-                [Value::Integer(left), Value::Integer(right)]
-                    if left.primitive() == right.primitive() =>
-                {
-                    wrapping_add(*left, *right)
+            RuntimeHook::WrappingAdd | RuntimeHook::WrappingSub | RuntimeHook::WrappingMul => {
+                match values.as_slice() {
+                    [Value::Integer(left), Value::Integer(right)]
+                        if left.primitive() == right.primitive() =>
+                    {
+                        match hook {
+                            RuntimeHook::WrappingAdd => left.wrapping_add(*right),
+                            RuntimeHook::WrappingSub => left.wrapping_sub(*right),
+                            RuntimeHook::WrappingMul => left.wrapping_mul(*right),
+                            _ => unreachable!(),
+                        }
                         .map(|value| Flow::Value(RuntimeValue::Value(Value::Integer(value))))
                         .unwrap_or_else(invalid_flow)
+                    }
+                    _ => invalid_flow(),
                 }
-                _ => invalid_flow(),
-            },
+            }
             RuntimeHook::TestEmit => match values.as_slice() {
                 [Value::Str(message)] => {
                     self.events.push(RuntimeEvent::Emitted(message.clone()));
@@ -698,7 +709,7 @@ impl<'a> Evaluator<'a> {
         let Some(destination) = self.view.primitive_type(operation.result()) else {
             return invalid_flow();
         };
-        match checked_integer(operation.operator(), destination, left, Some(right)) {
+        match left.checked(operation.operator(), destination, Some(right)) {
             IntegerEvaluation::Value(value) => {
                 Flow::Value(RuntimeValue::Value(Value::Integer(value)))
             }
@@ -751,7 +762,7 @@ impl<'a> Evaluator<'a> {
         let Some(destination) = self.view.primitive_type(operation.result()) else {
             return invalid_flow();
         };
-        match checked_integer(operation.operator(), destination, value, None) {
+        match value.checked(operation.operator(), destination, None) {
             IntegerEvaluation::Value(value) => {
                 Flow::Value(RuntimeValue::Value(Value::Integer(value)))
             }

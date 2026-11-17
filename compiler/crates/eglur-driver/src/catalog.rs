@@ -26,10 +26,13 @@ const OK: &str = "std::res::Ok";
 const ERR: &str = "std::res::Err";
 const TO_STR: &str = "std::prelude::to_str";
 const WRAPPING_ADD: &str = "std::prelude::wrapping_add";
+const WRAPPING_SUB: &str = "std::prelude::wrapping_sub";
+const WRAPPING_MUL: &str = "std::prelude::wrapping_mul";
 const TEST_EMIT: &str = "std::test::emit!";
 const TEST_ABORT: &str = "std::test::abort!";
 const IO_PRINT: &str = "std::io::print!";
 const TENSOR_ZEROS: &str = "std::tensor::zeros";
+const TENSOR: &str = "std::tensor::Tensor";
 const TENSOR_ONES: &str = "std::tensor::ones";
 const TENSOR_NAN: &str = "std::tensor::nan";
 const TENSOR_RAND: &str = "std::tensor::rand!";
@@ -64,6 +67,8 @@ impl TrustedCatalog {
         let err = external_id(ERR);
         let to_str = external_id(TO_STR);
         let wrapping_add = external_id(WRAPPING_ADD);
+        let wrapping_sub = external_id(WRAPPING_SUB);
+        let wrapping_mul = external_id(WRAPPING_MUL);
         let emit = external_id(TEST_EMIT);
         let abort = external_id(TEST_ABORT);
         let print = external_id(IO_PRINT);
@@ -73,6 +78,13 @@ impl TrustedCatalog {
         let rand = external_id(TENSOR_RAND);
 
         let declarations = vec![
+            declaration(
+                external_id(TENSOR),
+                tensor.clone(),
+                "Tensor",
+                false,
+                DeclarationKind::OpaqueType,
+            )?,
             declaration(
                 numeric_error.clone(),
                 prelude.clone(),
@@ -133,6 +145,20 @@ impl TrustedCatalog {
                 wrapping_add.clone(),
                 prelude.clone(),
                 "wrapping_add",
+                false,
+                DeclarationKind::Function,
+            )?,
+            declaration(
+                wrapping_sub.clone(),
+                prelude.clone(),
+                "wrapping_sub",
+                false,
+                DeclarationKind::Function,
+            )?,
+            declaration(
+                wrapping_mul.clone(),
+                prelude.clone(),
+                "wrapping_mul",
                 false,
                 DeclarationKind::Function,
             )?,
@@ -198,6 +224,8 @@ impl TrustedCatalog {
                 err.clone(),
                 to_str.clone(),
                 wrapping_add.clone(),
+                wrapping_sub.clone(),
+                wrapping_mul.clone(),
             ],
         )?;
 
@@ -308,21 +336,6 @@ impl TrustedCatalog {
                 argument: 0,
             }),
             TrustedDeclarationSignature::new(
-                wrapping_add.clone(),
-                TrustedSignatureKind::Callable {
-                    bang: false,
-                    generic_parameters: Box::new([generic("T", [])]),
-                    parameters: Box::new([
-                        parameter("lhs", TrustedTypeExpr::GenericParameter(0)),
-                        parameter("rhs", TrustedTypeExpr::GenericParameter(0)),
-                    ]),
-                    result: TrustedTypeExpr::GenericParameter(0),
-                    requirements: Box::new([TrustedCallableRequirement::FixedWidthInteger(
-                        TrustedTypeExpr::GenericParameter(0),
-                    )]),
-                },
-            ),
-            TrustedDeclarationSignature::new(
                 emit.clone(),
                 TrustedSignatureKind::Callable {
                     bang: true,
@@ -368,10 +381,41 @@ impl TrustedCatalog {
                 },
             ),
         ];
+        for id in [
+            wrapping_add.clone(),
+            wrapping_sub.clone(),
+            wrapping_mul.clone(),
+        ] {
+            signatures.push(TrustedDeclarationSignature::new(
+                id,
+                TrustedSignatureKind::Callable {
+                    bang: false,
+                    generic_parameters: Box::new([generic("T", [])]),
+                    parameters: Box::new([
+                        parameter("lhs", TrustedTypeExpr::GenericParameter(0)),
+                        parameter("rhs", TrustedTypeExpr::GenericParameter(0)),
+                    ]),
+                    result: TrustedTypeExpr::GenericParameter(0),
+                    requirements: Box::new([TrustedCallableRequirement::FixedWidthInteger(
+                        TrustedTypeExpr::GenericParameter(0),
+                    )]),
+                },
+            ));
+        }
         let display_members = display_impls(&display, &display_to_str);
         signatures.extend(display_members.signatures);
+        signatures.push(TrustedDeclarationSignature::new(
+            external_id(TENSOR),
+            TrustedSignatureKind::Nominal {
+                generic_parameters: Box::new([TrustedGenericParameter {
+                    name: "T".into(),
+                    bounds: Box::new([]),
+                }]),
+            },
+        ));
         let signatures = TrustedSignatureEnvironment::new(signatures)?;
         let inhabitance = TrustedInhabitanceEnvironment::new([
+            TrustedInhabitanceFact::new(external_id(TENSOR), TrustedNominalInhabitance::Inhabited),
             TrustedInhabitanceFact::new(
                 external_id(NUMERIC_ERROR),
                 TrustedNominalInhabitance::Unknown,
@@ -383,9 +427,21 @@ impl TrustedCatalog {
         ])?;
 
         let mut effects = vec![
+            TrustedEffectSummary::new(external_id(TENSOR_ZEROS), EffectSummary::pure()),
+            TrustedEffectSummary::new(external_id(TENSOR_ONES), EffectSummary::pure()),
+            TrustedEffectSummary::new(external_id(TENSOR_NAN), EffectSummary::pure()),
+            TrustedEffectSummary::new(
+                external_id(TENSOR_RAND),
+                EffectSummary::Known(KnownEffectSummary::new(
+                    [EffectCategory::Nondet],
+                    StateScope::None,
+                )?),
+            ),
             TrustedEffectSummary::new(display_to_str, EffectSummary::pure()),
             TrustedEffectSummary::new(to_str.clone(), EffectSummary::pure()),
             TrustedEffectSummary::new(wrapping_add.clone(), EffectSummary::pure()),
+            TrustedEffectSummary::new(wrapping_sub.clone(), EffectSummary::pure()),
+            TrustedEffectSummary::new(wrapping_mul.clone(), EffectSummary::pure()),
             TrustedEffectSummary::new(
                 emit.clone(),
                 EffectSummary::Known(KnownEffectSummary::new(
@@ -410,6 +466,8 @@ impl TrustedCatalog {
             (ok.clone(), RuntimeHook::ResOk),
             (err.clone(), RuntimeHook::ResErr),
             (wrapping_add, RuntimeHook::WrappingAdd),
+            (wrapping_sub, RuntimeHook::WrappingSub),
+            (wrapping_mul, RuntimeHook::WrappingMul),
             (emit, RuntimeHook::TestEmit),
             (abort, RuntimeHook::TestAbort),
         ];
@@ -417,6 +475,7 @@ impl TrustedCatalog {
 
         let language_items = TrustedLanguageItemEnvironment::new([
             (LanguageItem::NumericError, numeric_error),
+            (LanguageItem::Tensor, external_id(TENSOR)),
             (LanguageItem::OptSome, some.clone()),
             (LanguageItem::OptNone, none.clone()),
             (LanguageItem::ResOk, ok.clone()),
@@ -467,7 +526,7 @@ impl TrustedCatalog {
         }
         validate_name_signatures(&names, &signatures)?;
         validate_inhabitance(&signatures, &inhabitance)?;
-        validate_effects(&signatures, &effects)?;
+        validate_effects(&names, &signatures, &effects)?;
         validate_trait_adapter_effects(&signatures, &effects)?;
         validate_runtime_hooks(&signatures, &normalized_hooks)?;
         Ok(Self {
@@ -618,6 +677,7 @@ fn validate_inhabitance(
 }
 
 fn validate_effects(
+    names: &ExternalNameEnvironment,
     signatures: &TrustedSignatureEnvironment,
     effects: &TrustedEffectEnvironment,
 ) -> Result<(), TrustedCatalogError> {
@@ -629,6 +689,17 @@ fn validate_effects(
         }
     }
     for effect in effects.summaries() {
+        if names
+            .declaration(effect.declaration())
+            .is_some_and(|declaration| {
+                matches!(
+                    declaration.semantic_owner(),
+                    ExternalSemanticOwner::TensorSource(_)
+                )
+            })
+        {
+            continue;
+        }
         let Some(signature) = signatures.declaration(effect.declaration()) else {
             return Err(TrustedCatalogError::OrphanEffect(
                 effect.declaration().clone(),

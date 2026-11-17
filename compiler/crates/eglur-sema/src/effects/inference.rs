@@ -18,10 +18,10 @@ use super::body::{
     EffectBody, EffectBodyError, EffectBodyFact, EffectDispatch, EffectOperation, MutablePath,
     MutableRoot, collect_effect_bodies,
 };
-use super::graph::{EffectGraphError, dependency_first_sccs};
 use super::{
     EffectCategory, EffectSummary, KnownEffectSummary, StateScope, TrustedEffectEnvironment,
 };
+use crate::declaration_graph::{DeclarationGraphError, dependency_first_sccs};
 
 // A strict chain can add IO, NONDET, localizable STATE, nonlocal STATE, then Unknown.
 const EFFECT_LATTICE_HEIGHT: usize = 6;
@@ -156,6 +156,22 @@ fn infer_effects(
         .collect::<BTreeMap<_, _>>();
     let body_nodes = body_by_owner.keys().copied().collect::<BTreeSet<_>>();
     let mut solved = BTreeMap::<CanonicalTarget, SolvedFact>::new();
+    for (_, invocation) in body_types.invocations() {
+        if let crate::InvocationTarget::TensorConstructor {
+            declaration: CanonicalTarget::External(declaration),
+            ..
+        } = invocation.target()
+        {
+            let summary = trusted
+                .and_then(|environment| environment.summary(declaration))
+                .cloned()
+                .unwrap_or(EffectSummary::Unknown);
+            solved.insert(
+                CanonicalTarget::External(declaration.clone()),
+                SolvedFact::Known(summary),
+            );
+        }
+    }
 
     let declaration_targets = signatures
         .declarations()
@@ -575,8 +591,8 @@ impl From<EffectBodyError> for EffectAnalysisError {
     }
 }
 
-impl From<EffectGraphError> for EffectAnalysisError {
-    fn from(error: EffectGraphError) -> Self {
+impl From<DeclarationGraphError> for EffectAnalysisError {
+    fn from(error: DeclarationGraphError) -> Self {
         Self::GraphInvariant(error.to_string().into_boxed_str())
     }
 }

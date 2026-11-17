@@ -6,6 +6,7 @@ use crate::{CanonicalTarget, ExternalDefId};
 /// Closed semantic roles supplied by a trusted language environment.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum LanguageItem {
+    Tensor,
     NumericError,
     OptSome,
     OptNone,
