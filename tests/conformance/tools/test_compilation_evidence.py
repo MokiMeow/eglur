@@ -546,20 +546,38 @@ class CompileEvidenceTests(unittest.TestCase):
             content = (root / suite_file).read_bytes()
             suite_document_bytes[suite_file] = content
 
-        inventory = compile_projection.conformance_compile_inventory(
-            suite_artifact.parse_conformance_bundle_bytes(
-                manifest_bytes,
-                suite_document_bytes,
+        sources = suite_artifact.parse_conformance_bundle_bytes(
+            manifest_bytes, suite_document_bytes
+        )
+        inventory = compile_projection.conformance_compile_inventory(sources)
+        expected = {
+            test.identity: (
+                test.suite.file,
+                test.suite.precondition,
+                test.case.expectation.outcome.diagnostic.code
+                if isinstance(
+                    test.case.expectation.outcome, suite_model.CompileErrorOutcome
+                )
+                else None,
             )
-        )
-        self.assertEqual(len(inventory.fixtures), 1940)
+            for test in sources.tests
+            if test.suite.required
+        }
         self.assertEqual(
-            sum(item.expected_diagnostic is None for item in inventory.fixtures),
-            970,
+            [item.identity for item in inventory.fixtures], sorted(expected)
         )
         self.assertEqual(
-            sum(item.expected_diagnostic is not None for item in inventory.fixtures),
-            970,
+            {
+                item.identity: (
+                    item.suite_file,
+                    item.precondition,
+                    None
+                    if item.expected_diagnostic is None
+                    else item.expected_diagnostic.code,
+                )
+                for item in inventory.fixtures
+            },
+            expected,
         )
         invalid_utf8 = next(
             item

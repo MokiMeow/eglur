@@ -2,6 +2,33 @@ use super::{diagnostic_codes, session};
 use eglur_diagnostics::DiagnosticSnapshot;
 use eglur_driver::{SupportProfile, TrustedCatalog};
 
+#[test]
+fn associated_cycle_is_primary_when_a_body_uses_the_poisoned_projection() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for rhs in [
+        "(&i64, Self::Item)",
+        "Opt[&Self::Item]",
+        "(Own[i64], Self::Item)",
+    ] {
+        let source = format!(
+            "trait HasItem {{ type Item }}\n\
+             struct Broken {{}}\n\
+             impl HasItem for Broken {{ type Item = {rhs} }}\n\
+             fn consume[T: HasItem](carrier: T, value: T::Item) -> T::Item = value\n\
+             fn main() -> i64 = consume(Broken{{}}, 1)\n"
+        );
+        let mut session = session(&source);
+        session
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        assert_eq!(
+            diagnostic_codes(&session.into_diagnostics(None)),
+            ["ASSOCIATED_TYPE_CYCLE"],
+            "{source}"
+        );
+    }
+}
+
 fn assert_reference_rejection(snapshot: &DiagnosticSnapshot, source: &str) {
     assert_eq!(
         diagnostic_codes(snapshot),

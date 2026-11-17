@@ -182,6 +182,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             TraitNormalization::Normalized(ty) | TraitNormalization::Symbolic(ty) => {
                 Ok(Outcome::Known(ty))
             }
+            failure => self.normalization_failure_at(source, origin, failure),
+        }
+    }
+
+    pub(super) fn normalization_failure_at<T>(
+        &mut self,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
+        failure: TraitNormalization,
+    ) -> Result<Outcome<T>, BodyTypingError> {
+        match failure {
             TraitNormalization::Poisoned(poison) => Ok(Outcome::Poisoned(poison)),
             TraitNormalization::InvalidArgument(violation) => {
                 let (code, message) = crate::diagnostic::impl_argument_diagnostic(violation);
@@ -218,6 +229,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     BTreeMap::new(),
                 )
                 .map(Outcome::Poisoned),
+            TraitNormalization::Normalized(_) | TraitNormalization::Symbolic(_) => {
+                unreachable!("normalization success is handled by its consumer")
+            }
         }
     }
 

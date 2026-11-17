@@ -303,7 +303,14 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 if roots.is_empty() {
                     continue;
                 }
-                let context = self.source_context(owner.declaration, owner.allow_self)?;
+                let mut context = self.source_context(owner.declaration, owner.allow_self)?;
+                context.application_region = if context.application_region
+                    == super::super::applications::TypeApplicationRegion::ImplMethodSignature
+                {
+                    super::super::applications::TypeApplicationRegion::ImplMethodBody
+                } else {
+                    super::super::applications::TypeApplicationRegion::Body
+                };
                 for (type_ref, position) in roots {
                     self.resolve_source_type(
                         owner.declaration,
@@ -907,6 +914,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let Some(header) = self.impl_headers.get(&declaration_id).cloned() else {
             return Ok(Resolution::Unperformed);
         };
+        let declaration = self
+            .collection
+            .declaration(declaration_id)
+            .expect("impl belongs to collection");
+        let impl_span = self.required_span(source, declaration.origin())?;
+        let checkpoint = self.diagnostics.checkpoint();
         let bindings = self.resolve_source_impl_bindings(
             declaration_id,
             source,
@@ -915,6 +928,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             header.trait_ref(),
             header.target(),
         )?;
+        if let Some(roots) = self
+            .diagnostics
+            .roots_since_within(&checkpoint, &impl_span)?
+        {
+            self.impl_later_roots.insert(declaration_id, roots);
+        }
         match bindings {
             Resolution::Known(bindings) => Ok(Resolution::Known(DeclarationSignature::Impl {
                 associated_bindings: bindings.into_boxed_slice(),
@@ -922,215 +941,6 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             Resolution::Poisoned(poison) => Ok(Resolution::Poisoned(poison)),
             Resolution::Unperformed => Ok(Resolution::Unperformed),
         }
-    }
-
-    pub(super) fn resolve_source_impl_bindings(
-        &mut self,
-        declaration_id: DefId,
-        source: &SemanticSource<'hir>,
-        hir: &HirFile,
-        value: &eglur_hir::ImplDecl,
-        trait_ref: &TraitRef,
-        target: TypeId,
-    ) -> Result<Resolution<Vec<AssociatedBindingSignature>>, SignatureResolutionError> {
-        let info = self
-            .trait_info
-            .get(trait_ref.declaration())
-            .cloned()
-            .expect("resolved trait ref has registered trait info");
-        let mut expected_by_target = BTreeMap::new();
-        for (name, targets) in &info.associated {
-            for target in targets {
-                expected_by_target.insert(target.clone(), name.clone());
-            }
-        }
-        let mut seen = BTreeSet::new();
-        let mut pending_bindings = Vec::new();
-        let mut poison = None;
-        let mut unperformed = false;
-        let module = self
-            .collection
-            .module(declaration_id.module())
-            .expect("impl module belongs to collection");
-        for &item_id in &value.items {
-            let ItemKind::AssociatedTypeBinding(binding) = hir.item(item_id).kind() else {
-                continue;
-            };
-            let binding_id = module
-                .item_def(item_id)
-                .expect("collected associated binding has declaration identity");
-            let Some(name) = binding.name.text() else {
-                let found = source
-                    .invalid_poison(binding.name.origin())
-                    .cloned()
-                    .ok_or(SignatureResolutionError::MissingInvalidPoison {
-                        file: source.file(),
-                        origin: binding.name.origin(),
-                    })?;
-                self.declarations.insert(
-                    CanonicalTarget::Source(binding_id),
-                    SemanticFact::Poisoned(found.clone()),
-                )?;
-                merge_poison(&mut poison, &found)?;
-                continue;
-            };
-            let candidates = info.associated.get(name).map_or(&[][..], AsRef::as_ref);
-            let reason = if candidates.len() != 1 {
-                Some("unknown")
-            } else if !seen.insert(candidates[0].clone()) {
-                Some("duplicate")
-            } else {
-                None
-            };
-            if let Some(reason) = reason {
-                let found = self.associated_mismatch_error(
-                    source,
-                    binding.name.origin(),
-                    binding_id,
-                    trait_ref,
-                    name,
-                    reason,
-                )?;
-                self.declarations.insert(
-                    CanonicalTarget::Source(binding_id),
-                    SemanticFact::Poisoned(found.clone()),
-                )?;
-                merge_poison(&mut poison, &found)?;
-                continue;
-            }
-            let associated = candidates[0].clone();
-            let context = self.source_context(binding_id, true)?;
-            match self.resolve_source_type(
-                binding_id,
-                source,
-                hir,
-                binding.value,
-                TypePosition::Ordinary,
-                &context,
-            )? {
-                Resolution::Known(ty) => {
-                    let slot_error = if self.types.contains_ownership(ty)? {
-                        Some((
-                            "OWNERSHIP_TYPE_POSITION_FORBIDDEN",
-                            "ownership type is forbidden in an associated type binding",
-                        ))
-                    } else if self.types.contains_reference(ty)? {
-                        Some((
-                            "REFERENCE_TYPE_POSITION_FORBIDDEN",
-                            "reference type position is forbidden for an associated type binding",
-                        ))
-                    } else {
-                        None
-                    };
-                    if let Some((code, message)) = slot_error {
-                        let found = self.source_error(
-                            source,
-                            hir.type_ref(binding.value).origin(),
-                            code,
-                            message,
-                            BTreeMap::new(),
-                        )?;
-                        self.declarations.insert(
-                            CanonicalTarget::Source(binding_id),
-                            SemanticFact::Poisoned(found.clone()),
-                        )?;
-                        merge_poison(&mut poison, &found)?;
-                    } else {
-                        let signature = AssociatedBindingSignature {
-                            declaration: CanonicalTarget::Source(binding_id),
-                            associated,
-                            value: ty,
-                        };
-                        pending_bindings.push((signature, hir.type_ref(binding.value).origin()));
-                    }
-                }
-                Resolution::Poisoned(found) => {
-                    self.declarations.insert(
-                        CanonicalTarget::Source(binding_id),
-                        SemanticFact::Poisoned(found.clone()),
-                    )?;
-                    merge_poison(&mut poison, &found)?;
-                }
-                Resolution::Unperformed => unperformed = true,
-            }
-        }
-        for (associated, name) in expected_by_target {
-            if seen.contains(&associated) {
-                continue;
-            }
-            let declaration = self
-                .collection
-                .declaration(declaration_id)
-                .expect("impl belongs to collection");
-            let found = self.associated_mismatch_error(
-                source,
-                declaration.origin(),
-                declaration_id,
-                trait_ref,
-                &name,
-                "missing",
-            )?;
-            merge_poison(&mut poison, &found)?;
-        }
-        let cycle = self.associated_binding_cycle(source, trait_ref, target, &pending_bindings)?;
-        let cycle_affected = if let Some((found, affected)) = cycle {
-            merge_poison(&mut poison, &found)?;
-            Some((found, affected))
-        } else {
-            None
-        };
-        let mut bindings = Vec::with_capacity(pending_bindings.len());
-        for (signature, _) in pending_bindings {
-            let fact = if let Some((found, affected)) = &cycle_affected
-                && affected.contains(&signature.associated)
-            {
-                SemanticFact::Poisoned(found.clone())
-            } else {
-                bindings.push(signature.clone());
-                SemanticFact::Known(DeclarationSignature::AssociatedTypeBinding(
-                    signature.clone(),
-                ))
-            };
-            self.declarations
-                .insert(signature.declaration.clone(), fact)?;
-        }
-        Ok(if let Some(poison) = poison {
-            Resolution::Poisoned(poison)
-        } else if unperformed {
-            Resolution::Unperformed
-        } else {
-            Resolution::Known(bindings)
-        })
-    }
-
-    pub(super) fn associated_binding_cycle(
-        &mut self,
-        source: &SemanticSource<'hir>,
-        trait_ref: &TraitRef,
-        target: TypeId,
-        bindings: &[(AssociatedBindingSignature, OriginId)],
-    ) -> Result<Option<(Poison, BTreeSet<CanonicalTarget>)>, SignatureResolutionError> {
-        let signatures = bindings
-            .iter()
-            .map(|(binding, _)| binding.clone())
-            .collect::<Vec<_>>();
-        let Some(cycles) =
-            associated_binding_cycle_sets(&self.types, trait_ref, target, &signatures)?
-        else {
-            return Ok(None);
-        };
-        let (_, origin) = bindings
-            .iter()
-            .find(|(binding, _)| cycles.cyclic.contains(&binding.associated))
-            .expect("cyclic associated target has a source binding");
-        let poison = self.source_error(
-            source,
-            *origin,
-            "ASSOCIATED_TYPE_CYCLE",
-            "associated type binding contains a cycle",
-            BTreeMap::new(),
-        )?;
-        Ok(Some((poison, cycles.affected)))
     }
 
     pub(super) fn poison_impl_bindings(

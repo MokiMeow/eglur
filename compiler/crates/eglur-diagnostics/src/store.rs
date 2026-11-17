@@ -1,13 +1,23 @@
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
 use crate::root::RootIdentity;
-use crate::{Diagnostic, DiagnosticCode, DiagnosticRoot, DiagnosticSnapshot, ErrorLimit, Severity};
+use crate::{
+    Diagnostic, DiagnosticCode, DiagnosticRoot, DiagnosticSnapshot, ErrorLimit, Severity,
+    SourceSpan,
+};
 
 #[derive(Debug)]
 struct StoreIdentity;
+
+/// Position in one diagnostic store's root-discovery sequence.
+#[derive(Clone)]
+pub struct DiagnosticCheckpoint {
+    store: Arc<StoreIdentity>,
+    next_root: usize,
+}
 
 /// Non-empty opaque provenance for facts unavailable after retained roots.
 #[derive(Clone)]
@@ -86,6 +96,10 @@ pub enum DiagnosticStoreError {
     ForeignPoison,
     /// An error attempted to bypass independent-root classification.
     ErrorObservation,
+    /// A checkpoint from another diagnostic store was used.
+    ForeignCheckpoint,
+    /// All claimed earlier roots have already been superseded.
+    NoPrecedingRoot,
 }
 
 impl fmt::Display for DiagnosticStoreError {
@@ -100,6 +114,12 @@ impl fmt::Display for DiagnosticStoreError {
             }
             Self::ErrorObservation => {
                 formatter.write_str("error diagnostics must be recorded as independent roots")
+            }
+            Self::ForeignCheckpoint => {
+                formatter.write_str("diagnostic checkpoint belongs to another store")
+            }
+            Self::NoPrecedingRoot => {
+                formatter.write_str("no retained preceding diagnostic root exists")
             }
         }
     }
@@ -117,6 +137,8 @@ struct StoredRoot {
 pub struct DiagnosticStore {
     identity: Arc<StoreIdentity>,
     roots: HashMap<RootIdentity, StoredRoot>,
+    root_order: Vec<RootIdentity>,
+    superseded: HashSet<usize>,
     observations: Vec<Diagnostic>,
     next_root: usize,
 }
@@ -128,6 +150,8 @@ impl DiagnosticStore {
         Self {
             identity: Arc::new(StoreIdentity),
             roots: HashMap::new(),
+            root_order: Vec::new(),
+            superseded: HashSet::new(),
             observations: Vec::new(),
             next_root: 0,
         }
@@ -162,7 +186,77 @@ impl DiagnosticStore {
     /// Reports whether at least one independently established error root exists.
     #[must_use]
     pub fn has_errors(&self) -> bool {
-        !self.roots.is_empty()
+        self.roots
+            .values()
+            .any(|root| !self.superseded.contains(&root.id))
+    }
+
+    /// Marks the beginning of a local validation stage without copying diagnostics.
+    #[must_use]
+    pub fn checkpoint(&self) -> DiagnosticCheckpoint {
+        DiagnosticCheckpoint {
+            store: Arc::clone(&self.identity),
+            next_root: self.next_root,
+        }
+    }
+
+    /// Returns only newly discovered roots physically inside a source construct.
+    pub fn roots_since_within(
+        &self,
+        checkpoint: &DiagnosticCheckpoint,
+        construct: &SourceSpan,
+    ) -> Result<Option<Poison>, DiagnosticStoreError> {
+        if !Arc::ptr_eq(&self.identity, &checkpoint.store) {
+            return Err(DiagnosticStoreError::ForeignCheckpoint);
+        }
+        let roots = self.root_order[checkpoint.next_root..]
+            .iter()
+            .enumerate()
+            .filter_map(|(offset, identity)| {
+                let RootIdentity::Source { source, bytes, .. } = identity else {
+                    return None;
+                };
+                let container = construct.file_span();
+                (source == construct.source()
+                    && self.roots[identity]
+                        .diagnostic
+                        .primary_span()
+                        .as_source()
+                        .is_some_and(|span| span.file_span().file() == container.file())
+                    && bytes.start() >= container.range().start()
+                    && bytes.end() <= container.range().end())
+                .then_some(checkpoint.next_root + offset)
+            })
+            .collect::<Vec<_>>();
+        Ok((!roots.is_empty()).then(|| Poison {
+            store: Arc::clone(&self.identity),
+            roots: roots.into_boxed_slice(),
+        }))
+    }
+
+    /// Suppresses the specified later roots when an earlier root remains retained.
+    pub fn select_preceding_roots(
+        &mut self,
+        preceding: &Poison,
+        later: &Poison,
+    ) -> Result<(), DiagnosticStoreError> {
+        self.validate_poison(preceding)?;
+        self.validate_poison(later)?;
+        if preceding
+            .roots
+            .iter()
+            .all(|root| self.superseded.contains(root))
+        {
+            return Err(DiagnosticStoreError::NoPrecedingRoot);
+        }
+        for root in later
+            .roots
+            .iter()
+            .filter(|root| !preceding.roots.contains(root))
+        {
+            self.superseded.insert(*root);
+        }
+        Ok(())
     }
 
     /// Consumes discovery state and freezes one canonically ordered snapshot.
@@ -171,6 +265,7 @@ impl DiagnosticStore {
         let errors = self
             .roots
             .into_values()
+            .filter(|root| !self.superseded.contains(&root.id))
             .map(|root| root.diagnostic)
             .collect();
         DiagnosticSnapshot::finalize(errors, self.observations, limit)
@@ -179,7 +274,7 @@ impl DiagnosticStore {
     fn record_root(&mut self, root: DiagnosticRoot) -> Result<Poison, DiagnosticStoreError> {
         let (identity, diagnostic) = root.into_parts();
         let next_root = self.next_root;
-        let root_id = match self.roots.entry(identity) {
+        let root_id = match self.roots.entry(identity.clone()) {
             Entry::Occupied(entry) => {
                 let established = entry.get();
                 if established.diagnostic != diagnostic {
@@ -198,6 +293,7 @@ impl DiagnosticStore {
                     id: next_root,
                     diagnostic,
                 });
+                self.root_order.push(identity);
                 next_root
             }
         };

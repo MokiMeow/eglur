@@ -25,13 +25,16 @@ use super::error::TraitEnvironmentError;
 use super::model::{TraitNormalization, TraitObligation};
 use super::overlap::{ImplBuckets, classify_overlap, target_bucket};
 
+mod applications;
 mod assembly;
 mod contracts;
+mod public_contracts;
 
 use assembly::{
     build_assumptions, build_buckets, collect_implementations, validate_checked_coherence,
 };
 use contracts::validate_impl_methods;
+pub(crate) use contracts::{CheckedMethodBound, checked_method_bound_mapping};
 
 /// Builds the only impl/coherence environment consumed by body and dispatch phases.
 pub fn build_trait_environment(
@@ -60,6 +63,45 @@ pub fn build_trait_environment(
     let assumptions = build_assumptions(collection, signatures)?;
     let mut environment =
         TraitEnvironment::from_checked_parts(implementations, buckets, assumptions);
+    if !applications::validate_type_applications(
+        collection,
+        sources,
+        signatures,
+        diagnostics,
+        &mut environment,
+        applications::ApplicationPass::ImplHeaders,
+    )? {
+        return Ok(recorder.finish(PhaseProduct::Unperformed));
+    }
+    if !applications::validate_type_applications(
+        collection,
+        sources,
+        signatures,
+        diagnostics,
+        &mut environment,
+        applications::ApplicationPass::BeforeImplMethods,
+    )? {
+        return Ok(recorder.finish(PhaseProduct::Unperformed));
+    }
+    if !public_contracts::validate_public_impl_bindings(
+        collection,
+        sources,
+        signatures,
+        diagnostics,
+        &mut environment,
+    )? {
+        return Ok(recorder.finish(PhaseProduct::Unperformed));
+    }
+    if !applications::validate_type_applications(
+        collection,
+        sources,
+        signatures,
+        diagnostics,
+        &mut environment,
+        applications::ApplicationPass::BeforeImplBodies,
+    )? {
+        return Ok(recorder.finish(PhaseProduct::Unperformed));
+    }
     validate_impl_methods(
         collection,
         sources,
@@ -67,5 +109,24 @@ pub fn build_trait_environment(
         diagnostics,
         &mut environment,
     )?;
+    if !applications::validate_type_applications(
+        collection,
+        sources,
+        signatures,
+        diagnostics,
+        &mut environment,
+        applications::ApplicationPass::All,
+    )? {
+        return Ok(recorder.finish(PhaseProduct::Unperformed));
+    }
+    if !public_contracts::validate_public_type_contracts(
+        collection,
+        sources,
+        signatures,
+        diagnostics,
+        &mut environment,
+    )? {
+        return Ok(recorder.finish(PhaseProduct::Unperformed));
+    }
     Ok(recorder.finish(PhaseProduct::Performed(environment)))
 }

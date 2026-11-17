@@ -116,6 +116,141 @@ fn distinct_aliases_remain_valid_bindings() {
 }
 
 #[test]
+fn parser_budgeted_match_patterns_typecheck_on_the_default_stack() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let grouped = format!("{}value{}", "(".repeat(254), ")".repeat(254));
+    let aliases = (0..254)
+        .map(|index| format!("alias_{index} @ "))
+        .collect::<String>();
+
+    for pattern in [grouped, format!("{aliases}value")] {
+        let source = format!("fn f(input: i64) -> i64 = match input {{ {pattern} => value }}\n");
+        let mut accepted = session(&source);
+        let analysis = accepted
+            .resolve(&branching_profile(), Some(&catalog))
+            .unwrap();
+        assert!(analysis.trace().missing().next().is_none(), "{pattern}");
+        assert!(
+            diagnostic_codes(&accepted.into_diagnostics(None)).is_empty(),
+            "{pattern}"
+        );
+    }
+}
+
+#[test]
+fn parser_budgeted_option_patterns_typecheck_with_payload_bindings() {
+    let depth = 254;
+    let ty = format!("{}i64{}", "Opt[".repeat(depth), "]".repeat(depth));
+    let pattern = format!("{}value{}", "Some(".repeat(depth), ")".repeat(depth));
+    let source =
+        format!("fn f(input: {ty}) -> i64 = match input {{ {pattern} => value, _ => 0 }}\n");
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let mut accepted = session(&source);
+    let analysis = accepted
+        .resolve(&branching_profile(), Some(&catalog))
+        .unwrap();
+    assert!(analysis.trace().missing().next().is_none());
+    let resolution = analysis.resolution().unwrap();
+    let binding = resolution
+        .names()
+        .locals()
+        .iter()
+        .find(|binding| binding.name().spelling() == "value")
+        .unwrap();
+    assert!(matches!(
+        resolution.body_types().local(binding.id()),
+        FactState::Known(_)
+    ));
+    assert!(diagnostic_codes(&accepted.into_diagnostics(None)).is_empty());
+}
+
+#[test]
+fn parser_budgeted_pattern_failure_keeps_one_diagnostic() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let pattern = format!("{}(value, _){}", "(".repeat(253), ")".repeat(253));
+    let source = format!("fn f(input: i64) -> i64 = match input {{ {pattern} => 0 }}\n");
+    let mut rejected = session(&source);
+    rejected
+        .resolve(&branching_profile(), Some(&catalog))
+        .unwrap();
+    assert_eq!(
+        diagnostic_codes(&rejected.into_diagnostics(None)),
+        ["PATTERN_TYPE_MISMATCH"]
+    );
+}
+
+#[test]
+fn parser_budgeted_let_groups_bind_on_the_default_stack() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let pattern = format!("{}value{}", "(".repeat(254), ")".repeat(254));
+    let source = format!("fn f(input: i64) -> i64 {{ let {pattern} = input\n yield value }}\n");
+    let mut accepted = session(&source);
+    let analysis = accepted
+        .resolve(&branching_profile(), Some(&catalog))
+        .unwrap();
+    assert!(analysis.trace().missing().next().is_none());
+    let resolution = analysis.resolution().unwrap();
+    let binding = resolution
+        .names()
+        .locals()
+        .iter()
+        .find(|binding| binding.name().spelling() == "value")
+        .unwrap();
+    assert!(matches!(
+        resolution.body_types().local(binding.id()),
+        FactState::Known(_)
+    ));
+    assert!(diagnostic_codes(&accepted.into_diagnostics(None)).is_empty());
+}
+
+#[test]
+fn parser_budgeted_let_groups_preserve_duplicate_and_initializer_errors() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let groups = "(".repeat(245);
+    let closes = ")".repeat(245);
+    let cases = [
+        (
+            format!(
+                "fn f(input: (i64, i64)) -> i64 {{ let {groups}(value, value){closes} = input\n yield 0 }}\n"
+            ),
+            "LET_PATTERN_DUPLICATE_BINDING",
+        ),
+        (
+            format!("fn f() -> i64 {{ let {groups}value{closes} = missing\n yield 0 }}\n"),
+            "NAME_NOT_FOUND",
+        ),
+    ];
+    for (source, expected) in cases {
+        let mut rejected = session(&source);
+        let analysis = rejected
+            .resolve(&branching_profile(), Some(&catalog))
+            .unwrap();
+        let resolution = analysis.resolution().unwrap();
+        let bindings = resolution
+            .names()
+            .locals()
+            .iter()
+            .filter(|binding| binding.name().spelling() == "value")
+            .collect::<Vec<_>>();
+        assert!(!bindings.is_empty(), "{expected}");
+        for binding in bindings {
+            assert!(
+                matches!(
+                    resolution.body_types().local(binding.id()),
+                    FactState::Poisoned(_)
+                ),
+                "{expected}"
+            );
+        }
+        assert_eq!(
+            diagnostic_codes(&rejected.into_diagnostics(None)),
+            [expected],
+            "{expected}"
+        );
+    }
+}
+
+#[test]
 fn bare_enum_variant_spellings_are_not_whole_value_bindings() {
     let catalog = TrustedCatalog::first_slice().unwrap();
     for (declarations, ty, pattern, name) in [

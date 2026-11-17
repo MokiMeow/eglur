@@ -197,6 +197,25 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
             ExprKind::Member { receiver, member } => {
+                if let FactState::Known(ResolvedName::TypeMemberOwner(owner)) =
+                    self.names.fact(ResolutionKey::Expression {
+                        module,
+                        expression: expression_id,
+                    })
+                {
+                    let owner = owner.clone();
+                    return Ok(ExpressionPlan::Publish {
+                        key,
+                        outcome: self.type_qualified_member_value(
+                            context,
+                            expression_id,
+                            &member,
+                            &owner,
+                            self.expression_origin(source, receiver)?,
+                            request,
+                        )?,
+                    });
+                }
                 return Ok(ExpressionPlan::Value {
                     key,
                     plan: Box::new(self.prepare_member(
@@ -587,7 +606,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: TypeRequest,
         resolution: &ResolvedName,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let BodyContext { source, .. } = context;
+        let BodyContext { module, source, .. } = context;
         match resolution {
             ResolvedName::Local(binding) => match self.locals.state(binding) {
                 FactState::Known(local) => Ok(Outcome::Known(TypedExpression {
@@ -628,6 +647,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     DeclarationSignature::Const { ty } => {
                         self.type_constant_reference(source, expression, &target, ty)
                     }
+                    DeclarationSignature::Callable(callable) => self.type_named_callable_value(
+                        module,
+                        source,
+                        expression,
+                        request,
+                        &[callable],
+                    ),
                     DeclarationSignature::Constructor(constructor)
                         if matches!(constructor.payload(), ConstructorPayloadSignature::Unit) =>
                     {
@@ -647,11 +673,48 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     )),
                 }
             }
-            ResolvedName::Declarations(_) => Ok(self.unsupported(
-                TypecheckCapability::CheckClosures,
-                source,
-                self.expression_origin(source, expression)?,
-            )),
+            ResolvedName::Declarations(targets) => {
+                let origin = self.expression_origin(source, expression)?;
+                if !self.recorder.require(
+                    CompileCapability::Typecheck(TypecheckCapability::ResolveOverloads),
+                    SemanticLocation::origin(source.file(), origin),
+                ) {
+                    return Ok(Outcome::Unperformed);
+                }
+
+                let mut callables = Vec::with_capacity(targets.len());
+                let mut poison = None;
+                let mut unperformed = false;
+                for target in targets {
+                    match self.signatures.declaration(target) {
+                        FactState::Known(DeclarationSignature::Callable(callable)) => {
+                            callables.push(*callable);
+                        }
+                        FactState::Poisoned(found) => {
+                            let found = found.clone();
+                            self.merge_poison(&mut poison, &found)?;
+                        }
+                        FactState::Unperformed | FactState::NotApplicable => unperformed = true,
+                        FactState::Known(_) => {
+                            return Ok(self.unsupported(
+                                TypecheckCapability::CheckClosures,
+                                source,
+                                origin,
+                            ));
+                        }
+                    }
+                }
+                if let Some(poison) = poison {
+                    return Ok(Outcome::Poisoned(poison));
+                }
+                if unperformed {
+                    return Ok(Outcome::Unperformed);
+                }
+                self.type_named_callable_value(module, source, expression, request, &callables)
+            }
+            ResolvedName::TypeMemberOwner(_) => {
+                Err(BodyTypingError::WrongBodyExpression(expression))
+            }
         }
     }
 }

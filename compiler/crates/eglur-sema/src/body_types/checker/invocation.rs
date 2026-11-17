@@ -1,5 +1,5 @@
 use super::application::ApplicationPlan;
-use super::dispatch::DispatchContinuation;
+use super::dispatch::{DispatchContinuation, QualifiedMemberCallRequest};
 use super::tensor::TensorConstructorFrame;
 use super::*;
 
@@ -31,6 +31,26 @@ pub(super) struct InvocationFrame {
 }
 
 impl InvocationFrame {
+    pub(super) fn qualified_method(
+        expression: ExprId,
+        origin: OriginId,
+        slots: Vec<ApplicationSlot>,
+        callee: ExprId,
+        candidate: MethodCandidate,
+        member_origin: OriginId,
+    ) -> Self {
+        Self {
+            expression,
+            origin,
+            slots,
+            contract: InvocationContract::Method {
+                candidate: Box::new(candidate),
+                member_origin,
+                callee,
+            },
+        }
+    }
+
     pub(super) fn construction(
         expression: ExprId,
         origin: OriginId,
@@ -56,6 +76,10 @@ enum InvocationContract {
         callable: CallableSignature,
         callee: ExprId,
     },
+    CallableValue {
+        callee: ExprId,
+        ty: TypeId,
+    },
     Method {
         candidate: Box<MethodCandidate>,
         member_origin: OriginId,
@@ -72,6 +96,7 @@ impl InvocationContract {
     fn generic_parameters(&self) -> &[GenericParameterId] {
         match self {
             Self::Callable { callable, .. } => callable.generic_parameters(),
+            Self::CallableValue { .. } => &[],
             Self::Method { candidate, .. } => &candidate.explicit_parameters,
             Self::Constructor { parameters, .. } => parameters,
         }
@@ -79,7 +104,9 @@ impl InvocationContract {
 
     fn callee(&self) -> Option<ExprId> {
         match self {
-            Self::Callable { callee, .. } | Self::Method { callee, .. } => Some(*callee),
+            Self::Callable { callee, .. }
+            | Self::CallableValue { callee, .. }
+            | Self::Method { callee, .. } => Some(*callee),
             Self::Constructor { callee, .. } => *callee,
         }
     }
@@ -116,6 +143,25 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .last()
             .ok_or(BodyTypingError::WrongBodyExpression(call.callee))?;
         if let ExprKind::Member { receiver, member } = callee.kind() {
+            if let FactState::Known(ResolvedName::TypeMemberOwner(owner)) =
+                self.names.fact(ResolutionKey::Expression {
+                    module,
+                    expression: callee_id,
+                })
+            {
+                return self.prepare_qualified_member_call(
+                    context,
+                    QualifiedMemberCallRequest {
+                        expression,
+                        origin,
+                        call,
+                        ty: request,
+                        member,
+                        owner: owner.clone(),
+                        owner_origin: self.expression_origin(source, *receiver)?,
+                    },
+                );
+            }
             return self.prepare_method_call(
                 context,
                 MethodCallRequest {
@@ -142,7 +188,37 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         };
         let targets = match self.names.fact(callee_key) {
             FactState::Known(ResolvedName::Declarations(targets)) => targets,
-            FactState::Known(ResolvedName::Local(_)) | FactState::NotApplicable => {
+            FactState::Known(ResolvedName::Local(binding)) => {
+                let ty = match self.locals.state(binding) {
+                    FactState::Known(local) => local.ty(),
+                    FactState::Poisoned(poison) => {
+                        return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
+                    }
+                    FactState::Unperformed | FactState::NotApplicable => {
+                        return Ok(InvocationPlan::Complete(Outcome::Unperformed));
+                    }
+                };
+                let TypeKind::Callable { parameters, result } =
+                    self.signatures.types().kind(ty)?.clone()
+                else {
+                    return Ok(InvocationPlan::Complete(self.unsupported(
+                        TypecheckCapability::CheckClosures,
+                        source,
+                        origin,
+                    )));
+                };
+                return self.prepare_callable_value_call(
+                    context,
+                    expression,
+                    origin,
+                    call,
+                    request,
+                    ty,
+                    &parameters,
+                    result,
+                );
+            }
+            FactState::Known(ResolvedName::TypeMemberOwner(_)) | FactState::NotApplicable => {
                 return Ok(InvocationPlan::Complete(self.unsupported(
                     TypecheckCapability::CheckClosures,
                     source,
@@ -247,6 +323,124 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 contract: InvocationContract::Callable {
                     callable,
                     callee: call.callee,
+                },
+            }),
+        })
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "checked call construction keeps the callee and Fn contract explicit"
+    )]
+    fn prepare_callable_value_call(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        expression: ExprId,
+        origin: OriginId,
+        call: &CallExpr,
+        request: TypeRequest,
+        ty: TypeId,
+        parameters: &[TypeId],
+        result: TypeId,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
+        if let Some((argument, name)) = call
+            .arguments
+            .iter()
+            .find_map(|argument| argument.name.as_ref().map(|name| (argument, name)))
+        {
+            let Some(spelling) = name.text() else {
+                let poison = source.invalid_poison(name.origin()).cloned().ok_or(
+                    BodyTypingError::MissingOriginSpan {
+                        file: source.file(),
+                        origin: name.origin(),
+                    },
+                )?;
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
+            };
+            let data = BTreeMap::from([(
+                Box::<str>::from("name"),
+                DiagnosticDataValue::from(spelling),
+            )]);
+            return self
+                .type_error(
+                    source,
+                    argument.origin,
+                    "CALL_UNKNOWN_NAMED_ARG",
+                    format!("call has unknown named argument `{spelling}` on a Fn value"),
+                    data,
+                )
+                .map(Outcome::Poisoned)
+                .map(InvocationPlan::Complete);
+        }
+        if call.arguments.len() > parameters.len() {
+            return self
+                .type_error(
+                    source,
+                    call.arguments[parameters.len()].origin,
+                    "CALL_TOO_MANY_ARGS",
+                    "call has too many arguments for the callable value",
+                    BTreeMap::new(),
+                )
+                .map(Outcome::Poisoned)
+                .map(InvocationPlan::Complete);
+        }
+        if call.arguments.len() < parameters.len() {
+            let parameter = format!("#{}", call.arguments.len());
+            let data = BTreeMap::from([(
+                Box::<str>::from("parameter"),
+                DiagnosticDataValue::from(parameter.as_str()),
+            )]);
+            return self
+                .type_error(
+                    source,
+                    origin,
+                    "CALL_MISSING_ARG",
+                    "call argument is missing a required parameter",
+                    data,
+                )
+                .map(Outcome::Poisoned)
+                .map(InvocationPlan::Complete);
+        }
+
+        let slots = parameters
+            .iter()
+            .zip(&call.arguments)
+            .enumerate()
+            .map(|(index, (&parameter, argument))| ApplicationSlot {
+                name: format!("#{index}").into_boxed_str(),
+                template: parameter,
+                value: argument.value,
+                origin: argument.origin,
+                related: None,
+                evaluation_order: index,
+                passing: ArgumentPassing::Value,
+            })
+            .collect::<Vec<_>>();
+        let plan = self.prepare_application(
+            source,
+            ApplicationRequest {
+                origin,
+                generic_parameters: &[],
+                slots: &slots,
+                result_template: result,
+                explicit_arguments: &call.type_arguments,
+                explicit_parameters: None,
+                preset_replacements: None,
+                allowed_ownership_parameter: None,
+                ty: request,
+                defer_underconstrained: false,
+            },
+        )?;
+        Ok(InvocationPlan::Application {
+            plan,
+            continuation: Box::new(InvocationFrame {
+                expression,
+                origin,
+                slots,
+                contract: InvocationContract::CallableValue {
+                    callee: call.callee,
+                    ty,
                 },
             }),
         })
@@ -501,6 +695,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             InvocationContract::Callable { callable, .. } => InvocationTarget::Callable(
                 self.intern_callable_instance(callable.id(), application.substitution)?,
             ),
+            InvocationContract::CallableValue { callee, ty } => InvocationTarget::CallableValue {
+                callee: *callee,
+                ty: *ty,
+            },
             InvocationContract::Method { candidate, .. } => {
                 let arguments = candidate
                     .explicit_parameters
@@ -546,7 +744,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .current_owner
                 .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
             self.method_dispatches.push(PendingMethodDispatch {
-                invocation: key,
+                site: MethodDispatchSite::Invocation(key),
                 owner,
                 location: SemanticLocation::origin(source.file(), *member_origin),
                 subject: *subject,

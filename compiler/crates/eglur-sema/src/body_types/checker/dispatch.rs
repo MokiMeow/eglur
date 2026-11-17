@@ -1,4 +1,4 @@
-use super::invocation::{InvocationContinuation, InvocationPlan};
+use super::invocation::{InvocationContinuation, InvocationFrame, InvocationPlan};
 use super::*;
 
 struct DispatchRequest {
@@ -6,6 +6,16 @@ struct DispatchRequest {
     origin: OriginId,
     call: CallExpr,
     ty: TypeRequest,
+}
+
+pub(super) struct QualifiedMemberCallRequest<'a> {
+    pub(super) expression: ExprId,
+    pub(super) origin: OriginId,
+    pub(super) call: &'a CallExpr,
+    pub(super) ty: TypeRequest,
+    pub(super) member: &'a Name,
+    pub(super) owner: CanonicalTarget,
+    pub(super) owner_origin: OriginId,
 }
 
 pub(super) enum DispatchContinuation {
@@ -35,6 +45,16 @@ pub(super) struct DispatchArgumentsFrame {
 enum DispatchSelection {
     Method(MethodSelection),
     Overload(Vec<OverloadCandidate>),
+    QualifiedTrait {
+        owner: CanonicalTarget,
+        member: Name,
+        candidates: Vec<OverloadCandidate>,
+    },
+    QualifiedConcrete {
+        owner: QualifiedMethodOwner,
+        member: Name,
+        candidates: Vec<OverloadCandidate>,
+    },
 }
 
 struct MethodSelection {
@@ -69,6 +89,172 @@ impl DispatchArgumentsFrame {
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
+    pub(super) fn prepare_qualified_member_call(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        request: QualifiedMemberCallRequest<'_>,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
+        if !request.member.is_valid() {
+            return Ok(InvocationPlan::Complete(Outcome::Poisoned(
+                source
+                    .invalid_poison(request.member.origin())
+                    .cloned()
+                    .ok_or(BodyTypingError::MissingOriginSpan {
+                        file: source.file(),
+                        origin: request.member.origin(),
+                    })?,
+            )));
+        }
+        let owner =
+            match self.qualified_method_owner(source, request.owner_origin, &request.owner)? {
+                Outcome::Known(owner) => owner,
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+        let concrete = match self.signatures.declaration(&owner.target) {
+            FactState::Known(DeclarationSignature::Trait { .. }) => false,
+            FactState::Known(DeclarationSignature::Struct { .. }) => true,
+            FactState::Known(DeclarationSignature::Nominal { .. })
+                if matches!(&owner.target, CanonicalTarget::External(_)) =>
+            {
+                return Ok(InvocationPlan::Complete(self.unsupported(
+                    TypecheckCapability::CheckClosures,
+                    source,
+                    request.origin,
+                )));
+            }
+            FactState::Known(_) | FactState::NotApplicable => {
+                return self
+                    .method_not_found(source, request.member)
+                    .map(InvocationPlan::Complete);
+            }
+            FactState::Poisoned(poison) => {
+                return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
+            }
+            FactState::Unperformed => return Ok(InvocationPlan::Complete(Outcome::Unperformed)),
+        };
+        if !self.recorder.require(
+            CompileCapability::Typecheck(TypecheckCapability::ResolveMethods),
+            SemanticLocation::origin(source.file(), request.member.origin()),
+        ) {
+            return Ok(InvocationPlan::Complete(Outcome::Unperformed));
+        }
+
+        let name =
+            NameKey::from_hir(request.member).expect("valid method name has canonical spelling");
+        let source_methods = if concrete {
+            let CanonicalTarget::Source(owner) = &owner.target else {
+                return Ok(InvocationPlan::Complete(self.unsupported(
+                    TypecheckCapability::CheckClosures,
+                    source,
+                    request.origin,
+                )));
+            };
+            Some(
+                self.collection
+                    .child_candidates(*owner, &name, DeclarationKind::Function),
+            )
+        } else {
+            None
+        };
+        let methods = if let Some(source_methods) = &source_methods {
+            source_methods
+                .iter()
+                .copied()
+                .map(CanonicalTarget::Source)
+                .collect::<Vec<_>>()
+        } else {
+            self.signatures
+                .trait_methods(&owner.target)
+                .iter()
+                .filter(|method| method.name() == &name)
+                .map(|method| method.declaration().clone())
+                .collect::<Vec<_>>()
+        };
+        if methods.is_empty() {
+            return self
+                .method_not_found(source, request.member)
+                .map(InvocationPlan::Complete);
+        }
+        if let Some(source_methods) = &source_methods
+            && self.inherent_family_is_inaccessible(context.module, source_methods)?
+        {
+            return self
+                .type_error(
+                    source,
+                    request.member.origin(),
+                    "VISIBILITY_VIOLATION",
+                    "visibility violation: inherent method family is private",
+                    BTreeMap::new(),
+                )
+                .map(Outcome::Poisoned)
+                .map(InvocationPlan::Complete);
+        }
+        let mut candidates = Vec::with_capacity(methods.len());
+        for method in methods {
+            let callable = match self.signatures.declaration(&method) {
+                FactState::Known(DeclarationSignature::Callable(id)) => self
+                    .signatures
+                    .callable(*id)
+                    .cloned()
+                    .ok_or(BodyTypingError::UnknownCallable(*id))?,
+                FactState::Poisoned(poison) => {
+                    return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison.clone())));
+                }
+                FactState::Unperformed => {
+                    return Ok(InvocationPlan::Complete(Outcome::Unperformed));
+                }
+                _ => continue,
+            };
+            let bindings =
+                Self::bind_call_argument_indices(&callable, &request.call.arguments).ok();
+            candidates.push(OverloadCandidate { callable, bindings });
+        }
+        if candidates
+            .iter()
+            .all(|candidate| candidate.bindings.is_none())
+        {
+            let first = candidates
+                .first()
+                .ok_or(BodyTypingError::EmptyDeclarationSet)?;
+            return Ok(InvocationPlan::Complete(
+                self.bind_call_slots(
+                    source,
+                    request.origin,
+                    &first.callable,
+                    &request.call.arguments,
+                )?
+                .map(|_| unreachable!()),
+            ));
+        }
+
+        self.advance_dispatch_arguments(
+            context,
+            Box::new(DispatchArgumentsFrame::new(
+                DispatchRequest {
+                    expression: request.expression,
+                    origin: request.origin,
+                    call: request.call.clone(),
+                    ty: request.ty,
+                },
+                if concrete {
+                    DispatchSelection::QualifiedConcrete {
+                        owner,
+                        member: request.member.clone(),
+                        candidates,
+                    }
+                } else {
+                    DispatchSelection::QualifiedTrait {
+                        owner: owner.target,
+                        member: request.member.clone(),
+                        candidates,
+                    }
+                },
+                NormalContinuation::Present,
+            )),
+        )
+    }
+
     pub(super) fn prepare_method_call(
         &mut self,
         context: BodyContext<'_, '_>,
@@ -127,7 +313,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             NameKey::from_hir(&frame.member).expect("valid method name has canonical spelling");
         let inherent_targets = self.inherent_method_targets(subject, &name)?;
         let (trait_tier, candidates) = if inherent_targets.is_empty() {
-            let candidates = match self.trait_method_candidates(module, subject, &name)? {
+            let candidates = match self.trait_method_candidates(
+                module,
+                source,
+                frame.request.origin,
+                subject,
+                &name,
+            )? {
                 Outcome::Known(candidates) => candidates,
                 outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
             };
@@ -298,6 +490,30 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             DispatchSelection::Overload(candidates) => {
                 self.select_overload(context, frame.request, candidates, frame.typed)
             }
+            DispatchSelection::QualifiedTrait {
+                owner,
+                member,
+                candidates,
+            } => self.select_qualified_trait(
+                context,
+                frame.request,
+                &owner,
+                &member,
+                candidates,
+                frame.typed,
+            ),
+            DispatchSelection::QualifiedConcrete {
+                owner,
+                member,
+                candidates,
+            } => self.select_qualified_concrete(
+                context,
+                frame.request,
+                &owner,
+                &member,
+                candidates,
+                frame.typed,
+            ),
         }
     }
 
@@ -412,6 +628,243 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 )
                 .map(InvocationPlan::Complete),
         }
+    }
+
+    fn select_qualified_trait(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        request: DispatchRequest,
+        owner: &CanonicalTarget,
+        member: &Name,
+        candidates: Vec<OverloadCandidate>,
+        typed_arguments: BTreeMap<ExprId, TypedExpression>,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
+        let name = NameKey::from_hir(member).expect("valid method name has canonical spelling");
+        let explicit =
+            match self.resolve_explicit_method_arguments(source, &request.call.type_arguments)? {
+                Outcome::Known(arguments) => arguments,
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+
+        let mut applicable = Vec::new();
+        let mut missing_subject = None;
+        let mut found_candidates = false;
+        for OverloadCandidate { callable, bindings } in candidates {
+            let Some(bindings) = bindings else {
+                continue;
+            };
+            let receiver_ty = typed_arguments[&request.call.arguments[bindings[0]].value].ty;
+            let Some(subject) = self.qualified_receiver_subject(owner, &callable, receiver_ty)?
+            else {
+                continue;
+            };
+            missing_subject = Some(subject);
+            let candidates = match self.trait_method_candidates_for_owner(
+                source,
+                member.origin(),
+                subject,
+                &name,
+                owner,
+            )? {
+                Outcome::Known(candidates) => candidates,
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+            found_candidates |= !candidates.is_empty();
+            for candidate in candidates
+                .into_iter()
+                .filter(|candidate| candidate.callable.id() == callable.id())
+            {
+                if !explicit.is_empty() && explicit.len() != candidate.explicit_parameters.len() {
+                    continue;
+                }
+                let actual = bindings
+                    .iter()
+                    .map(|&index| typed_arguments[&request.call.arguments[index].value].ty)
+                    .collect::<Vec<_>>();
+                let mut replacements = candidate.preset_replacements.clone();
+                replacements.extend(
+                    candidate
+                        .explicit_parameters
+                        .iter()
+                        .cloned()
+                        .zip(explicit.iter().copied()),
+                );
+                if exact_parameter_match(
+                    self.signatures.types(),
+                    &candidate.callable,
+                    &actual,
+                    &mut replacements,
+                )? {
+                    applicable.push(candidate);
+                }
+            }
+        }
+
+        match applicable.as_slice() {
+            [] if !found_candidates && missing_subject.is_some() => self
+                .qualified_trait_impl_missing(
+                    source,
+                    member.origin(),
+                    owner,
+                    missing_subject.expect("receiver determines Self"),
+                )
+                .map(InvocationPlan::Complete),
+            [] => self
+                .method_not_found(source, member)
+                .map(InvocationPlan::Complete),
+            [candidate] => {
+                self.prepare_selected_qualified_method(context, request, member, candidate.clone())
+            }
+            _ => self
+                .method_ambiguous(source, member, &applicable, true)
+                .map(InvocationPlan::Complete),
+        }
+    }
+
+    fn select_qualified_concrete(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        request: DispatchRequest,
+        qualified_owner: &QualifiedMethodOwner,
+        member: &Name,
+        candidates: Vec<OverloadCandidate>,
+        typed_arguments: BTreeMap<ExprId, TypedExpression>,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
+        let owner = &qualified_owner.target;
+        let presented = candidates
+            .iter()
+            .map(|candidate| candidate.callable.clone())
+            .collect::<Vec<_>>();
+        let explicit =
+            match self.resolve_explicit_method_arguments(source, &request.call.type_arguments)? {
+                Outcome::Known(arguments) => arguments,
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+
+        let mut applicable = Vec::new();
+        for OverloadCandidate { callable, bindings } in candidates {
+            let Some(bindings) = bindings else {
+                continue;
+            };
+            let receiver_ty = typed_arguments[&request.call.arguments[bindings[0]].value].ty;
+            let subject = self.method_subject(receiver_ty)?;
+            let TypeKind::Nominal {
+                head: NominalHead::Declaration(found),
+                ..
+            } = self.signatures.types().kind(subject)?
+            else {
+                continue;
+            };
+            if found != owner {
+                continue;
+            }
+            if qualified_owner
+                .fixed_subject
+                .is_some_and(|fixed| fixed != subject)
+            {
+                continue;
+            }
+            let CanonicalTarget::Source(method) = callable.declaration() else {
+                unreachable!("source struct child is a source method");
+            };
+            let methods = match self.inherent_method_candidates(subject, &[*method])? {
+                Outcome::Known(methods) => methods,
+                outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+            };
+            for candidate in methods
+                .into_iter()
+                .filter(|candidate| candidate.callable.id() == callable.id())
+            {
+                if !explicit.is_empty() && explicit.len() != candidate.explicit_parameters.len() {
+                    continue;
+                }
+                let actual = bindings
+                    .iter()
+                    .map(|&index| typed_arguments[&request.call.arguments[index].value].ty)
+                    .collect::<Vec<_>>();
+                let mut replacements = candidate.preset_replacements.clone();
+                replacements.extend(
+                    candidate
+                        .explicit_parameters
+                        .iter()
+                        .cloned()
+                        .zip(explicit.iter().copied()),
+                );
+                if exact_parameter_match(
+                    self.signatures.types(),
+                    &candidate.callable,
+                    &actual,
+                    &mut replacements,
+                )? {
+                    applicable.push(candidate);
+                }
+            }
+        }
+
+        match applicable.as_slice() {
+            [] => self
+                .overload_no_match(
+                    source,
+                    request.origin,
+                    &request.call,
+                    &presented,
+                    &typed_arguments,
+                )
+                .map(InvocationPlan::Complete),
+            [candidate] => {
+                self.prepare_selected_qualified_method(context, request, member, candidate.clone())
+            }
+            _ => self
+                .method_ambiguous(source, member, &applicable, false)
+                .map(InvocationPlan::Complete),
+        }
+    }
+
+    fn prepare_selected_qualified_method(
+        &mut self,
+        context: BodyContext<'_, '_>,
+        request: DispatchRequest,
+        member: &Name,
+        candidate: MethodCandidate,
+    ) -> Result<InvocationPlan, BodyTypingError> {
+        let source = context.source;
+        let slots = match self.bind_call_slots(
+            source,
+            request.origin,
+            &candidate.callable,
+            &request.call.arguments,
+        )? {
+            Outcome::Known(slots) => slots,
+            outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
+        };
+        let plan = self.prepare_application(
+            source,
+            ApplicationRequest {
+                origin: request.origin,
+                generic_parameters: candidate.callable.generic_parameters(),
+                slots: &slots,
+                result_template: candidate.callable.result(),
+                explicit_arguments: &request.call.type_arguments,
+                explicit_parameters: Some(&candidate.explicit_parameters),
+                preset_replacements: Some(&candidate.preset_replacements),
+                allowed_ownership_parameter: None,
+                ty: request.ty,
+                defer_underconstrained: false,
+            },
+        )?;
+        Ok(InvocationPlan::Application {
+            plan,
+            continuation: Box::new(InvocationFrame::qualified_method(
+                request.expression,
+                request.origin,
+                slots,
+                request.call.callee,
+                candidate,
+                member.origin(),
+            )),
+        })
     }
 
     fn select_overload(

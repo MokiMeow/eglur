@@ -261,7 +261,7 @@ class TraceabilityContractTests(unittest.TestCase):
             lines,
         )
         self.assertIn(f"release: {report.release.text}", lines)
-        self.assertIn("  required_code_count: 272", lines)
+        self.assertEqual({trace.code for trace in report.diagnostics}, self.codes)
         self.assertIn("  contract_failure_count: 0", lines)
 
     def test_missing_manifest_suite_fails_for_required_and_optional_files(

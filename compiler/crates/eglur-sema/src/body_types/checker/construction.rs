@@ -559,6 +559,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     fact: "local binding",
                 });
             }
+            FactState::Known(ResolvedName::TypeMemberOwner(_)) => {
+                return Err(BodyTypingError::UnexpectedPatternResolution {
+                    module,
+                    pattern,
+                    fact: "type member owner",
+                });
+            }
             FactState::NotApplicable => {
                 return Err(BodyTypingError::UnexpectedPatternResolution {
                     module,
@@ -675,6 +682,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 return Err(BodyTypingError::UnexpectedConstructorResolution {
                     expression: ExpressionKey::new(module, expression),
                     fact: "local binding",
+                });
+            }
+            FactState::Known(ResolvedName::TypeMemberOwner(_)) => {
+                return Err(BodyTypingError::UnexpectedConstructorResolution {
+                    expression: ExpressionKey::new(module, expression),
+                    fact: "type member owner",
                 });
             }
             FactState::NotApplicable => {

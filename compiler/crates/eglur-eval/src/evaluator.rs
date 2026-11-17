@@ -6,11 +6,12 @@ use eglur_hir::{
 };
 use eglur_sema::{
     ArgumentPassing, CallableSignature, CanonicalTarget, CheckedDispatch, CheckedEntryResult,
-    CheckedNumericOperator, CheckedProgram, DeclarationSignature, DefId, EvidenceEnvironment,
-    EvidenceSource, ExpressionKey, ExternalDefId, FactState, IntegerEvaluation, InvocationArgument,
-    InvocationFact, InvocationTarget, LanguageItem, LocalBindingId, MemberKind, ModuleId,
-    NumericFaultCause, PhaseProduct, PrimitiveType, ResolutionKey, ResolvedName, SubstId,
-    TraitEvidence, TypeId, TypeKind, TypedPlaceKind, WitnessSlotId,
+    CheckedInvocation, CheckedNumericOperator, CheckedProgram, DeclarationSignature, DefId,
+    EvidenceEnvironment, EvidenceSource, ExpressionKey, ExternalDefId, FactState,
+    IntegerEvaluation, InvocationArgument, InvocationFact, InvocationTarget, LanguageItem,
+    LocalBindingId, MemberKind, ModuleId, NumericFaultCause, PhaseProduct, PrimitiveType,
+    ResolutionKey, ResolvedName, SubstId, TraitEvidence, TypeId, TypeKind, TypedPlaceKind,
+    WitnessSlotId,
 };
 
 use crate::{
@@ -270,8 +271,8 @@ mod preflight;
 mod runtime;
 mod store;
 
-use checked_program::{ProgramView, WitnessValue, Witnesses, child_witnesses};
+use checked_program::{ProgramView, WitnessId, WitnessStore, Witnesses};
 use numeric::numeric_fault;
 use preflight::Planner;
 use runtime::{Evaluator, Flow};
-use store::{Place, Projection, RuntimeValue, Store};
+use store::{Place, Projection, RuntimeCallable, RuntimeValue, Store};

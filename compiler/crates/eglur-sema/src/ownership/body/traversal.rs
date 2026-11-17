@@ -348,7 +348,15 @@ impl<'hir> BodyAnalyzer<'hir> {
                 pending,
             ),
             ExprKind::Member { receiver, .. } => {
-                pending.push(Step::Expression(*receiver, None));
+                if !matches!(
+                    self.names.fact(ResolutionKey::Expression {
+                        module: self.module,
+                        expression: id,
+                    }),
+                    FactState::Known(ResolvedName::TypeMemberOwner(_))
+                ) {
+                    pending.push(Step::Expression(*receiver, None));
+                }
             }
             ExprKind::TupleProjection { receiver, index } => {
                 pending.push(Step::Projection(key, origin, index));

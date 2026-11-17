@@ -663,6 +663,28 @@ impl CanonicalTypeStore {
                     referent: expected_referent,
                 },
             ) => Ok(actual_referent == expected_referent),
+            (
+                TypeKind::Callable {
+                    parameters: actual_parameters,
+                    result: actual_result,
+                },
+                TypeKind::Callable {
+                    parameters: expected_parameters,
+                    result: expected_result,
+                },
+            ) => {
+                if actual_parameters.len() != expected_parameters.len() {
+                    return Ok(false);
+                }
+                for (expected_parameter, actual_parameter) in
+                    expected_parameters.iter().zip(actual_parameters.iter())
+                {
+                    if !self.is_assignable(*expected_parameter, *actual_parameter)? {
+                        return Ok(false);
+                    }
+                }
+                self.is_assignable(actual_result, expected_result)
+            }
             _ => Ok(false),
         }
     }
@@ -1137,6 +1159,55 @@ mod tests {
                 .is_assignable(impossible_success, integer_success)
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn callable_assignability_is_contravariant_in_inputs_and_covariant_in_result() {
+        let mut store = CanonicalTypeStore::new().unwrap();
+        let integer = store.primitive(PrimitiveType::I64).unwrap();
+        let text = store.primitive(PrimitiveType::Str).unwrap();
+        let boolean = store.primitive(PrimitiveType::Bool).unwrap();
+        let shared = store
+            .reference(ReferenceMutability::Shared, integer)
+            .unwrap();
+        let mutable = store
+            .reference(ReferenceMutability::Mutable, integer)
+            .unwrap();
+        let narrow_error = store
+            .nominal(
+                NominalHead::Intrinsic(IntrinsicNominal::Res),
+                [integer, text],
+            )
+            .unwrap();
+        let errors = store.error_union([text, boolean]).unwrap();
+        let wide_error = store
+            .nominal(
+                NominalHead::Intrinsic(IntrinsicNominal::Res),
+                [integer, errors],
+            )
+            .unwrap();
+        let actual = store.callable([shared], narrow_error).unwrap();
+        let expected = store.callable([mutable], wide_error).unwrap();
+        let wrong_arity = store.callable([mutable, mutable], wide_error).unwrap();
+
+        assert!(store.is_assignable(actual, expected).unwrap());
+        assert!(!store.is_assignable(expected, actual).unwrap());
+        assert!(!store.is_assignable(actual, wrong_arity).unwrap());
+        assert!(!store.is_assignable(wrong_arity, actual).unwrap());
+    }
+
+    #[test]
+    fn callable_bottom_compatibility_does_not_reverse_or_lift_through_results() {
+        let mut store = CanonicalTypeStore::new().unwrap();
+        let integer = store.primitive(PrimitiveType::I64).unwrap();
+        let never = store.never();
+        let returns_never = store.callable([integer], never).unwrap();
+        let returns_integer = store.callable([integer], integer).unwrap();
+        let accepts_never = store.callable([never], integer).unwrap();
+
+        assert!(store.is_assignable(returns_never, returns_integer).unwrap());
+        assert!(!store.is_assignable(returns_integer, returns_never).unwrap());
+        assert!(!store.is_assignable(accepts_never, returns_integer).unwrap());
     }
 
     #[test]

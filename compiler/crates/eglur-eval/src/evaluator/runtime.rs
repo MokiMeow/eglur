@@ -25,6 +25,7 @@ pub(super) struct Evaluator<'a> {
     steps: u64,
     call_depth: u32,
     store: Store,
+    witness_store: WitnessStore,
     pub(super) events: Vec<RuntimeEvent>,
 }
 
@@ -41,6 +42,7 @@ impl<'a> Evaluator<'a> {
             steps: 0,
             call_depth: 0,
             store: Store::default(),
+            witness_store: WitnessStore::default(),
             events: Vec::new(),
         }
     }
@@ -166,7 +168,21 @@ impl<'a> Evaluator<'a> {
                 Ok(None) => invalid_flow(),
                 Err(flow) => flow,
             },
-            ExprKind::Member { receiver, .. } => self.eval_member(frame, expression, receiver),
+            ExprKind::Member { receiver, .. } => {
+                let key = ExpressionKey::new(frame.module, expression);
+                if matches!(
+                    self.view
+                        .program
+                        .resolution()
+                        .body_types()
+                        .callable_value(key),
+                    FactState::Known(_)
+                ) {
+                    self.eval_callable_value(frame, key)
+                } else {
+                    self.eval_member(frame, expression, receiver)
+                }
+            }
             ExprKind::TupleProjection { receiver, index } => {
                 let Ok(index) = index.parse::<usize>() else {
                     return invalid_flow();
@@ -358,7 +374,18 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_name(&self, frame: &Frame, expression: ExprId) -> Flow {
+    fn eval_name(&mut self, frame: &Frame, expression: ExprId) -> Flow {
+        let value_key = ExpressionKey::new(frame.module, expression);
+        if matches!(
+            self.view
+                .program
+                .resolution()
+                .body_types()
+                .callable_value(value_key),
+            FactState::Known(_)
+        ) {
+            return self.eval_callable_value(frame, value_key);
+        }
         let key = ResolutionKey::Expression {
             module: frame.module,
             expression,
@@ -377,6 +404,60 @@ impl<'a> Evaluator<'a> {
             }
             _ => invalid_flow(),
         }
+    }
+
+    fn eval_callable_value(&mut self, frame: &Frame, key: ExpressionKey) -> Flow {
+        let Some(evidence) = self.view.trait_evidence() else {
+            return invalid_flow();
+        };
+        let FactState::Known(checked) = evidence.callable_value(key) else {
+            return invalid_flow();
+        };
+        let Some(environment) = evidence.environment(checked.evidence_environment()) else {
+            return invalid_flow();
+        };
+        let Some(selected) = self.view.selected_call(
+            checked.dispatch(),
+            &frame.witnesses,
+            &mut self.witness_store,
+        ) else {
+            return invalid_flow();
+        };
+        let (selected, borrow_argument) = match self.view.trait_adapter_value_dispatch(
+            &selected.target,
+            key,
+            environment,
+            &frame.witnesses,
+            &mut self.witness_store,
+        ) {
+            Ok(Some(adapter)) => (adapter.selected, adapter.borrow_argument),
+            Ok(None) => (selected, None),
+            Err(_) => return invalid_flow(),
+        };
+        let witnesses = if matches!(selected.target, CanonicalTarget::Source(_))
+            && selected.method.is_some()
+        {
+            let Some(frame_witnesses) =
+                self.witness_store
+                    .method_frame(evidence, &selected, environment, &frame.witnesses)
+            else {
+                return invalid_flow();
+            };
+            frame_witnesses
+        } else {
+            let Some(child) =
+                self.witness_store
+                    .child_witnesses(evidence, environment, &frame.witnesses)
+            else {
+                return invalid_flow();
+            };
+            child
+        };
+        Flow::Value(RuntimeValue::Callable(RuntimeCallable {
+            target: selected.target,
+            witnesses,
+            borrow_argument,
+        }))
     }
 
     fn eval_literal(&self, module: ModuleId, expression: ExprId, literal: &Literal) -> Flow {
@@ -445,6 +526,15 @@ impl<'a> Evaluator<'a> {
         let Some((invocation, checked)) = self.view.invocation(frame.module, expression) else {
             return invalid_flow();
         };
+        let callable = if let CheckedInvocation::Indirect { callee, ty } = checked {
+            if !matches!(invocation.target(), InvocationTarget::CallableValue { callee: found, ty: found_ty } if found == callee && found_ty == ty)
+            {
+                return invalid_flow();
+            }
+            Some(flow_value!(self.eval_expr(frame, *callee)))
+        } else {
+            None
+        };
         let mut evaluated = BTreeMap::new();
         for argument in invocation.evaluation_order() {
             let value = flow_value!(self.eval_argument(frame, *argument));
@@ -462,32 +552,67 @@ impl<'a> Evaluator<'a> {
         if !evaluated.is_empty() {
             return invalid_flow();
         }
+        if let Some(callable) = callable {
+            let RuntimeValue::Callable(callable) = callable else {
+                return invalid_flow();
+            };
+            if let Some(index) = callable.borrow_argument {
+                let Some(argument) = arguments.get_mut(index) else {
+                    return invalid_flow();
+                };
+                let value = std::mem::replace(argument, RuntimeValue::Value(Value::Unit));
+                *argument = self.store.borrow_temporary(value);
+            }
+            return match callable.target {
+                CanonicalTarget::Source(declaration) => {
+                    self.call_source(declaration, arguments, callable.witnesses)
+                }
+                CanonicalTarget::External(declaration) => self.eval_hook(
+                    &declaration,
+                    CanonicalTarget::External(declaration.clone()),
+                    arguments,
+                ),
+            };
+        }
+        let CheckedInvocation::Static {
+            dispatch,
+            evidence_environment,
+        } = checked
+        else {
+            unreachable!()
+        };
         let Some(evidence) = self.view.trait_evidence() else {
             return invalid_flow();
         };
-        let Some(environment) = evidence.environment(checked.evidence_environment()) else {
+        let Some(environment) = evidence.environment(*evidence_environment) else {
             return invalid_flow();
         };
-        let Some(child) = child_witnesses(environment, &frame.witnesses) else {
+        let Some(child) =
+            self.witness_store
+                .child_witnesses(evidence, environment, &frame.witnesses)
+        else {
             return invalid_flow();
         };
         match invocation.target() {
+            InvocationTarget::CallableValue { .. } => invalid_flow(),
             InvocationTarget::TensorConstructor { .. } => invalid_flow(),
             InvocationTarget::Constructor { declaration, .. } => {
-                self.eval_constructor(declaration, checked.dispatch(), arguments)
+                self.eval_constructor(declaration, dispatch, arguments)
             }
             InvocationTarget::Callable(_) => {
-                let Some(direct_target) =
-                    self.dispatch_target(checked.dispatch(), &frame.witnesses)
+                let Some(selected) =
+                    self.view
+                        .selected_call(dispatch, &frame.witnesses, &mut self.witness_store)
                 else {
                     return invalid_flow();
                 };
-                let target = match self.view.trait_adapter_dispatch(
-                    &direct_target,
+                let selected = match self.view.trait_adapter_dispatch(
+                    &selected.target,
                     frame.module,
                     invocation.arguments(),
                     environment,
                     &frame.witnesses,
+                    &mut self.witness_store,
                 ) {
                     Ok(Some(adapter)) => {
                         if let Some(index) = adapter.borrow_argument {
@@ -498,17 +623,30 @@ impl<'a> Evaluator<'a> {
                                 std::mem::replace(argument, RuntimeValue::Value(Value::Unit));
                             *argument = self.store.borrow_temporary(value);
                         }
-                        adapter.target
+                        adapter.selected
                     }
-                    Ok(None) => direct_target,
+                    Ok(None) => selected,
                     Err(_) => return invalid_flow(),
                 };
-                match target {
+                match &selected.target {
                     CanonicalTarget::Source(declaration) => {
-                        self.call_source(declaration, arguments, child)
+                        let witnesses = if selected.method.is_some() {
+                            let Some(projected) = self.witness_store.method_frame(
+                                evidence,
+                                &selected,
+                                environment,
+                                &frame.witnesses,
+                            ) else {
+                                return invalid_flow();
+                            };
+                            projected
+                        } else {
+                            child
+                        };
+                        self.call_source(*declaration, arguments, witnesses)
                     }
                     CanonicalTarget::External(declaration) => self.eval_hook(
-                        &declaration,
+                        declaration,
                         CanonicalTarget::External(declaration.clone()),
                         arguments,
                     ),
@@ -581,26 +719,6 @@ impl<'a> Evaluator<'a> {
                     }
                     _ => invalid_flow(),
                 }
-            }
-        }
-    }
-
-    fn dispatch_target(
-        &self,
-        dispatch: &CheckedDispatch,
-        witnesses: &Witnesses,
-    ) -> Option<CanonicalTarget> {
-        match dispatch {
-            CheckedDispatch::Direct(target) => Some(target.clone()),
-            CheckedDispatch::ImplTemplate { callable, .. } => Some(callable.clone()),
-            CheckedDispatch::Bound { witness, method } => {
-                let evidence = witnesses.get(witness)?;
-                self.view
-                    .program
-                    .resolution()
-                    .trait_environment()
-                    .checked_impl_method(&evidence.implementation, method)
-                    .cloned()
             }
         }
     }
@@ -866,7 +984,9 @@ impl<'a> Evaluator<'a> {
         };
         match self.store.read(&place).ok_or_else(invalid_flow)? {
             RuntimeValue::Reference(referent) => Ok(Some(referent)),
-            RuntimeValue::Value(_) | RuntimeValue::Tuple(_) => Ok(Some(place)),
+            RuntimeValue::Value(_) | RuntimeValue::Callable(_) | RuntimeValue::Tuple(_) => {
+                Ok(Some(place))
+            }
         }
     }
 

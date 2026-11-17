@@ -4,6 +4,7 @@ use eglur_diagnostics::Poison;
 use eglur_hir::{BodyId, OriginId, PatternId, TypeRefId};
 use eglur_source::FileId;
 
+use super::GenericParameterSignature;
 use crate::type_rendering::{DiagnosticTypeFacts, DiagnosticTypeNames};
 use crate::{
     CallableSignatureId, CanonicalTarget, CanonicalTypeStore, DefId, FactState, FactTable,
@@ -80,31 +81,6 @@ impl ResolvedTypeOccurrence {
 pub enum ResolvedType {
     Type(TypeId),
     Trait(TraitRef),
-}
-
-/// Resolved generic parameter and its order-insensitive nominal bounds.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GenericParameterSignature {
-    pub(super) id: GenericParameterId,
-    pub(super) name: Box<str>,
-    pub(super) bounds: Box<[TraitRef]>,
-}
-
-impl GenericParameterSignature {
-    #[must_use]
-    pub const fn id(&self) -> &GenericParameterId {
-        &self.id
-    }
-
-    #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    #[must_use]
-    pub fn bounds(&self) -> &[TraitRef] {
-        &self.bounds
-    }
 }
 
 /// One callable parameter after declaration-signature resolution.
@@ -493,6 +469,8 @@ pub enum EnumVariantPayloadSignature {
 
 /// Completed canonical signature graph for one semantic compilation graph.
 pub struct DeclarationSignatures {
+    pub(super) type_applications: super::applications::TypeApplicationFacts,
+    pub(super) public_contract_poisons: BTreeMap<CanonicalTarget, Poison>,
     pub(super) types: CanonicalTypeStore,
     pub(super) diagnostic_type_names: DiagnosticTypeNames,
     pub(super) declarations: FactTable<CanonicalTarget, DeclarationSignature>,
@@ -502,6 +480,8 @@ pub struct DeclarationSignatures {
     pub(super) occurrences: FactTable<TypeOccurrenceId, ResolvedTypeOccurrence>,
     pub(super) callables: Box<[CallableSignature]>,
     pub(super) impl_headers: FactTable<CanonicalTarget, TraitImplHeader>,
+    pub(super) rejected_impl_headers: BTreeMap<CanonicalTarget, TraitImplHeader>,
+    pub(super) impl_later_roots: BTreeMap<DefId, Poison>,
     pub(super) trait_methods: BTreeMap<CanonicalTarget, Box<[TraitMethodSignature]>>,
     pub(super) trait_method_owners: BTreeMap<CanonicalTarget, CanonicalTarget>,
     pub(super) declared_impl_methods: BTreeMap<CanonicalTarget, Box<[DeclaredImplMethod]>>,
@@ -534,6 +514,12 @@ impl DeclarationSignatures {
         &self,
         declaration: &CanonicalTarget,
     ) -> FactState<'_, DeclarationSignature> {
+        if let Some(poison) = self.application_poison(declaration) {
+            return FactState::Poisoned(poison);
+        }
+        if let Some(poison) = self.public_contract_poisons.get(declaration) {
+            return FactState::Poisoned(poison);
+        }
         declaration_fact_state(
             &self.declarations,
             &self.overload_family_poisons,
@@ -563,6 +549,16 @@ impl DeclarationSignatures {
         &self,
         parameter: &GenericParameterId,
     ) -> FactState<'_, GenericParameterSignature> {
+        if let GenericParameterId::Source(parameter) = parameter
+            && let Some(poison) = self
+                .application_poison(&CanonicalTarget::Source(*parameter))
+                .or_else(|| {
+                    self.public_contract_poisons
+                        .get(&CanonicalTarget::Source(*parameter))
+                })
+        {
+            return FactState::Poisoned(poison);
+        }
         self.generic_parameters.state(parameter)
     }
 
@@ -581,13 +577,43 @@ impl DeclarationSignatures {
 
     #[must_use]
     pub fn impl_header(&self, declaration: &CanonicalTarget) -> FactState<'_, TraitImplHeader> {
+        if let Some(poison) = self.application_poison(declaration) {
+            return FactState::Poisoned(poison);
+        }
+        if let Some(poison) = self.public_contract_poisons.get(declaration) {
+            return FactState::Poisoned(poison);
+        }
         self.impl_headers.state(declaration)
+    }
+
+    pub(crate) fn poison_public_contract(
+        &mut self,
+        declaration: CanonicalTarget,
+        poison: Poison,
+    ) -> bool {
+        match self.public_contract_poisons.entry(declaration) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(poison);
+                true
+            }
+            std::collections::btree_map::Entry::Occupied(_) => false,
+        }
     }
 
     pub(crate) fn impl_headers(
         &self,
     ) -> impl ExactSizeIterator<Item = (&CanonicalTarget, &SemanticFact<TraitImplHeader>)> {
         self.impl_headers.iter()
+    }
+
+    pub(crate) fn rejected_impl_headers(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&CanonicalTarget, &TraitImplHeader)> {
+        self.rejected_impl_headers.iter()
+    }
+
+    pub(crate) fn impl_later_roots(&self, declaration: DefId) -> Option<&Poison> {
+        self.impl_later_roots.get(&declaration)
     }
 
     #[must_use]
@@ -651,7 +677,9 @@ impl DeclarationSignatures {
     }
 
     pub(crate) fn has_poisoned_facts(&self) -> bool {
-        self.declarations.has_poisoned()
+        self.has_invalid_applications()
+            || !self.public_contract_poisons.is_empty()
+            || self.declarations.has_poisoned()
             || !self.overload_family_poisons.is_empty()
             || self.generic_parameters.has_poisoned()
             || self.occurrences.has_poisoned()

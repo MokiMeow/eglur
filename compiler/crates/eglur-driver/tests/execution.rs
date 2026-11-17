@@ -480,6 +480,66 @@ fn generic_and_bound_calls_execute_shared_checked_bodies() {
 }
 
 #[test]
+fn reordered_generic_bounds_forward_witnesses_to_the_right_methods() {
+    for callee_bounds in ["Zulu + Alpha", "Alpha + Zulu"] {
+        for caller_bounds in ["Zulu + Alpha", "Alpha + Zulu"] {
+            let source = format!(
+                concat!(
+                    "trait Alpha {{ fn alpha(self: &Self) -> i64 }}\n",
+                    "trait Zulu {{ fn zulu(self: &Self) -> i64 = 5 }}\n",
+                    "struct Both {{}}\n",
+                    "impl Alpha for Both {{ fn alpha(self: &Self) -> i64 = 2 }}\n",
+                    "impl Zulu for Both {{}}\n",
+                    "fn combine[T: {}](value: T) -> i64 = wrapping_add(value.alpha(), value.zulu())\n",
+                    "fn forward[T: {}](value: T) -> i64 = combine(value)\n",
+                    "fn main!() -> Res[Str, Str] = Ok(to_str(forward(Both {{}})))\n",
+                ),
+                callee_bounds, caller_bounds,
+            );
+            let (program, catalog, profile) = compile_single(&source);
+            assert_eq!(
+                ok_str(completed(&program, &catalog, &profile).value()),
+                "7",
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dependent_generic_bounds_forward_parameterized_witnesses() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link[A] { fn linked(self: &Self, value: A) -> A }\n",
+        "impl Link[i64] for Bool { fn linked(self: &Self, value: i64) -> i64 = value }\n",
+        "fn project[A: Link[B], B](value: A, argument: B) -> B = value.linked(argument)\n",
+        "fn forward[A: Link[B], B](value: A, argument: B) -> B = project(value, argument)\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(forward(true, 7)))\n",
+    ));
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn normalized_owner_bounds_forward_witnesses_to_checked_methods() {
+    for caller_argument in ["i64", "Item[Carrier]"] {
+        for callee_argument in ["i64", "Item[Carrier]"] {
+            let source = format!(
+                "trait Carries {{ type Item }}\nstruct Carrier {{}}\n\
+                 impl Carries for Carrier {{ type Item = i64 }}\n\
+                 type Item[T: Carries] = T::Item\n\
+                 trait Link[A] {{\nfn linked(self: &Self, value: A) -> A\n\
+                 fn forward(self: &Self, value: A) -> A = self.linked(value)\n}}\n\
+                 impl Link[i64] for Bool {{ fn linked(self: &Self, value: i64) -> i64 = value }}\n\
+                 fn project[T: Link[{callee_argument}]](value: T) -> i64 = value.linked(7)\n\
+                 fn forward[T: Link[{caller_argument}]](value: T) -> i64 = project(value)\n\
+                 fn main!() -> Res[Str, Str] = Ok(to_str(forward(true)))\n"
+            );
+            let (program, catalog, profile) = compile_single(&source);
+            assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+        }
+    }
+}
+
+#[test]
 fn cross_module_method_dispatch_and_mutable_reference_updates_work() {
     let (program, catalog, profile) = compile_files(
         [
@@ -776,6 +836,151 @@ fn scalar_hook_support_follows_checked_witnesses_through_shared_generic_bodies()
 }
 
 #[test]
+fn default_trait_method_uses_its_current_trait_witness() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link[A] {\n",
+        "  fn linked(self: &Self, value: A) -> A\n",
+        "  fn forward(self: &Self, value: A) -> A = self.linked(value)\n",
+        "}\n",
+        "impl Link[i64] for Bool { fn linked(self: &Self, value: i64) -> i64 = value }\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.forward(7)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn normalized_bound_dispatches_into_the_default_method_frame() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Carries { type Item }\n",
+        "struct Carrier {}\n",
+        "impl Carries for Carrier { type Item = i64 }\n",
+        "type Item[T: Carries] = T::Item\n",
+        "trait Link[A] {\n",
+        "  fn linked(self: &Self, value: A) -> A\n",
+        "  fn forward(self: &Self, value: A) -> A = self.linked(value)\n",
+        "}\n",
+        "impl Link[i64] for Bool { fn linked(self: &Self, value: i64) -> i64 = value }\n",
+        "fn forward[T: Link[Item[Carrier]]](value: T) -> i64 = value.forward(7)\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(forward(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn generic_impl_method_receives_its_prerequisite_witness() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Marker {}\n",
+        "impl Marker for Bool {}\n",
+        "trait Show { fn number(self: &Self) -> i64 }\n",
+        "fn marker[T: Marker]() -> i64 = 7\n",
+        "impl[T: Marker] Show for T {\n",
+        "  fn number(self: &Self) -> i64 = marker::[T]()\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.number()))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn default_trait_method_receives_trait_generic_prerequisite() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Marker {}\n",
+        "impl Marker for Bool {}\n",
+        "fn marked[T: Marker]() -> i64 = 7\n",
+        "trait Echo[A: Marker] {\n",
+        "  fn echo(self: &Self, value: A) -> i64 = marked::[A]()\n",
+        "}\n",
+        "impl Echo[Bool] for i64 {}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(1.echo(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn override_method_generic_bounds_route_by_contract_not_written_order() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Left {}\n",
+        "trait Right {}\n",
+        "impl Left for Bool {}\n",
+        "impl Right for Bool {}\n",
+        "fn both[T: Left + Right]() -> i64 = 7\n",
+        "trait Combo { fn combine[T: Left + Right](self: &Self, value: T) -> i64 }\n",
+        "impl Combo for Bool {\n",
+        "  fn combine[U: Right + Left](self: &Self, value: U) -> i64 = both::[U]()\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.combine(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn selected_impl_prerequisite_survives_multiple_generic_calls() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Marker {}\n",
+        "impl Marker for Bool {}\n",
+        "trait Show { fn number(self: &Self) -> i64 }\n",
+        "fn marker[T: Marker]() -> i64 = 7\n",
+        "impl[T: Marker] Show for T {\n",
+        "  fn number(self: &Self) -> i64 = marker::[T]()\n",
+        "}\n",
+        "fn inner[T: Marker](value: T) -> i64 = value.number()\n",
+        "fn outer[T: Marker](value: T) -> i64 = inner::[T](value)\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(outer(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn no_bound_default_method_remains_executable() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Readable { fn read(self: &Self) -> i64 = 7 }\n",
+        "impl Readable for Bool {}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.read()))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn method_generic_bound_can_refer_to_a_trait_parameter() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link[A] {}\n",
+        "impl Link[i64] for Bool {}\n",
+        "fn linked[X: Link[Y], Y]() -> i64 = 7\n",
+        "trait Use[A] {\n",
+        "  fn use[B: Link[A]](self: &Self, value: B) -> i64 = linked::[B, A]()\n",
+        "}\n",
+        "impl Use[i64] for Bool {}\n",
+        "fn main!() -> Res[Str, Str] = Ok(to_str(true.use(true)))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn trusted_adapter_routes_source_impl_prerequisites() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Marker {}\n",
+        "impl Marker for Bool {}\n",
+        "fn marker[T: Marker]() -> i64 = 7\n",
+        "struct Wrap[T] { field value: T }\n",
+        "impl[T: Marker] Display for Wrap[T] {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(marker::[T]())\n",
+        "}\n",
+        "fn stringify[T: Display](value: T) -> Str = to_str(value)\n",
+        "fn main!() -> Res[Str, Str] = Ok(stringify(Wrap { value: true }))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
 fn property_reads_are_rejected_before_runtime_until_accessor_dispatch_is_lowered() {
     let (program, catalog, profile) = compile_single(concat!(
         "struct Counter {\n",
@@ -796,6 +1001,693 @@ fn property_reads_are_rejected_before_runtime_until_accessor_dispatch_is_lowered
             eglur_driver::UnsupportedFeature::PropertyRead,
         ))
     );
+}
+
+#[test]
+fn named_function_values_execute_through_local_bindings() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn identity(value: i64) -> i64 = value\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(i64) -> i64 = identity\n",
+        "  yield Ok(to_str(f(7)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn selected_overload_function_value_executes_the_selected_target() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "overload fn identity(value: i64) -> i64 = value\n",
+        "overload fn identity(value: Str) -> Str = \"wrong\"\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(i64) -> i64 = identity\n",
+        "  yield Ok(to_str(f(7)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn bounded_generic_function_value_carries_witness_into_indirect_call() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Readable {\n  type Elem\n  fn read(self: &Self) -> Self::Elem\n}\n",
+        "struct Good {}\n",
+        "impl Readable for Good {\n  type Elem = i64\n  fn read(self: &Self) -> Self::Elem = 8\n}\n",
+        "fn bounded[T: Readable](value: T) -> T::Elem = value.read()\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(Good) -> i64 = bounded\n",
+        "  yield Ok(to_str(f(Good{})))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "8");
+}
+
+#[test]
+fn trusted_wrapping_hook_executes_through_a_function_value() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let add: Fn(i8, i8) -> i8 = wrapping_add\n",
+        "  let maximum: i8 = 127\n",
+        "  yield Ok(to_str(add(maximum, 1)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "-128"
+    );
+}
+
+#[test]
+fn trusted_display_adapter_value_executes_scalar_hook() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let stringify: Fn(i64) -> Str = to_str\n",
+        "  yield Ok(stringify(7))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn trusted_display_adapter_value_captures_source_impl() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "import std::test::emit!\n",
+        "struct Label { field value: i64 }\n",
+        "impl Display for Label {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(self.value)\n",
+        "}\n",
+        "fn make!() -> Label { emit!(\"make\")\nyield Label { value: 8 } }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let stringify: Fn(Label) -> Str = to_str\n",
+        "  yield Ok(stringify(make!()))\n",
+        "}\n",
+    ));
+
+    let result = completed(&program, &catalog, &profile);
+    assert_eq!(ok_str(result.value()), "8");
+    assert_eq!(
+        result.events(),
+        [eglur_driver::RuntimeEvent::Emitted("make".into())]
+    );
+}
+
+#[test]
+fn generic_display_adapter_value_preserves_bound_witness() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Label { field value: i64 }\n",
+        "impl Display for Label {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(self.value)\n",
+        "}\n",
+        "fn stringify[T: Display](value: T) -> Str {\n",
+        "  let f: Fn(T) -> Str = to_str\n",
+        "  yield f(value)\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] = Ok(stringify(Label { value: 9 }))\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "9");
+}
+
+#[test]
+fn generic_display_adapter_value_resolves_builtin_impl() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn stringify[T: Display](value: T) -> Str {\n",
+        "  let f: Fn(T) -> Str = to_str\n",
+        "  yield f(value)\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] = Ok(stringify(11))\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "11"
+    );
+}
+
+#[test]
+fn qualified_trait_method_value_executes_checked_impl() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link { fn forward(self: &Self) -> i64 }\n",
+        "impl Link for Bool { fn forward(self: &Self) -> i64 = 17 }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  let f: Fn(&Bool) -> i64 = Link.forward\n",
+        "  yield Ok(to_str(f(&value)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "17"
+    );
+}
+
+#[test]
+fn concrete_owner_method_call_and_value_execute_the_same_target() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count { field value: i64\nfn read(self: &Self) -> i64 = self.value }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Count { value: 7 }\n",
+        "  let read: Fn(&Count) -> i64 = Count.read\n",
+        "  yield Ok(to_str(wrapping_add(Count.read(&value), read(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "14"
+    );
+}
+
+#[test]
+fn generic_concrete_owner_methods_specialize_from_the_receiver() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Boxed[T] { field value: T\nfn read(self: &Self) -> T = self.value }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Boxed { value: 7 }\n",
+        "  let read: Fn(&Boxed[i64]) -> i64 = Boxed.read\n",
+        "  yield Ok(to_str(wrapping_add(Boxed.read(&value), read(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "14"
+    );
+}
+
+#[test]
+fn fully_applied_alias_owner_methods_execute_with_fixed_specialization() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Boxed[T] { field value: T\nfn read(self: &Self) -> T = self.value }\n",
+        "type IntBox = Boxed[i64]\n",
+        "type Alias = IntBox\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Boxed { value: 7 }\n",
+        "  let read: Fn(&IntBox) -> i64 = Alias.read\n",
+        "  let inferred = Alias.read\n",
+        "  let pair = wrapping_add(IntBox.read(&value), read(&value))\n",
+        "  yield Ok(to_str(wrapping_add(pair, inferred(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "21"
+    );
+}
+
+#[test]
+fn reexported_transparent_alias_preserves_underlying_method_target() {
+    let (program, catalog, profile) = compile_files(
+        [
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::IntBox\nimport dep::make\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let value = make()\n",
+                    "  let read: Fn(&IntBox) -> i64 = IntBox.read\n",
+                    "  yield Ok(to_str(wrapping_add(IntBox.read(&value), read(&value))))\n",
+                    "}\n",
+                ),
+            ),
+            ("bridge.eglur", "pub import dep::IntBox\n"),
+            (
+                "dep.eglur",
+                concat!(
+                    "pub struct Boxed[T] { field value: T\n",
+                    "pub fn read(self: &Self) -> T = self.value }\n",
+                    "pub type IntBox = Boxed[i64]\n",
+                    "pub fn make() -> IntBox = Boxed { value: 7 }\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "14"
+    );
+}
+
+#[test]
+fn imported_reexported_concrete_owner_preserves_its_method_target() {
+    let (program, catalog, profile) = compile_files(
+        [
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::Count\nimport dep::make\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let value = make()\n",
+                    "  let read: Fn(&Count) -> i64 = Count.read\n",
+                    "  yield Ok(to_str(wrapping_add(Count.read(&value), read(&value))))\n",
+                    "}\n",
+                ),
+            ),
+            ("bridge.eglur", "pub import dep::Count\n"),
+            (
+                "dep.eglur",
+                concat!(
+                    "pub struct Count { field value: i64\npub fn read(self: &Self) -> i64 = self.value }\n",
+                    "pub fn make() -> Count = Count { value: 7 }\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "14"
+    );
+}
+
+#[test]
+fn concrete_owner_overloads_select_direct_and_function_value_targets() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count {\n",
+        "  overload fn read(self: &Self, value: i64) -> i64 = value\n",
+        "  overload fn read(self: &Self, value: Str) -> i64 = 99\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Count {}\n",
+        "  let read: Fn(&Count, i64) -> i64 = Count.read\n",
+        "  yield Ok(to_str(wrapping_add(Count.read(&value, 7), read(&value, 8))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "15"
+    );
+}
+
+#[test]
+fn monomorphic_concrete_owner_method_value_infers_without_annotation() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count { fn read(self: &Self) -> i64 = 7 }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Count {}\n",
+        "  let read = Count.read\n",
+        "  yield Ok(to_str(read(&value)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn concrete_owner_bang_method_uses_explicit_mutable_receiver() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count { field mut value: i64\n",
+        "  fn set!(self: &mut Self, value: i64) -> Unit { self.value = value\nyield () }\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let mut value = Count { value: 0 }\n",
+        "  Count.set!(&mut value, 7)\n",
+        "  yield Ok(to_str(value.value))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn concrete_owner_generic_method_uses_explicit_or_expected_type_arguments() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Count { fn echo[T](self: &Self, value: T) -> T = value }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Count {}\n",
+        "  let echo: Fn(&Count, i64) -> i64 = Count.echo\n",
+        "  yield Ok(to_str(wrapping_add(Count.echo::[i64](&value, 7), echo(&value, 8))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "15"
+    );
+}
+
+#[test]
+fn qualified_trait_method_call_executes_checked_impl() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link { fn forward(self: &Self) -> i64 }\n",
+        "impl Link for Bool { fn forward(self: &Self) -> i64 = 19 }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  yield Ok(to_str(Link.forward(&value)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "19"
+    );
+}
+
+#[test]
+fn qualified_trait_default_method_keeps_its_witness() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Link[A] {\n",
+        "  fn linked(self: &Self, value: A) -> A\n",
+        "  fn forward(self: &Self, value: A) -> A = self.linked(value)\n",
+        "}\n",
+        "impl Link[i64] for Bool { fn linked(self: &Self, value: i64) -> i64 = value }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  let f: Fn(&Bool, i64) -> i64 = Link.forward\n",
+        "  yield Ok(to_str(wrapping_add(f(&value, 7), Link.forward(&value, 8))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "15"
+    );
+}
+
+#[test]
+fn qualified_trait_methods_keep_generic_bound_witnesses() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Rank { fn rank(self: &Self) -> i64 }\n",
+        "impl Rank for Bool { fn rank(self: &Self) -> i64 = 11 }\n",
+        "fn direct[T: Rank](value: &T) -> i64 = Rank.rank(value)\n",
+        "fn indirect[T: Rank](value: &T) -> i64 {\n",
+        "  let f: Fn(&T) -> i64 = Rank.rank\n",
+        "  yield f(value)\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  yield Ok(to_str(wrapping_add(direct(&value), indirect(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "22"
+    );
+}
+
+#[test]
+fn qualified_trait_calls_bypass_visible_method_ambiguity() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Left { fn read(self: &Self) -> i64 }\n",
+        "trait Right { fn read(self: &Self) -> i64 }\n",
+        "impl Left for Bool { fn read(self: &Self) -> i64 = 1 }\n",
+        "impl Right for Bool { fn read(self: &Self) -> i64 = 2 }\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = true\n",
+        "  yield Ok(to_str(wrapping_add(Left.read(&value), Right.read(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "3");
+}
+
+#[test]
+fn qualified_trait_method_normalizes_associated_result() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "trait Readable { type Elem\nfn read(self: &Self) -> Self::Elem }\n",
+        "struct Good {}\n",
+        "impl Readable for Good {\n",
+        "  type Elem = i64\n",
+        "  fn read(self: &Self) -> Self::Elem = 8\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = Good{}\n",
+        "  let f: Fn(&Good) -> i64 = Readable.read\n",
+        "  yield Ok(to_str(wrapping_add(f(&value), Readable.read(&value))))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "16"
+    );
+}
+
+#[test]
+fn reexported_qualified_trait_method_retains_impl_identity() {
+    let (program, catalog, profile) = compile_files(
+        [
+            (
+                "dep.eglur",
+                concat!(
+                    "pub trait Rank { fn rank(self: &Self) -> i64 }\n",
+                    "pub struct Count {}\n",
+                    "impl Rank for Count { fn rank(self: &Self) -> i64 = 5 }\n",
+                ),
+            ),
+            ("bridge.eglur", "pub import dep::Rank as PublicRank\n"),
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::PublicRank\n",
+                    "import dep::Count\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let value = Count{}\n",
+                    "  let f: Fn(&Count) -> i64 = PublicRank.rank\n",
+                    "  let direct = PublicRank.rank(&value)\n",
+                    "  let module_qualified = dep::Rank.rank(&value)\n",
+                    "  yield Ok(to_str(wrapping_add(wrapping_add(f(&value), direct), module_qualified)))\n",
+                    "}\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "15"
+    );
+}
+
+#[test]
+fn trusted_qualified_display_method_uses_checked_builtin_route() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = 7\n",
+        "  let f: Fn(&i64) -> Str = Display.to_str\n",
+        "  yield Ok(f(&value))\n",
+        "}\n",
+    ));
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let value = 8\n",
+        "  yield Ok(Display.to_str(&value))\n",
+        "}\n",
+    ));
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "8");
+}
+
+#[test]
+fn display_adapter_value_keeps_its_route_when_passed_to_a_function() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "struct Label { field value: i64 }\n",
+        "impl Display for Label {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(self.value)\n",
+        "}\n",
+        "fn invoke(f: Fn(Label) -> Str) -> Str = f(Label { value: 12 })\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let stringify: Fn(Label) -> Str = to_str\n",
+        "  yield Ok(invoke(stringify))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "12"
+    );
+}
+
+#[test]
+fn display_adapter_value_rejects_unsupported_impl_before_effects() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "import std::test::emit!\n",
+        "struct Label {\n",
+        "  field value: i64\n",
+        "  prop count: i64 { fn get_count(self: &Self) -> i64 = self.value }\n",
+        "}\n",
+        "impl Display for Label {\n",
+        "  fn to_str(self: &Self) -> Str = to_str(self.count)\n",
+        "}\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  emit!(\"before\")\n",
+        "  let stringify: Fn(Label) -> Str = to_str\n",
+        "  yield Ok(stringify(Label { value: 5 }))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        execute(&program, &profile, &catalog, EvaluationLimits::default()),
+        ExecutionAttempt::Unsupported(SupportReason::Feature(
+            eglur_driver::UnsupportedFeature::PropertyRead,
+        ))
+    );
+}
+
+#[test]
+fn display_adapter_value_rejects_unsupported_scalar_hook() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let stringify: Fn(f32) -> Str = to_str\n",
+        "  yield Ok(\"unused\")\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        execute(&program, &profile, &catalog, EvaluationLimits::default()),
+        ExecutionAttempt::Unsupported(SupportReason::Feature(
+            eglur_driver::UnsupportedFeature::HookArgumentType,
+        ))
+    );
+}
+
+#[test]
+fn named_function_values_execute_through_locals_and_parameters() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn identity(value: Str) -> Str = value\n",
+        "fn invoke(f: Fn(Str) -> Str) -> Str = f(\"passed\")\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(Str) -> Str = identity\n",
+        "  yield Ok(invoke(f))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "passed"
+    );
+}
+
+#[test]
+fn reexported_named_function_value_keeps_its_source_target() {
+    let (program, catalog, profile) = compile_files(
+        [
+            ("dep.eglur", "pub fn identity(value: Str) -> Str = value\n"),
+            ("bridge.eglur", "pub import dep::identity as routed\n"),
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::routed\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let f: Fn(Str) -> Str = routed\n",
+                    "  yield Ok(f(\"reexported\"))\n",
+                    "}\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "reexported"
+    );
+}
+
+#[test]
+fn reexported_overload_function_value_selects_the_expected_fn_target() {
+    let (program, catalog, profile) = compile_files(
+        [
+            (
+                "dep.eglur",
+                concat!(
+                    "pub overload fn identity(value: i64) -> i64 = value\n",
+                    "pub overload fn identity(value: Str) -> Str = \"wrong\"\n",
+                ),
+            ),
+            ("bridge.eglur", "pub import dep::identity as routed\n"),
+            (
+                "main.eglur",
+                concat!(
+                    "import bridge::routed\n",
+                    "fn main!() -> Res[Str, Str] {\n",
+                    "  let f: Fn(i64) -> i64 = routed\n",
+                    "  yield Ok(to_str(f(7)))\n",
+                    "}\n",
+                ),
+            ),
+        ],
+        "main.eglur",
+    );
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn callable_value_variance_preserves_reference_argument_passing() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn read(value: &i64) -> i64 = *value\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let mut value = 7\n",
+        "  let f: Fn(&mut i64) -> i64 = read\n",
+        "  yield Ok(to_str(f(&mut value)))\n",
+        "}\n",
+    ));
+
+    assert_eq!(ok_str(completed(&program, &catalog, &profile).value()), "7");
+}
+
+#[test]
+fn callable_value_target_is_selected_by_runtime_control_flow() {
+    let (program, catalog, profile) = compile_single(concat!(
+        "fn left(value: Str) -> Str = value\n",
+        "fn right(value: Str) -> Str = \"right\"\n",
+        "fn main!() -> Res[Str, Str] {\n",
+        "  let f: Fn(Str) -> Str = if false { yield left } else { yield right }\n",
+        "  yield Ok(f(\"left\"))\n",
+        "}\n",
+    ));
+
+    assert_eq!(
+        ok_str(completed(&program, &catalog, &profile).value()),
+        "right"
+    );
+}
+
+#[test]
+fn callable_values_in_public_carriers_are_refused_before_execution() {
+    for (declaration, expression) in [
+        ("", "Some(identity)"),
+        ("", "Some((identity,))"),
+        (
+            "struct Holder { field callback: Fn(Str) -> Str }\n",
+            "Holder { callback: identity }",
+        ),
+    ] {
+        let source = format!(
+            "import std::test::emit!\n\
+             fn identity(value: Str) -> Str = value\n\
+             {declaration}\
+             fn main!() -> Res[Str, Str] {{\n\
+               emit!(\"before\")\n\
+               let wrapped = {expression}\n\
+               yield Ok(\"ready\")\n\
+             }}\n"
+        );
+        let (program, catalog, profile) = compile_single(&source);
+        assert_eq!(
+            execute(&program, &profile, &catalog, EvaluationLimits::default()),
+            ExecutionAttempt::Unsupported(SupportReason::Feature(
+                eglur_driver::UnsupportedFeature::FunctionValue,
+            )),
+            "{expression}"
+        );
+    }
 }
 
 #[test]

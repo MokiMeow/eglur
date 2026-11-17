@@ -1,7 +1,6 @@
 """Regression tests for canonical conformance suite decoding."""
 
 import unittest
-from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from typing import ClassVar, cast
@@ -42,38 +41,59 @@ class RepositoryBundleTests(unittest.TestCase):
         )
 
     def test_decodes_every_suite_test_source_and_outcome_variant(self) -> None:
-        """Assert exact inventory counts across all closed variant families."""
-        tests = [test.case for test in self.bundle.tests]
+        """Preserve authored identities, source payloads and outcome variants."""
+        manifest = cast(dict[str, YamlValue], self.manifest_value)
+        entries = cast(list[dict[str, YamlValue]], manifest["suites"])
+        self.assertEqual(
+            [(suite.entry.suite_id, suite.entry.file) for suite in self.bundle.suites],
+            [(entry["id"], entry["file"]) for entry in entries],
+        )
 
-        self.assertEqual(len(self.bundle.suites), 47)
-        self.assertEqual(len(tests), 1950)
-        self.assertEqual(
-            Counter(
-                type(suite.entry.participation).__name__ for suite in self.bundle.suites
-            ),
-            {
-                "BaselineParticipation": 39,
-                "ConditionalParticipation": 5,
-                "OptionalParticipation": 3,
-            },
-        )
-        self.assertEqual(
-            Counter(type(test.invocation.source).__name__ for test in tests),
-            {
-                "Utf8Source": 1765,
-                "FileSetSource": 184,
-                "RawBytesSource": 1,
-            },
-        )
-        self.assertEqual(
-            Counter(type(test.expectation.outcome).__name__ for test in tests),
-            {
-                "ValueOutcome": 965,
-                "CompileErrorOutcome": 972,
-                "RuntimeErrorOutcome": 9,
-                "TestRunOutcome": 4,
-            },
-        )
+        for suite, entry in zip(self.bundle.suites, entries, strict=True):
+            self.assertEqual(suite.entry.required, entry["required"])
+            self.assertEqual(suite.entry.precondition, entry.get("precondition"))
+            document = cast(
+                dict[str, YamlValue], self.suite_documents[suite.entry.file]
+            )
+            authored = cast(list[dict[str, YamlValue]], document["tests"])
+            self.assertEqual(
+                [case.test_id for case in suite.document.tests],
+                [raw["id"] for raw in authored],
+            )
+            for case, raw in zip(suite.document.tests, authored, strict=True):
+                with self.subTest(suite=suite.entry.suite_id, test=case.test_id):
+                    self.assertEqual(case.category, raw["category"])
+                    self.assertEqual(case.title, raw["title"])
+                    source = case.invocation.source
+                    if isinstance(source, suite_model.Utf8Source):
+                        self.assertEqual(source.text, raw["code"])
+                    elif isinstance(source, suite_model.RawBytesSource):
+                        self.assertEqual(
+                            bytes.fromhex(source.hex_bytes),
+                            bytes.fromhex(cast(str, raw["code_bytes_hex"])),
+                        )
+                    else:
+                        self.assertEqual(
+                            {item.path: item.text for item in source.files},
+                            raw["files"],
+                        )
+                        self.assertEqual(
+                            {item.path: item.target for item in source.symlinks},
+                            raw.get("symlinks", {}),
+                        )
+                        self.assertEqual(source.entry, raw["entry"])
+                        self.assertEqual(source.root, raw.get("file_set_root"))
+
+                    expected = cast(dict[str, YamlValue], raw["expect"])
+                    outcome = case.expectation.outcome
+                    if "compile_error" in expected:
+                        self.assertIsInstance(outcome, suite_model.CompileErrorOutcome)
+                    elif "runtime_error" in expected:
+                        self.assertIsInstance(outcome, suite_model.RuntimeErrorOutcome)
+                    elif "value" in expected:
+                        self.assertIsInstance(outcome, suite_model.ValueOutcome)
+                    else:
+                        self.assertIsInstance(outcome, suite_model.TestRunOutcome)
 
     def test_bundle_requires_the_exact_manifest_owned_document_set(self) -> None:
         """Reject both missing and unbound suite documents."""

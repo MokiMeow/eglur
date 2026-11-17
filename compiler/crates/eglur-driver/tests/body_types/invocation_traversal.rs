@@ -46,6 +46,17 @@ fn nested_generic_calls_typecheck_with_inferred_and_explicit_arguments() {
 }
 
 #[test]
+fn parser_budgeted_reference_type_inference_seals_on_the_default_stack() {
+    let depth = 254;
+    let source = format!(
+        "fn sink[T](value: {}T) -> Unit = ()\nfn f(x: {}i64) -> Unit = sink(x)\n",
+        "& ".repeat(depth),
+        "& ".repeat(depth),
+    );
+    check_invocations(&source, &body_profile(), 1);
+}
+
+#[test]
 fn mixed_call_and_block_frames_share_the_work_stack() {
     let depth = 120;
     let source = format!(

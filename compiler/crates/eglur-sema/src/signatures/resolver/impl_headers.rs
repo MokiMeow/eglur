@@ -1,4 +1,7 @@
 use super::*;
+use crate::signatures::public_contracts::{
+    conformance_is_externally_reachable, first_unnameable_trait, first_unnameable_type,
+};
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_generics(&mut self) -> Result<(), SignatureResolutionError> {
@@ -277,11 +280,45 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 self.reject_source_impl_header(declaration_id, poison)?;
                 continue;
             }
+            accepted.push(header.clone());
+            if self.public_impl_header_exposes_private_type(&header)? {
+                let poison = self.source_impl_header_error(
+                    declaration_id,
+                    "VISIBILITY_VIOLATION",
+                    "visibility violation: public conformance exposes a private declaration",
+                    None,
+                )?;
+                self.reject_source_impl_header(declaration_id, poison)?;
+                continue;
+            }
             self.retained_impl_headers
-                .insert(target, SemanticFact::Known(header.clone()))?;
-            accepted.push(header);
+                .insert(target, SemanticFact::Known(header))?;
         }
         Ok(())
+    }
+
+    fn public_impl_header_exposes_private_type(
+        &self,
+        header: &TraitImplHeader,
+    ) -> Result<bool, SignatureResolutionError> {
+        if !conformance_is_externally_reachable(self.collection, &self.types, header)? {
+            return Ok(false);
+        }
+        for parameter in header.generic_parameters() {
+            let FactState::Known(signature) = self.generic_parameters.state(parameter) else {
+                unreachable!("checked impl header has known generic parameters")
+            };
+            for bound in signature.declared_bounds() {
+                if first_unnameable_trait(self.collection, &self.types, bound.clone())?.is_some() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(
+            first_unnameable_trait(self.collection, &self.types, header.trait_ref().clone())?
+                .is_some()
+                || first_unnameable_type(self.collection, &self.types, header.target())?.is_some(),
+        )
     }
 
     pub(super) fn reject_source_impl_header(
@@ -289,7 +326,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         declaration_id: DefId,
         poison: Poison,
     ) -> Result<(), SignatureResolutionError> {
-        self.impl_headers.remove(&declaration_id);
+        let header = self
+            .impl_headers
+            .remove(&declaration_id)
+            .expect("rejected impl has a parsed header");
+        self.rejected_impl_headers
+            .insert(CanonicalTarget::Source(declaration_id), header);
+        self.impl_later_roots.insert(declaration_id, poison.clone());
         self.impl_header_poison
             .insert(declaration_id, poison.clone());
         self.retained_impl_headers.insert(
@@ -611,19 +654,18 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             } else if unperformed {
                 Resolution::Unperformed
             } else {
-                bounds.sort();
-                Resolution::Known(GenericParameterSignature {
-                    id: id.clone(),
-                    name: parameter.name.text().unwrap_or("<invalid>").into(),
-                    bounds: bounds.into_boxed_slice(),
-                })
+                Resolution::Known(GenericParameterSignature::new(
+                    id.clone(),
+                    parameter.name.text().unwrap_or("<invalid>").into(),
+                    bounds,
+                ))
             }
         };
 
         let state = match result {
             Resolution::Known(signature) => {
                 self.generic_bounds
-                    .insert(id.clone(), signature.bounds.clone());
+                    .insert(id.clone(), signature.bounds().into());
                 self.generic_parameters
                     .insert(id, SemanticFact::Known(signature.clone()))?;
                 self.declarations.insert(

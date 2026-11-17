@@ -123,6 +123,84 @@ fn assert_global_conformance_dependency(snapshot: &FingerprintSnapshot) {
 }
 
 #[test]
+fn bound_priority_does_not_change_semantic_contract_or_evidence_fingerprints() {
+    let resolve_bounds = |bounds: &str| {
+        let source = format!(
+            concat!(
+                "pub trait Alpha {{ fn alpha(self: &Self) -> i64 }}\n",
+                "pub trait Zulu {{ fn zulu(self: &Self) -> i64 }}\n",
+                "pub fn choose[T: {}](value: T) -> i64 = value.zulu()\n",
+                "pub fn forward[T: {}](value: T) -> i64 = choose(value)\n",
+            ),
+            bounds, bounds,
+        );
+        resolve([file("main.eglur", &source)], "main.eglur", false)
+    };
+    let forward = resolve_bounds("Zulu + Alpha");
+    let reverse = resolve_bounds("Alpha + Zulu");
+    assert_eq!(forward.semantics, reverse.semantics);
+}
+
+#[test]
+fn qualified_trait_aliases_share_the_same_body_fingerprint() {
+    let resolve_alias = |import: &str, owner: &str| {
+        let main = format!(
+            concat!(
+                "import {import}\nimport dep::Count\n",
+                "pub fn score(value: &Count) -> i64 = {owner}.rank(value)\n",
+                "pub fn from_value(value: &Count) -> i64 {{\n",
+                "  let f: Fn(&Count) -> i64 = {owner}.rank\n",
+                "  yield f(value)\n",
+                "}}\n",
+            ),
+            import = import,
+            owner = owner,
+        );
+        resolve(
+            [
+                file(
+                    "dep.eglur",
+                    concat!(
+                        "pub trait Rank { fn rank(self: &Self) -> i64 }\n",
+                        "pub struct Count {}\n",
+                        "impl Rank for Count { fn rank(self: &Self) -> i64 = 3 }\n",
+                    ),
+                ),
+                file("bridge.eglur", "pub import dep::Rank as PublicRank\n"),
+                file("main.eglur", &main),
+            ],
+            "main.eglur",
+            false,
+        )
+    };
+
+    let direct = resolve_alias("dep::Rank", "Rank");
+    let reexported = resolve_alias("bridge::PublicRank", "PublicRank");
+    assert_eq!(
+        outputs(&direct, "main").body(),
+        outputs(&reexported, "main").body()
+    );
+}
+
+#[test]
+fn normalized_owner_evidence_fingerprints_ignore_declaration_order() {
+    let snapshot = |prefix: &str| {
+        let source = format!(
+            "{prefix}\n\
+             pub trait Carries {{ type Item }}\npub struct Carrier {{}}\n\
+             impl Carries for Carrier {{ type Item = i64 }}\n\
+             pub type Item[T: Carries] = T::Item\n\
+             pub fn accept[T: Link[i64]](x: T) -> Unit = ()\n\
+             pub fn forward[T: Mark + Link[Item[Carrier]]](x: T) -> Unit = accept(x)\n"
+        );
+        resolve([file("main.eglur", &source)], "main.eglur", false)
+    };
+    let first = snapshot("pub trait Mark {}\npub trait Link[A] {}\npub struct Unrelated {}");
+    let reordered = snapshot("pub struct Unrelated {}\npub trait Link[A] {}\npub trait Mark {}");
+    assert_eq!(first.semantics, reordered.semantics);
+}
+
+#[test]
 fn grouped_call_fingerprints_preserve_trivia_and_source_label_invariance() {
     let source = "fn id(value: i64) -> i64 = value\npub fn value() -> i64 = ((id))(7)\n";
     let base = resolve([file("main.eglur", source)], "main.eglur", false);
@@ -167,7 +245,7 @@ fn shuffled_source_insertion_and_observation_do_not_change_fingerprints() {
 #[test]
 fn receiver_passing_fingerprints_ignore_labels_and_trivia_but_retain_call_semantics() {
     let declarations =
-        "struct Counter { field value: i64\nfn read(self: &Self) -> i64 = self.value\n}\n";
+        "pub struct Counter { field value: i64\nfn read(self: &Self) -> i64 = self.value\n}\n";
     let source = format!("{declarations}pub fn inspect(value: Counter) -> i64 = value.read()\n");
     let base = resolve([file("main.eglur", &source)], "main.eglur", false);
     let labeled = resolve(
@@ -538,6 +616,36 @@ fn public_impl_contract_changes_invalidate_unrelated_units() {
     assert_ne!(
         unit_key(&before, "unrelated"),
         unit_key(&after, "unrelated")
+    );
+}
+
+#[test]
+fn private_alias_spelling_does_not_change_public_conformance_fingerprints() {
+    let sources = |item: &str| {
+        [
+            file(
+                "model.eglur",
+                &format!(
+                    "pub trait Carries {{ type Item }}\npub struct Holder {{}}\ntype Count = i64\nimpl Carries for Holder {{ type Item = {item} }}\n"
+                ),
+            ),
+            file("unrelated.eglur", "pub fn untouched() -> Unit = ()\n"),
+        ]
+    };
+    let canonical = resolve(sources("i64"), "model.eglur", false);
+    let aliased = resolve(sources("Count"), "model.eglur", false);
+
+    assert_eq!(
+        canonical.analysis.conformance(),
+        aliased.analysis.conformance()
+    );
+    assert_eq!(
+        outputs(&canonical, "model").interface(),
+        outputs(&aliased, "model").interface()
+    );
+    assert_eq!(
+        unit_key(&canonical, "unrelated"),
+        unit_key(&aliased, "unrelated")
     );
 }
 

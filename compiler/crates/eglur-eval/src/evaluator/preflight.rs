@@ -4,7 +4,7 @@ use eglur_sema::{CanonicalTypeStore, TypeStoreError};
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct PlannedCall {
     declaration: DefId,
-    witnesses: Box<[(WitnessSlotId, WitnessValue)]>,
+    witnesses: Box<[(WitnessSlotId, WitnessId)]>,
 }
 
 pub(super) struct Planner<'a> {
@@ -15,6 +15,7 @@ pub(super) struct Planner<'a> {
     call_depth: u32,
     limit: Option<ToolLimit>,
     planned: BTreeSet<PlannedCall>,
+    witness_store: WitnessStore,
 }
 
 impl<'a> Planner<'a> {
@@ -32,6 +33,7 @@ impl<'a> Planner<'a> {
             call_depth: 0,
             limit: None,
             planned: BTreeSet::new(),
+            witness_store: WitnessStore::default(),
         }
     }
 
@@ -56,7 +58,7 @@ impl<'a> Planner<'a> {
             declaration,
             witnesses: witnesses
                 .iter()
-                .map(|(slot, value)| (*slot, value.clone()))
+                .map(|(slot, value)| (*slot, *value))
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
         };
@@ -164,6 +166,16 @@ impl<'a> Planner<'a> {
             }
             ExprKind::Member { receiver, .. } => {
                 let key = ExpressionKey::new(module, expression);
+                if matches!(
+                    self.view
+                        .program
+                        .resolution()
+                        .body_types()
+                        .callable_value(key),
+                    FactState::Known(_)
+                ) {
+                    return self.plan_callable_value(key, witnesses);
+                }
                 let FactState::Known(member) =
                     self.view.program.resolution().body_types().member(key)
                 else {
@@ -206,6 +218,16 @@ impl<'a> Planner<'a> {
                     FactState::Known(ResolvedName::Local(_)) => Ok(()),
                     FactState::Known(ResolvedName::Declarations(_)) => {
                         let key = ExpressionKey::new(module, expression);
+                        if matches!(
+                            self.view
+                                .program
+                                .resolution()
+                                .body_types()
+                                .callable_value(key),
+                            FactState::Known(_)
+                        ) {
+                            return self.plan_callable_value(key, witnesses);
+                        }
                         let FactState::Known(typed) =
                             self.view.program.resolution().body_types().expression(key)
                         else {
@@ -227,11 +249,12 @@ impl<'a> Planner<'a> {
                         };
                         Err(SupportReason::Feature(feature))
                     }
-                    FactState::Poisoned(_) | FactState::Unperformed | FactState::NotApplicable => {
-                        Err(SupportReason::Feature(
-                            UnsupportedFeature::InvalidCheckedProgram,
-                        ))
-                    }
+                    FactState::Known(ResolvedName::TypeMemberOwner(_))
+                    | FactState::Poisoned(_)
+                    | FactState::Unperformed
+                    | FactState::NotApplicable => Err(SupportReason::Feature(
+                        UnsupportedFeature::InvalidCheckedProgram,
+                    )),
                 }
             }
             ExprKind::Unit => Ok(()),
@@ -529,6 +552,29 @@ impl<'a> Planner<'a> {
                 .ok_or(SupportReason::Feature(
                     UnsupportedFeature::InvalidCheckedProgram,
                 ))?;
+        if let CheckedInvocation::Indirect { callee, ty } = checked {
+            if !matches!(invocation.target(), InvocationTarget::CallableValue { callee: found, ty: found_ty } if found == callee && found_ty == ty)
+            {
+                return Err(SupportReason::Feature(
+                    UnsupportedFeature::InvalidCheckedProgram,
+                ));
+            }
+            self.plan_expr(module, *callee, witnesses)?;
+            for argument in invocation.evaluation_order() {
+                if argument.passing() != ArgumentPassing::Value {
+                    self.require(ExecutionCapability::ReferencesAndMutation)?;
+                }
+                self.plan_expr(module, argument.expression(), witnesses)?;
+            }
+            return Ok(());
+        }
+        let CheckedInvocation::Static {
+            dispatch,
+            evidence_environment,
+        } = checked
+        else {
+            unreachable!()
+        };
         for argument in invocation.evaluation_order() {
             if argument.passing() != ArgumentPassing::Value {
                 self.require(ExecutionCapability::ReferencesAndMutation)?;
@@ -540,49 +586,155 @@ impl<'a> Planner<'a> {
         ))?;
         let environment =
             evidence
-                .environment(checked.evidence_environment())
+                .environment(*evidence_environment)
                 .ok_or(SupportReason::Feature(
                     UnsupportedFeature::InvalidCheckedProgram,
                 ))?;
-        let child = child_witnesses(environment, witnesses).ok_or(SupportReason::Feature(
-            UnsupportedFeature::InvalidCheckedProgram,
-        ))?;
+        let child = self
+            .witness_store
+            .child_witnesses(evidence, environment, witnesses)
+            .ok_or(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ))?;
         match invocation.target() {
+            InvocationTarget::CallableValue { .. } => Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            )),
             InvocationTarget::TensorConstructor { .. } => {
                 Err(SupportReason::Feature(UnsupportedFeature::Tensor))
             }
             InvocationTarget::Constructor { declaration, .. } => {
-                self.plan_constructor(declaration, checked.dispatch())
+                self.plan_public_arguments(module, invocation.arguments())?;
+                self.plan_constructor(declaration, dispatch)
             }
             InvocationTarget::Callable(_) => {
-                let direct_target = self.dispatch_target(checked.dispatch(), witnesses)?;
+                let selected = self
+                    .view
+                    .selected_call(dispatch, witnesses, &mut self.witness_store)
+                    .ok_or(SupportReason::Feature(
+                        UnsupportedFeature::InvalidCheckedProgram,
+                    ))?;
                 let adapter = self
                     .view
                     .trait_adapter_dispatch(
-                        &direct_target,
+                        &selected.target,
                         module,
                         invocation.arguments(),
                         environment,
                         witnesses,
+                        &mut self.witness_store,
                     )
                     .map_err(|_| {
                         SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram)
                     })?;
-                let target = if let Some(adapter) = adapter {
+                let selected = if let Some(adapter) = adapter {
                     if adapter.borrow_argument.is_some() {
                         self.require(ExecutionCapability::ReferencesAndMutation)?;
                     }
-                    adapter.target
+                    adapter.selected
                 } else {
-                    direct_target
+                    selected
                 };
-                match target {
-                    CanonicalTarget::Source(declaration) => self.plan_callable(declaration, &child),
+                match &selected.target {
+                    CanonicalTarget::Source(declaration) => {
+                        let frame = if selected.method.is_some() {
+                            self.witness_store
+                                .method_frame(evidence, &selected, environment, witnesses)
+                                .ok_or(SupportReason::Feature(
+                                    UnsupportedFeature::InvalidCheckedProgram,
+                                ))?
+                        } else {
+                            child
+                        };
+                        self.plan_callable(*declaration, &frame)
+                    }
                     CanonicalTarget::External(declaration) => {
-                        let hook = self.plan_hook(&declaration)?;
-                        self.plan_hook_arguments(hook, &declaration, invocation.arguments())
+                        let hook = self.plan_hook(declaration)?;
+                        self.plan_hook_arguments(hook, declaration, module, invocation.arguments())
                     }
                 }
+            }
+        }
+    }
+
+    fn plan_callable_value(
+        &mut self,
+        key: ExpressionKey,
+        witnesses: &Witnesses,
+    ) -> Result<(), SupportReason> {
+        self.require(ExecutionCapability::Calls)?;
+        let evidence = self.view.trait_evidence().ok_or(SupportReason::Feature(
+            UnsupportedFeature::InvalidCheckedProgram,
+        ))?;
+        let FactState::Known(checked) = evidence.callable_value(key) else {
+            return Err(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ));
+        };
+        let environment =
+            evidence
+                .environment(checked.evidence_environment())
+                .ok_or(SupportReason::Feature(
+                    UnsupportedFeature::InvalidCheckedProgram,
+                ))?;
+        let selected = self
+            .view
+            .selected_call(checked.dispatch(), witnesses, &mut self.witness_store)
+            .ok_or(SupportReason::Feature(
+                UnsupportedFeature::InvalidCheckedProgram,
+            ))?;
+        let adapter = self
+            .view
+            .trait_adapter_value_dispatch(
+                &selected.target,
+                key,
+                environment,
+                witnesses,
+                &mut self.witness_store,
+            )
+            .map_err(|_| SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram))?;
+        let selected = if let Some(adapter) = adapter {
+            if adapter.borrow_argument.is_some() {
+                self.require(ExecutionCapability::ReferencesAndMutation)?;
+            }
+            adapter.selected
+        } else {
+            selected
+        };
+        match &selected.target {
+            CanonicalTarget::Source(declaration) => {
+                let frame = if selected.method.is_some() {
+                    self.witness_store
+                        .method_frame(evidence, &selected, environment, witnesses)
+                        .ok_or(SupportReason::Feature(
+                            UnsupportedFeature::InvalidCheckedProgram,
+                        ))?
+                } else {
+                    self.witness_store
+                        .child_witnesses(evidence, environment, witnesses)
+                        .ok_or(SupportReason::Feature(
+                            UnsupportedFeature::InvalidCheckedProgram,
+                        ))?
+                };
+                self.plan_callable(*declaration, &frame)
+            }
+            CanonicalTarget::External(declaration) => {
+                let signature = self.view.callable_signature(&selected.target).ok_or(
+                    SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram),
+                )?;
+                let types = self.view.program.resolution().signatures().types();
+                for parameter in signature.parameters() {
+                    if has_direct_callable_payload(types, parameter.ty()).map_err(|_| {
+                        SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram)
+                    })? {
+                        return Err(SupportReason::Feature(UnsupportedFeature::FunctionValue));
+                    }
+                }
+                let hook = self.plan_hook(declaration)?;
+                if hook == RuntimeHook::ToStr {
+                    self.plan_to_str_hook_subject(declaration)?;
+                }
+                Ok(())
             }
         }
     }
@@ -616,8 +768,10 @@ impl<'a> Planner<'a> {
         &self,
         hook: RuntimeHook,
         declaration: &ExternalDefId,
+        module: ModuleId,
         arguments: &[InvocationArgument],
     ) -> Result<(), SupportReason> {
+        self.plan_public_arguments(module, arguments)?;
         if hook != RuntimeHook::ToStr {
             return Ok(());
         }
@@ -626,6 +780,10 @@ impl<'a> Planner<'a> {
                 UnsupportedFeature::InvalidCheckedProgram,
             ));
         }
+        self.plan_to_str_hook_subject(declaration)
+    }
+
+    fn plan_to_str_hook_subject(&self, declaration: &ExternalDefId) -> Result<(), SupportReason> {
         let signature = self
             .view
             .callable_signature(&CanonicalTarget::External(declaration.clone()))
@@ -670,30 +828,60 @@ impl<'a> Planner<'a> {
         }
     }
 
-    fn dispatch_target(
+    fn plan_public_arguments(
         &self,
-        dispatch: &CheckedDispatch,
-        witnesses: &Witnesses,
-    ) -> Result<CanonicalTarget, SupportReason> {
-        match dispatch {
-            CheckedDispatch::Direct(target) => Ok(target.clone()),
-            CheckedDispatch::ImplTemplate { callable, .. } => Ok(callable.clone()),
-            CheckedDispatch::Bound { witness, method } => {
-                let evidence = witnesses.get(witness).ok_or(SupportReason::Feature(
+        module: ModuleId,
+        arguments: &[InvocationArgument],
+    ) -> Result<(), SupportReason> {
+        let resolution = self.view.program.resolution();
+        let types = resolution.signatures().types();
+        for argument in arguments {
+            let FactState::Known(typed) = resolution
+                .body_types()
+                .expression(ExpressionKey::new(module, argument.expression()))
+            else {
+                return Err(SupportReason::Feature(
                     UnsupportedFeature::InvalidCheckedProgram,
-                ))?;
-                self.view
-                    .program
-                    .resolution()
-                    .trait_environment()
-                    .checked_impl_method(&evidence.implementation, method)
-                    .cloned()
-                    .ok_or(SupportReason::Feature(
-                        UnsupportedFeature::InvalidCheckedProgram,
-                    ))
+                ));
+            };
+            if has_direct_callable_payload(types, typed.ty())
+                .map_err(|_| SupportReason::Feature(UnsupportedFeature::InvalidCheckedProgram))?
+            {
+                return Err(SupportReason::Feature(UnsupportedFeature::FunctionValue));
             }
         }
+        Ok(())
     }
+}
+
+fn has_direct_callable_payload(
+    types: &CanonicalTypeStore,
+    root: TypeId,
+) -> Result<bool, TypeStoreError> {
+    let mut pending = vec![root];
+    let mut visited = BTreeSet::new();
+    while let Some(current) = pending.pop() {
+        if !visited.insert(current) {
+            continue;
+        }
+        match types.kind(current)? {
+            TypeKind::Callable { .. } => return Ok(true),
+            TypeKind::Tuple(elements) | TypeKind::ErrorUnion(elements) => {
+                pending.extend(elements.iter().copied());
+            }
+            TypeKind::Reference { referent, .. } | TypeKind::RawPointer { referent, .. } => {
+                pending.push(*referent);
+            }
+            // Nominal type arguments are not necessarily stored; constructors check their fields.
+            TypeKind::Never
+            | TypeKind::Primitive(_)
+            | TypeKind::Nominal { .. }
+            | TypeKind::GenericParameter(_)
+            | TypeKind::SelfType(_)
+            | TypeKind::AssociatedProjection(_) => {}
+        }
+    }
+    Ok(false)
 }
 
 fn supports_local_tuple_type(
@@ -729,9 +917,11 @@ fn supports_local_tuple_type(
 
 #[cfg(test)]
 mod tests {
-    use eglur_sema::{CanonicalTypeStore, PrimitiveType, ReferenceMutability};
+    use eglur_sema::{
+        CanonicalTypeStore, IntrinsicNominal, NominalHead, PrimitiveType, ReferenceMutability,
+    };
 
-    use super::supports_local_tuple_type;
+    use super::{has_direct_callable_payload, supports_local_tuple_type};
 
     #[test]
     fn reference_tuple_shape_is_closed_over_references_and_tuples_only() {
@@ -747,5 +937,20 @@ mod tests {
         let callable = types.callable([reference], integer).unwrap();
         let unsupported = types.tuple([reference, callable]).unwrap();
         assert!(!supports_local_tuple_type(&types, unsupported).unwrap());
+    }
+
+    #[test]
+    fn direct_callable_payload_check_does_not_assume_nominal_type_arguments_are_stored() {
+        let mut types = CanonicalTypeStore::new().unwrap();
+        let string = types.primitive(PrimitiveType::Str).unwrap();
+        let callable = types.callable([string], string).unwrap();
+        let tuple = types.tuple([string, callable]).unwrap();
+        let optional = types
+            .nominal(NominalHead::Intrinsic(IntrinsicNominal::Opt), [callable])
+            .unwrap();
+
+        assert!(has_direct_callable_payload(&types, callable).unwrap());
+        assert!(has_direct_callable_payload(&types, tuple).unwrap());
+        assert!(!has_direct_callable_payload(&types, optional).unwrap());
     }
 }

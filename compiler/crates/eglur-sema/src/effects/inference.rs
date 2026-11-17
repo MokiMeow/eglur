@@ -398,40 +398,41 @@ fn summarize_body(
 ) -> Result<SummaryOutcome, EffectAnalysisError> {
     let mut summary = EffectSummary::pure();
     for operation in body.operations() {
-        let contribution = match operation {
-            EffectOperation::Mutation(mutation) => mutation_summary(mutation.path()),
-            EffectOperation::Call(call) => {
-                let callee = match call.dispatch() {
-                    EffectDispatch::Constructor => SummaryOutcome::Known(EffectSummary::pure()),
-                    EffectDispatch::BoundRequirement { .. } if call.is_bang() => {
-                        SummaryOutcome::Known(EffectSummary::Unknown)
+        let contribution =
+            match operation {
+                EffectOperation::Mutation(mutation) => mutation_summary(mutation.path()),
+                EffectOperation::Call(call) => {
+                    let callee =
+                        match call.dispatch() {
+                            EffectDispatch::Constructor | EffectDispatch::CallableValue => {
+                                SummaryOutcome::Known(EffectSummary::pure())
+                            }
+                            EffectDispatch::BoundRequirement { .. } if call.is_bang() => {
+                                SummaryOutcome::Known(EffectSummary::Unknown)
+                            }
+                            EffectDispatch::BoundRequirement { .. } => {
+                                SummaryOutcome::Known(EffectSummary::pure())
+                            }
+                            EffectDispatch::Target(CanonicalTarget::Source(declaration))
+                                if component.contains(declaration) =>
+                            {
+                                SummaryOutcome::Known(current.get(declaration).cloned().ok_or(
+                                    EffectAnalysisError::MissingCurrentSummary(*declaration),
+                                )?)
+                            }
+                            EffectDispatch::Target(target) => solved
+                                .get(target)
+                                .map(SolvedFact::as_outcome)
+                                .unwrap_or(SummaryOutcome::Unperformed),
+                        };
+                    match callee {
+                        SummaryOutcome::Known(summary) => {
+                            SummaryOutcome::Known(transfer_call(&summary, call.mutable_paths()))
+                        }
+                        blocked => blocked,
                     }
-                    EffectDispatch::BoundRequirement { .. } => {
-                        SummaryOutcome::Known(EffectSummary::pure())
-                    }
-                    EffectDispatch::Target(CanonicalTarget::Source(declaration))
-                        if component.contains(declaration) =>
-                    {
-                        SummaryOutcome::Known(
-                            current
-                                .get(declaration)
-                                .cloned()
-                                .ok_or(EffectAnalysisError::MissingCurrentSummary(*declaration))?,
-                        )
-                    }
-                    EffectDispatch::Target(target) => solved
-                        .get(target)
-                        .map(SolvedFact::as_outcome)
-                        .unwrap_or(SummaryOutcome::Unperformed),
-                };
-                match callee {
-                    SummaryOutcome::Known(summary) => {
-                        SummaryOutcome::Known(transfer_call(&summary, call.mutable_paths()))
-                    }
-                    blocked => blocked,
                 }
-            }
-        };
+            };
         match contribution {
             SummaryOutcome::Known(contribution) => summary = summary.join(&contribution),
             SummaryOutcome::Poisoned(poison) => return Ok(SummaryOutcome::Poisoned(poison)),

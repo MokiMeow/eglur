@@ -505,6 +505,25 @@ codes:
       - actual_type
       - expected_family
       - candidates
+  CALLABLE_VALUE_NO_MATCH:
+    severity: error
+    message:
+      all_of:
+      - callable
+      - value
+      - no matching candidate
+      any_of: []
+      templates: []
+      contextual: []
+    data:
+      required:
+      - expected_type
+      - candidates
+      required_if_emitted: []
+      conditional_required: []
+      exact_value_keys:
+      - expected_type
+      - candidates
   CALL_DUPLICATE_NAMED_ARG:
     severity: error
     message:

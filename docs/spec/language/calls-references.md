@@ -61,6 +61,7 @@ Assignable target semantics:
 ### Named and Trailing Arguments
 
 v0.1 call surface includes positional arguments, named arguments, and trailing closure arguments.
+Named argument availability depends on the callee's exposed parameter names; calls through `Fn` values follow the restriction in Callable Type Compatibility Rule 9.
 
 Rules:
 
@@ -231,13 +232,19 @@ Rules:
    3. its result type is assignable to `R`,
    4. invoking it does not require an effectful/bang callable.
 3. A named non-bang function value is compatible with `Fn(P0, ..., Pn) -> R` when Rule 2 holds after overload resolution and generic instantiation.
-   If an overload set is used as a function value, expected `Fn` type context MUST select exactly one compatible overload; multiple compatible overloads fail with `OVERLOAD_AMBIGUOUS`, and no compatible overload fails with `CALL_ARG_TYPE_MISMATCH` when the value appears as a bound call argument.
+   If an overload set is used as a function value, expected `Fn` type context MUST select exactly one compatible overload. Multiple compatible overloads fail with `OVERLOAD_AMBIGUOUS`; no compatible overload fails with `CALLABLE_VALUE_NO_MATCH`, including when the value appears as a bound call argument.
    Callable-value selection uses the complete assignability relation from
    Rule 2, including `Res` error-union assignability. Declaration-time overload
    disjointness uses exact call applicability instead, so a legal overload set
    can still contain multiple members compatible with one expected `Fn`; that
    coercion fails with `OVERLOAD_AMBIGUOUS`.
-   Generic instantiation from expected `Fn` context MUST also satisfy every declared trait bound; a structurally selected generic function whose inferred argument fails a bound MUST fail with `TRAIT_BOUND_NOT_SATISFIED`.
+   Declared trait bounds MUST NOT remove or rank candidates whose instantiated
+   callable types satisfy Rule 2. If multiple such candidates remain, coercion
+   MUST fail with `OVERLOAD_AMBIGUOUS` even when an inferred type argument of
+   one candidate would fail its bound. Only after exactly one compatible
+   candidate remains are its declared bounds checked. A bound failure on that
+   selected candidate MUST fail with `TRAIT_BOUND_NOT_SATISFIED`; it MUST NOT
+   fall back to another overload.
    A generic named function is monomorphized at this coercion and does not create a polymorphic function value. If no expected `Fn` type fully determines its type arguments, the function-value expression MUST fail with `TYPE_ARG_INFERENCE_FAILED`.
    An expected `Fn` component matched only against a projection such as `T::Item` does not determine `T`. Because a standalone function-value specialization expression such as `f::[Concrete]` without a call is outside v0.1, a projection-only generic parameter can participate in an immediate explicitly typed call but cannot be specialized into a function value without another non-projected position that determines it.
    A fully qualified non-bang trait method reference is a named function value
@@ -262,7 +269,9 @@ Rules:
 7. If callable compatibility fails because of arity, parameter type, or result type at a call argument binding, compilation MUST fail with `CALL_ARG_TYPE_MISMATCH` unless a more specific diagnostic from this section applies.
 8. A `Fn(...) -> ...` value is an escaping value when it is assigned to a `Fn`-typed binding, returned, stored, or passed as an argument.
    Capturing an explicit reference inside a closure or partial application that becomes such an escaping `Fn` value MUST fail with `REF_ESCAPE_FORBIDDEN`.
-9. Calling a value whose static type is `Fn(P0, ..., Pn) -> R` follows ordinary call argument typing rules from `type-system.md`.
+9. Calling a value whose static type is `Fn(P0, ..., Pn) -> R` follows ordinary positional call argument typing rules from `type-system.md`.
+   `Fn` types do not expose parameter names, so any named argument in such a call MUST fail with `CALL_UNKNOWN_NAMED_ARG`, even if the value's underlying function declaration has a parameter with that spelling.
+   Calling a function declaration directly retains its named-call surface.
 10. v0.1 bang APIs that accept effectful callbacks MUST specify those callback contracts directly in their API rules; they are not expressed as a surface `Fn!` type.
 11. A closure or partial application that captures an ownership root or a reference derived from one is an ownership-capable callable value and MUST fail with `OWNERSHIP_TYPE_POSITION_FORBIDDEN` under `ownership-boundary.md`.
 12. Rule 11 takes precedence over `REF_ESCAPE_FORBIDDEN` when the same capture is both ownership-bearing and reference-escaping.

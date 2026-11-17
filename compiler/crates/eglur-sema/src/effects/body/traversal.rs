@@ -148,8 +148,19 @@ impl BodyCollector<'_> {
                 );
                 pending.push(Step::Expression(call.callee));
             }
-            ExprKind::Member { receiver, .. } | ExprKind::TupleProjection { receiver, .. } => {
-                pending.push(Step::Expression(*receiver))
+            ExprKind::Member { receiver, .. } => {
+                if !matches!(
+                    self.names.fact(ResolutionKey::Expression {
+                        module: self.module,
+                        expression: id,
+                    }),
+                    FactState::Known(ResolvedName::TypeMemberOwner(_))
+                ) {
+                    pending.push(Step::Expression(*receiver));
+                }
+            }
+            ExprKind::TupleProjection { receiver, .. } => {
+                pending.push(Step::Expression(*receiver));
             }
             ExprKind::ReduceByCandidate(candidate) => {
                 match self

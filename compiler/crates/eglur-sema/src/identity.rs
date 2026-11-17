@@ -33,6 +33,7 @@ graph_id!(SubstId);
 graph_id!(CallableSignatureId);
 graph_id!(CallableInstanceId);
 graph_id!(EvidenceEnvironmentId);
+graph_id!(EvidenceProofId);
 
 /// One declaration identity within a compilation graph.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

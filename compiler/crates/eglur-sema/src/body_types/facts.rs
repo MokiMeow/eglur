@@ -188,6 +188,10 @@ impl CallableInstance {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InvocationTarget {
     Callable(CallableInstanceId),
+    CallableValue {
+        callee: ExprId,
+        ty: TypeId,
+    },
     TensorConstructor {
         declaration: CanonicalTarget,
         constructor: crate::TensorSourceConstructor,
@@ -282,10 +286,11 @@ impl InvocationFact {
 /// First-order trait proof request emitted only after complete local inference.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PendingTraitObligation {
-    pub(super) invocation: ExpressionKey,
+    pub(super) site: ExpressionKey,
     pub(super) owner: DefId,
     pub(super) location: SemanticLocation,
     pub(super) parameter: GenericParameterId,
+    pub(super) bound_index: usize,
     pub(super) subject: TypeId,
     pub(super) trait_ref: TraitRef,
     pub(super) destination: Option<WitnessSlotId>,
@@ -293,8 +298,8 @@ pub struct PendingTraitObligation {
 
 impl PendingTraitObligation {
     #[must_use]
-    pub const fn invocation(&self) -> ExpressionKey {
-        self.invocation
+    pub const fn site(&self) -> ExpressionKey {
+        self.site
     }
 
     #[must_use]
@@ -310,6 +315,11 @@ impl PendingTraitObligation {
     #[must_use]
     pub const fn parameter(&self) -> &GenericParameterId {
         &self.parameter
+    }
+
+    #[must_use]
+    pub const fn bound_index(&self) -> usize {
+        self.bound_index
     }
 
     #[must_use]
@@ -330,9 +340,25 @@ impl PendingTraitObligation {
 }
 
 /// Trait-method target selected during body typing and proved after the body.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MethodDispatchSite {
+    Invocation(ExpressionKey),
+    CallableValue(ExpressionKey),
+}
+
+impl MethodDispatchSite {
+    #[must_use]
+    pub const fn key(self) -> ExpressionKey {
+        match self {
+            Self::Invocation(key) | Self::CallableValue(key) => key,
+        }
+    }
+}
+
+/// Trait-method target selected during body typing and proved after the body.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PendingMethodDispatch {
-    pub(super) invocation: ExpressionKey,
+    pub(super) site: MethodDispatchSite,
     pub(super) owner: DefId,
     pub(super) location: SemanticLocation,
     pub(super) subject: TypeId,
@@ -342,8 +368,8 @@ pub struct PendingMethodDispatch {
 
 impl PendingMethodDispatch {
     #[must_use]
-    pub const fn invocation(&self) -> ExpressionKey {
-        self.invocation
+    pub const fn site(&self) -> MethodDispatchSite {
+        self.site
     }
 
     #[must_use]
@@ -399,6 +425,7 @@ pub struct BodyTypes {
     pub(super) locals: FactTable<LocalBindingId, LocalTypeFact>,
     pub(super) members: FactTable<ExpressionKey, MemberAccess>,
     pub(super) invocations: FactTable<ExpressionKey, InvocationFact>,
+    pub(super) callable_values: FactTable<ExpressionKey, CallableInstanceId>,
     pub(super) reduce_by_commitments: FactTable<ExpressionKey, ReduceByCommitment>,
     pub(super) regions: FactTable<ControlRegionKey, ControlRegion>,
     pub(super) checked_numeric: FactTable<ExpressionKey, CheckedNumericOperation>,
@@ -443,6 +470,22 @@ impl BodyTypes {
     #[must_use]
     pub fn invocation(&self, key: ExpressionKey) -> FactState<'_, InvocationFact> {
         self.invocations.state(&key)
+    }
+
+    #[must_use]
+    pub fn callable_value(&self, key: ExpressionKey) -> FactState<'_, CallableInstanceId> {
+        self.callable_values.state(&key)
+    }
+
+    pub fn callable_values(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (ExpressionKey, CallableInstanceId)> + '_ {
+        self.callable_values.iter().map(|(key, fact)| match fact {
+            SemanticFact::Known(instance) => (*key, *instance),
+            SemanticFact::Poisoned(_) | SemanticFact::NotApplicable => {
+                unreachable!("callable values are recorded only after static selection")
+            }
+        })
     }
 
     #[must_use]
@@ -541,6 +584,7 @@ impl BodyTypes {
             + self.locals.iter().len()
             + self.members.iter().len()
             + self.invocations.iter().len()
+            + self.callable_values.iter().len()
             + self.reduce_by_commitments.iter().len()
             + self.regions.iter().len()
             + self.checked_numeric.iter().len()
@@ -557,6 +601,7 @@ impl BodyTypes {
             || self.locals.has_poisoned()
             || self.members.has_poisoned()
             || self.invocations.has_poisoned()
+            || self.callable_values.has_poisoned()
             || self.reduce_by_commitments.has_poisoned()
             || self.regions.has_poisoned()
             || self.checked_numeric.has_poisoned()

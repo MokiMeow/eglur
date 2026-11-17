@@ -256,6 +256,44 @@
       },
       "origin": {
         "kind": "file_conformance",
+        "path": "app/main.eglur",
+        "suite_id": "core-modules",
+        "test_id": "MOD-alias-qualified-private-inherent-method-is-rejected"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "module app::main\nimport app::model::Alias\nimport app::model::make\n\nfn main!() -> Res[Str, Str] {\n  let value = make()\n  yield Ok(to_str(Alias.hidden(&value))) // @primary private-alias-qualified-method\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "file_conformance",
+        "path": "app/model.eglur",
+        "suite_id": "core-modules",
+        "test_id": "MOD-alias-qualified-private-inherent-method-is-rejected"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "module app::model\n\npub struct Count {\n  fn hidden(self: &Self) -> i64 = 7\n}\npub type Alias = Count\npub fn make() -> Count = Count{}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "file_conformance",
         "path": "src/main.eglur",
         "suite_id": "core-modules",
         "test_id": "MOD-backslash-manifest-dependency-path-is-invalid"
@@ -4140,6 +4178,63 @@
       "source": {
         "kind": "utf8",
         "text": "module main\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "file_conformance",
+        "path": "app/bridge.eglur",
+        "suite_id": "core-modules",
+        "test_id": "MOD-reexported-transparent-alias-qualifies-public-inherent-method"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "module app::bridge\npub import app::model::IntBox\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "file_conformance",
+        "path": "app/main.eglur",
+        "suite_id": "core-modules",
+        "test_id": "MOD-reexported-transparent-alias-qualifies-public-inherent-method"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "module app::main\nimport app::bridge::IntBox\nimport app::model::make\n\nfn main!() -> Res[Str, Str] {\n  let value = make()\n  let read: Fn(&IntBox) -> i64 = IntBox.read\n  yield Ok(to_str(wrapping_add(IntBox.read(&value), read(&value))))\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "file_conformance",
+        "path": "app/model.eglur",
+        "suite_id": "core-modules",
+        "test_id": "MOD-reexported-transparent-alias-qualifies-public-inherent-method"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "module app::model\n\npub struct Boxed[T] {\n  field value: T\n  pub fn read(self: &Self) -> T = self.value\n}\npub type IntBox = Boxed[i64]\npub fn make() -> IntBox = Boxed{ value: 7 }\n"
       }
     },
     {
@@ -20466,6 +20561,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-traits",
+        "test_id": "TRT-concrete-alias-does-not-qualify-trait-impl-method"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Rank { fn rank(self: &Self) -> i64 }\nstruct Count {}\ntype Alias = Count\nimpl Rank for Count { fn rank(self: &Self) -> i64 = 1 }\n\nfn wrong(value: &Alias) -> i64 = Alias.rank(value)\nfn main!() -> Res[Str, Str] { yield Ok(\"unreachable\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-traits",
         "test_id": "TRT-default-body-assumes-exact-current-trait-through-generic-helper"
       },
       "public_examples": [],
@@ -24516,6 +24629,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-expected-fn-bound-failure-does-not-prune-compatible-overload"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "trait Mark {}\nstruct Plain {}\nstruct NarrowError {}\nstruct OtherError {}\n\noverload fn inspect[T: Mark](_value: Res[T, NarrowError]) -> i64 = 1\noverload fn inspect(_value: Res[Plain, Union[NarrowError, OtherError]]) -> i64 = 2\n\nfn accept(_f: Fn(Res[Plain, NarrowError]) -> i64) -> Unit = ()\n\nfn main!() -> Res[Str, Str] {\n  _ = accept(inspect)\n  yield Ok(\"unreachable\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-expected-fn-cannot-instantiate-generic-with-reference"
       },
       "public_examples": [],
@@ -24540,6 +24671,24 @@
       "source": {
         "kind": "utf8",
         "text": "trait Mark {\n  fn mark(self: &Self) -> i64\n}\n\nstruct Plain {}\n\nfn bounded[T: Mark](x: T) -> i64 = x.mark()\n\nfn run(f: Fn(Plain) -> i64) -> i64 {\n  yield f(Plain{})\n}\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(to_str(run(bounded)))\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-expected-fn-overload-value-without-compatible-candidate"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "overload fn identity(value: i64) -> i64 = value\noverload fn identity(value: Str) -> Str = value\n\nfn accept(f: Fn(Bool) -> Bool) -> Unit = ()\n\nfn main!() -> Res[Str, Str] {\n  _ = accept(identity)\n  yield Ok(\"unreachable\")\n}\n"
       }
     },
     {
@@ -25272,6 +25421,42 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-fixed-alias-owner-rejects-different-call-receiver"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Boxed[T] {\n  field value: T\n  fn read(self: &Self) -> T = self.value\n}\ntype IntBox = Boxed[i64]\n\nfn wrong(value: &Boxed[Str]) -> Str = IntBox.read(value)\nfn main!() -> Res[Str, Str] { yield Ok(\"unreachable\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-fixed-alias-owner-rejects-different-fn-receiver"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Boxed[T] {\n  field value: T\n  fn read(self: &Self) -> T = self.value\n}\ntype IntBox = Boxed[i64]\n\nfn accept(f: Fn(&Boxed[Str]) -> Str) -> Unit = ()\nfn wrong() -> Unit = accept(IntBox.read)\nfn main!() -> Res[Str, Str] { yield Ok(\"unreachable\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-floating-comparison-orders-0-0-before-0-0"
       },
       "public_examples": [],
@@ -25452,6 +25637,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-fn-value-call-rejects-underlying-declaration-name"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "fn identity(value: i64) -> i64 = value\n\nfn main!() -> Res[Str, Str] {\n  let f: Fn(i64) -> i64 = identity\n  _ = f(value=1)\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-for-binder-and-body-shadowing-have-nested-scopes"
       },
       "public_examples": [],
@@ -25476,6 +25679,24 @@
       "source": {
         "kind": "utf8",
         "text": "fn main!() -> Res[Str, Str] {\n  for item in [1] {\n    _ = item\n  }\n  yield Ok(to_str(item)) // @primary escaped-for-binder\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-fully-applied-alias-qualifies-inherent-call-and-fn-value"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Boxed[T] {\n  field value: T\n  fn read(self: &Self) -> T = self.value\n}\ntype IntBox = Boxed[i64]\ntype Alias = IntBox\n\nfn main!() -> Res[Str, Str] {\n  let value = Boxed{ value: 7 }\n  let read: Fn(&IntBox) -> i64 = Alias.read\n  let inferred = Alias.read\n  let pair = wrapping_add(IntBox.read(&value), read(&value))\n  yield Ok(to_str(wrapping_add(pair, inferred(&value))))\n}\n"
       }
     },
     {
@@ -27774,6 +27995,24 @@
       "origin": {
         "kind": "inline_conformance",
         "suite_id": "core-typecheck",
+        "test_id": "TYC-primitive-alias-has-no-inherent-method-owner"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "type Alias = i64\n\nfn wrong(value: Alias) -> i64 = Alias.read(value)\nfn main!() -> Res[Str, Str] { yield Ok(\"unreachable\") }\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
         "test_id": "TYC-processsnapshot-accessors-type-check-as-pure-views"
       },
       "public_examples": [],
@@ -29670,6 +29909,24 @@
       "source": {
         "kind": "utf8",
         "text": "type PtrSeq = Seq[*const u8]\n\nfn main!() -> Res[Str, Str] {\n  yield Ok(\"x\")\n}\n"
+      }
+    },
+    {
+      "entrypoint": "compilation_unit",
+      "expectation": {
+        "diagnostic_code": null,
+        "kind": "success",
+        "primary_span": null
+      },
+      "origin": {
+        "kind": "inline_conformance",
+        "suite_id": "core-typecheck",
+        "test_id": "TYC-unapplied-generic-alias-cannot-qualify-method"
+      },
+      "public_examples": [],
+      "source": {
+        "kind": "utf8",
+        "text": "struct Boxed[T] {\n  field value: T\n  fn read(self: &Self) -> T = self.value\n}\ntype Alias[T] = Boxed[T]\n\nfn wrong(value: &Boxed[i64]) -> i64 = Alias.read(value)\nfn main!() -> Res[Str, Str] { yield Ok(\"unreachable\") }\n"
       }
     },
     {
@@ -39004,6 +39261,6 @@
       }
     }
   ],
-  "input_digest": "sha256:3857ef96ef9252405b7b2fdef6687bf8577f44ff4fa1976a008e3fe248efbec2",
+  "input_digest": "sha256:e1c700a141c5d4b561eb6c3d80190f58e2caaca8df99995794bf79d7546b992f",
   "schema_version": "0.1"
 }

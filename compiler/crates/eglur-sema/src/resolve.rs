@@ -48,6 +48,7 @@ pub enum ResolutionKey {
 pub enum ResolvedName {
     Local(LocalBindingId),
     Declarations(Box<[CanonicalTarget]>),
+    TypeMemberOwner(CanonicalTarget),
 }
 
 /// One unqualified lookup retained until a contextual expression commits its meaning.
@@ -938,13 +939,30 @@ impl Resolver<'_, '_> {
         key: ResolutionKey,
         purpose: LookupPurpose,
     ) -> Result<VisitOutcome, NameResolutionError> {
+        let outcome = self.lookup_path(module, source, path, lookup, purpose)?;
+        self.record_fact(key, outcome.clone())?;
+        Ok(outcome)
+    }
+
+    fn lookup_path(
+        &mut self,
+        module: ModuleId,
+        source: &SemanticSource<'_>,
+        path: &Path,
+        lookup: PathLookup,
+        purpose: LookupPurpose,
+    ) -> Result<VisitOutcome, NameResolutionError> {
         if path.segments().len() == 1 {
-            return self.resolve_name(
+            let name = &path.segments()[0];
+            let Some(name_key) = NameKey::from_hir(name) else {
+                return self.invalid_outcome(source, name.origin());
+            };
+            return self.lookup_unqualified(
                 module,
                 source,
-                &path.segments()[0],
+                &name_key,
                 lookup.direct_namespace(),
-                key,
+                name.origin(),
                 purpose,
             );
         }
@@ -954,9 +972,7 @@ impl Resolver<'_, '_> {
             .map(NameKey::from_hir)
             .collect::<Option<Vec<_>>>()
         else {
-            let outcome = self.invalid_path_outcome(source, path)?;
-            self.record_fact(key, outcome.clone())?;
-            return Ok(outcome);
+            return self.invalid_path_outcome(source, path);
         };
         let capability = CompileCapability::Resolve(ResolveCapability::ResolveQualifiedValues);
         let location = SemanticLocation::origin(source.file(), path.origin());
@@ -983,14 +999,12 @@ impl Resolver<'_, '_> {
                     path.origin(),
                     purpose,
                 )?;
-                self.record_fact(key, outcome.clone())?;
                 return Ok(outcome);
             }
         }
 
         match self.lookup_external_module_path(source, &segments, lookup, path.origin(), purpose)? {
             ExternalModuleLookup::Matched(outcome) => {
-                self.record_fact(key, outcome.clone())?;
                 return Ok(outcome);
             }
             ExternalModuleLookup::NoModule => {}
@@ -1012,16 +1026,13 @@ impl Resolver<'_, '_> {
                 path.origin(),
                 purpose,
             )?;
-            self.record_fact(key, outcome.clone())?;
             return Ok(outcome);
         }
 
         let name = segments
             .last()
             .expect("qualified path contains at least two segments");
-        let outcome = self.not_found(source, name, path.origin(), purpose)?;
-        self.record_fact(key, outcome.clone())?;
-        Ok(outcome)
+        self.not_found(source, name, path.origin(), purpose)
     }
 
     fn lookup_unqualified(
@@ -1299,6 +1310,7 @@ impl Resolver<'_, '_> {
                 })
             }
             NameLookupDecision::Resolved(ResolvedName::Local(_))
+            | NameLookupDecision::Resolved(ResolvedName::TypeMemberOwner(_))
             | NameLookupDecision::NotApplicable
             | NameLookupDecision::NotFound => false,
             NameLookupDecision::Poisoned(_)
@@ -1587,7 +1599,7 @@ impl Resolver<'_, '_> {
             span,
             name,
             decision,
-            purpose == LookupPurpose::AssignmentTarget,
+            purpose.suppresses_not_found(),
         )? {
             NameLookupMaterialization::Resolved(resolution) => {
                 Ok(VisitOutcome::Resolved(resolution))
@@ -1634,7 +1646,7 @@ impl Resolver<'_, '_> {
         origin: OriginId,
         purpose: LookupPurpose,
     ) -> Result<VisitOutcome, NameResolutionError> {
-        if purpose == LookupPurpose::AssignmentTarget {
+        if purpose.suppresses_not_found() {
             return Ok(VisitOutcome::NotApplicable);
         }
         let poison = record_name_not_found(
@@ -2256,6 +2268,13 @@ struct BindingCollision {
 enum LookupPurpose {
     Ordinary,
     AssignmentTarget,
+    Probe,
+}
+
+impl LookupPurpose {
+    const fn suppresses_not_found(self) -> bool {
+        !matches!(self, Self::Ordinary)
+    }
 }
 
 #[derive(Clone, Copy)]

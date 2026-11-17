@@ -193,6 +193,9 @@ impl Parser<'_> {
                 Some(self.complete(name, SyntaxKind::NameExpr))
             }
             Some(TokenKind::Underscore) => {
+                if let Some(seen) = &mut self.placeholder_hole {
+                    *seen = true;
+                }
                 let hole = self.start();
                 self.bump();
                 Some(self.complete(hole, SyntaxKind::HoleExpr))
@@ -200,10 +203,10 @@ impl Parser<'_> {
             Some(TokenKind::LeftParen) => self.parse_parenthesized_expression(),
             Some(TokenKind::LeftBracket) => self.parse_bracket_collection_expression(),
             Some(TokenKind::LeftBrace) => {
-                if self.brace_looks_like_lambda() {
+                if self.nth_at(1, TokenKind::LogicalOr) || self.nth_at(1, TokenKind::Pipe) {
                     self.parse_lambda_expression()
                 } else {
-                    self.parse_block_expression()
+                    self.parse_bare_brace_expression()
                 }
             }
             Some(TokenKind::IfKw) => self.parse_if_expression(),
@@ -240,7 +243,7 @@ impl Parser<'_> {
 
         if self.at(TokenKind::LeftBrace)
             && allow_outer_brace_suffix
-            && !self.brace_looks_like_lambda()
+            && self.brace_is_named_payload()
         {
             completed = self.parse_braced_literal(completed, qualified);
         } else if qualified && self.at(TokenKind::LeftParen) {
@@ -545,6 +548,48 @@ impl Parser<'_> {
             return Some(self.complete(block, SyntaxKind::BlockExpr));
         }
         self.skip_newlines();
+        self.parse_block_statements();
+        self.expect_closing(TokenKind::RightBrace);
+        Some(self.complete(block, SyntaxKind::BlockExpr))
+    }
+
+    fn parse_bare_brace_expression(&mut self) -> Option<CompletedMarker> {
+        let brace = self.start();
+        self.expect(TokenKind::LeftBrace);
+        self.skip_newlines();
+
+        if self.expression_can_start() {
+            let first = self.start();
+            let previous_hole = self.placeholder_hole.replace(false);
+            let expression = self.parse_expression(false, true);
+            let has_hole = self.placeholder_hole.unwrap_or(false);
+            self.placeholder_hole = previous_hole;
+
+            if self.eat(TokenKind::Equal) {
+                self.parse_expression(false, true);
+                self.line_end();
+                self.complete(first, SyntaxKind::AssignStmt);
+            } else {
+                self.line_end();
+                if expression.is_some()
+                    && has_hole
+                    && self.at(TokenKind::RightBrace)
+                    && !self.halted()
+                {
+                    self.complete(first, SyntaxKind::LambdaBody);
+                    self.expect_closing(TokenKind::RightBrace);
+                    return Some(self.complete(brace, SyntaxKind::LambdaExpr));
+                }
+                self.complete(first, SyntaxKind::ExprStmt);
+            }
+        }
+
+        self.parse_block_statements();
+        self.expect_closing(TokenKind::RightBrace);
+        Some(self.complete(brace, SyntaxKind::BlockExpr))
+    }
+
+    fn parse_block_statements(&mut self) {
         while !self.at(TokenKind::RightBrace) && !self.at_eof() && !self.halted() {
             if self.at(TokenKind::YieldKw) {
                 self.parse_yield_statement();
@@ -557,8 +602,6 @@ impl Parser<'_> {
             self.parse_statement();
             self.skip_newlines();
         }
-        self.expect_closing(TokenKind::RightBrace);
-        Some(self.complete(block, SyntaxKind::BlockExpr))
     }
 
     pub(super) fn parse_statement(&mut self) -> Option<CompletedMarker> {
@@ -739,6 +782,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_lambda_expression(&mut self) -> Option<CompletedMarker> {
+        let previous_hole = self.placeholder_hole.take();
         let lambda = self.start();
         self.expect(TokenKind::LeftBrace);
         if self.eat(TokenKind::LogicalOr) {
@@ -812,25 +856,30 @@ impl Parser<'_> {
         }
         self.complete(body, SyntaxKind::LambdaBody);
         self.expect_closing(TokenKind::RightBrace);
+        self.placeholder_hole = previous_hole;
         Some(self.complete(lambda, SyntaxKind::LambdaExpr))
     }
 
-    fn brace_looks_like_lambda(&mut self) -> bool {
+    fn brace_is_named_payload(&mut self) -> bool {
         let opening = self.logical_position();
         if self.nth_at(1, TokenKind::LogicalOr) || self.nth_at(1, TokenKind::Pipe) {
-            return true;
+            return false;
         }
         let Some(close) = self.matching_delimiter(opening) else {
-            return false;
+            return true;
         };
-        for position in opening + 1..close {
-            if self.kind_at_logical(position) == Some(TokenKind::Underscore)
-                && self.kind_at_logical(position + 1) != Some(TokenKind::Equal)
-            {
-                return true;
-            }
+        let mut first = opening + 1;
+        while self.kind_at_logical(first) == Some(TokenKind::Newline) {
+            first += 1;
         }
-        false
+        first == close || self.brace_has_top_level_colon(opening, close)
+    }
+
+    fn brace_has_possible_placeholder_token(&self, opening: usize, close: usize) -> bool {
+        (opening + 1..close).any(|position| {
+            self.kind_at_logical(position) == Some(TokenKind::Underscore)
+                && self.kind_at_logical(position + 1) != Some(TokenKind::Equal)
+        })
     }
 
     fn control_brace_is_restricted_suffix(&mut self) -> bool {
@@ -848,7 +897,11 @@ impl Parser<'_> {
             Some(TokenKind::Pipe | TokenKind::LogicalOr)
         );
         let payload = first == close || self.brace_has_top_level_colon(opening, close);
-        if !explicit_closure && !payload && !self.brace_looks_like_lambda() {
+        // This balanced-token probe selects a diagnostic only, never an AST kind.
+        if !explicit_closure
+            && !payload
+            && !self.brace_has_possible_placeholder_token(opening, close)
+        {
             return false;
         }
 

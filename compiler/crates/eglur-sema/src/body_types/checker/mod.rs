@@ -36,6 +36,7 @@ use super::{BodyTypes, BodyTypingError, *};
 
 mod application;
 mod branching;
+mod callable_values;
 mod calls;
 mod constants;
 mod construction;
@@ -108,6 +109,7 @@ pub fn typecheck_bodies(
         locals: FactTable::new(),
         members: FactTable::new(),
         invocations: FactTable::new(),
+        callable_values: FactTable::new(),
         reduce_by_commitments: FactTable::new(),
         regions: FactTable::new(),
         checked_numeric: FactTable::new(),
@@ -149,6 +151,7 @@ struct BodyChecker<'input, 'hir, 'support> {
     locals: FactTable<LocalBindingId, LocalTypeFact>,
     members: FactTable<ExpressionKey, MemberAccess>,
     invocations: FactTable<ExpressionKey, InvocationFact>,
+    callable_values: FactTable<ExpressionKey, CallableInstanceId>,
     reduce_by_commitments: FactTable<ExpressionKey, ReduceByCommitment>,
     regions: FactTable<ControlRegionKey, ControlRegion>,
     checked_numeric: FactTable<ExpressionKey, CheckedNumericOperation>,
@@ -191,6 +194,12 @@ struct ResultContext {
 
 struct CheckedContext {
     region: ControlRegionKey,
+}
+
+#[derive(Clone)]
+struct QualifiedMethodOwner {
+    target: CanonicalTarget,
+    fixed_subject: Option<TypeId>,
 }
 
 #[derive(Clone)]

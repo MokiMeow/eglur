@@ -4,7 +4,15 @@ use super::*;
 pub(super) enum RuntimeValue {
     Value(Value),
     Reference(Place),
+    Callable(RuntimeCallable),
     Tuple(Box<[RuntimeValue]>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct RuntimeCallable {
+    pub(super) target: CanonicalTarget,
+    pub(super) witnesses: Witnesses,
+    pub(super) borrow_argument: Option<usize>,
 }
 
 impl RuntimeValue {
@@ -16,7 +24,7 @@ impl RuntimeValue {
         match self {
             Self::Tuple(values) => Some(values.len()),
             Self::Value(Value::Tuple(values)) => Some(values.len()),
-            Self::Value(_) | Self::Reference(_) => None,
+            Self::Value(_) | Self::Reference(_) | Self::Callable(_) => None,
         }
     }
 
@@ -24,7 +32,7 @@ impl RuntimeValue {
         match self {
             Self::Tuple(values) => values.get(index).cloned(),
             Self::Value(Value::Tuple(values)) => values.get(index).cloned().map(Self::Value),
-            Self::Value(_) | Self::Reference(_) => None,
+            Self::Value(_) | Self::Reference(_) | Self::Callable(_) => None,
         }
     }
 
@@ -39,14 +47,14 @@ impl RuntimeValue {
                     .collect::<Vec<_>>()
                     .into_boxed_slice(),
             ),
-            Self::Value(_) | Self::Reference(_) => None,
+            Self::Value(_) | Self::Reference(_) | Self::Callable(_) => None,
         }
     }
 
     pub(super) fn into_public(self) -> Option<Value> {
         match self {
             Self::Value(value) => Some(value),
-            Self::Reference(_) => None,
+            Self::Reference(_) | Self::Callable(_) => None,
             Self::Tuple(values) => values
                 .into_vec()
                 .into_iter()
@@ -144,7 +152,9 @@ impl Store {
                         *child = runtime.into_public()?;
                         Some(())
                     }
-                    RuntimeValue::Value(_) | RuntimeValue::Reference(_) => None,
+                    RuntimeValue::Value(_)
+                    | RuntimeValue::Reference(_)
+                    | RuntimeValue::Callable(_) => None,
                 },
             }
         }

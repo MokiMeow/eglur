@@ -15,6 +15,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             locals: self.locals,
             members: self.members,
             invocations: self.invocations,
+            callable_values: self.callable_values,
             reduce_by_commitments: self.reduce_by_commitments,
             regions: self.regions,
             checked_numeric: self.checked_numeric,

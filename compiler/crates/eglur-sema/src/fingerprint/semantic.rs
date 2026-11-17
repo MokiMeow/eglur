@@ -227,6 +227,8 @@ pub enum SemanticFingerprintError {
     IncompleteTraitEvidence,
     UnknownCallableInstance,
     UnknownEvidenceEnvironment,
+    UnknownEvidenceProof,
+    CyclicEvidenceProof,
     UnknownBoundWitness,
     OrphanGenericParameter(crate::DefId),
     UnknownGenericParameter(crate::DefId),
@@ -324,6 +326,12 @@ impl fmt::Display for SemanticFingerprintError {
             Self::UnknownEvidenceEnvironment => {
                 formatter.write_str("checked invocation references an unknown evidence environment")
             }
+            Self::UnknownEvidenceProof => {
+                formatter.write_str("checked invocation references an unknown evidence proof")
+            }
+            Self::CyclicEvidenceProof => {
+                formatter.write_str("checked invocation references a cyclic evidence proof")
+            }
             Self::UnknownBoundWitness => {
                 formatter.write_str("checked dispatch references an unknown bound witness")
             }
@@ -361,6 +369,8 @@ impl std::error::Error for SemanticFingerprintError {
             | Self::IncompleteTraitEvidence
             | Self::UnknownCallableInstance
             | Self::UnknownEvidenceEnvironment
+            | Self::UnknownEvidenceProof
+            | Self::CyclicEvidenceProof
             | Self::UnknownBoundWitness
             | Self::OrphanGenericParameter(_)
             | Self::UnknownGenericParameter(_) => None,

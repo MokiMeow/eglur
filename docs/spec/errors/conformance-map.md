@@ -209,8 +209,9 @@ Tensor determinism coverage additionally requires:
       8. private transparent aliases with public expansions, including concretely discharged private alias bounds, to remain valid across public contracts without hiding symbolic caller obligations, and
       9. public nominal types to retain private representation without recursively exposing that representation as a public contract,
       10. package-mode foreign nominal and trait contracts to require an exact canonical-target `pub import` in the contract-owning module,
-      11. aliased and chained public re-exports to preserve foreign canonical identity and remain usable through a direct dependency's public path even when the target owner is transitive-only, and
-      12. private imports, sibling-module re-exports, public transparent aliases or imports targeting them, and downstream direct dependencies not to substitute for that contract-local bridge.
+      11. aliased and chained public re-exports to preserve foreign canonical identity and remain usable through a direct dependency's public path even when the target owner is transitive-only,
+      12. private imports, sibling-module re-exports, public transparent aliases or imports targeting them, and downstream direct dependencies not to substitute for that contract-local bridge, and
+      13. imported or re-exported transparent aliases to preserve their expanded struct's inherent method identity and visibility without exposing private method families.
    11. Effect-summary coverage across module boundaries requires:
       1. a known localizable-state summary to preserve the non-bang
          local-mutation exception,
@@ -448,7 +449,7 @@ Tensor determinism coverage additionally requires:
    17. call argument binding, constructor form, and typing validation paths require:
       1. `CALL_POSITIONAL_AFTER_NAMED`,
       2. `CALL_DUPLICATE_NAMED_ARG`,
-      3. `CALL_UNKNOWN_NAMED_ARG`,
+      3. `CALL_UNKNOWN_NAMED_ARG`, including a named argument on a `Fn`-typed value whose underlying declaration uses the same parameter name,
       4. `CALL_MISSING_ARG`,
       5. `CALL_TOO_MANY_ARGS`,
       6. `CALL_ARG_TYPE_MISMATCH`,
@@ -589,7 +590,10 @@ Tensor determinism coverage additionally requires:
    4. `OVERLOAD_OVERLAP` for non-disjoint overload declarations;
    5. `OVERLOAD_AMBIGUOUS` when a call leaves multiple applicable overload
       candidates or expected-`Fn` coercion leaves multiple compatible overload
-      candidates.
+      candidates;
+   6. `CALLABLE_VALUE_NO_MATCH` when expected-`Fn` coercion of an overload set
+      leaves no compatible candidate. This is distinct from a call whose typed
+      argument vector matches no overload.
 27. Ownership-flow suites in v0.1 conformance baseline assume ownership surface enabled and require:
    1. per-path discharge mismatches require `OWNERSHIP_PATH_UNBALANCED`, including bang bodies, direct/conditional local roots, lexical normal exits, nested `yield`, inner `result`/`checked` early exits, and loop-control edges; enclosing-region roots remain live when an inner edge does not exit their obligation region;
    2. forbidden nested or ordinary-generic ownership positions require `OWNERSHIP_TYPE_POSITION_FORBIDDEN`;

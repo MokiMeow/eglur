@@ -18,4 +18,6 @@ pub use snapshot::{AcceptedDiagnostics, DiagnosticSnapshot, ErrorLimit, Rejected
 pub use span::{
     PrimarySpan, RelatedSpan, SourceLabel, SourceProjectionError, SourceSpan, SourceTextRange,
 };
-pub use store::{DiagnosticFailure, DiagnosticStore, DiagnosticStoreError, Poison};
+pub use store::{
+    DiagnosticCheckpoint, DiagnosticFailure, DiagnosticStore, DiagnosticStoreError, Poison,
+};

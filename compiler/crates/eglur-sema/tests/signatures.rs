@@ -21,10 +21,16 @@ use eglur_sema::{
 use eglur_source::{FileId, LineIndex, SourceFile};
 use eglur_syntax::parse_validated;
 
+#[path = "signatures/associated_bindings.rs"]
+mod associated_bindings;
 #[path = "signatures/enums.rs"]
 mod enums;
 #[path = "signatures/impl_arguments.rs"]
 mod impl_arguments;
+#[path = "signatures/source_type_depth.rs"]
+mod source_type_depth;
+#[path = "signatures/type_applications.rs"]
+mod type_applications;
 
 struct PreparedSource {
     file: FileId,

@@ -270,6 +270,22 @@ tests:
     value:
       kind: Ok
       repr: '"1"'
+- id: TRT-concrete-alias-does-not-qualify-trait-impl-method
+  category: traits
+  title: concrete alias does not expose an implemented trait method as inherent
+  code: |
+    trait Rank { fn rank(self: &Self) -> i64 }
+    struct Count {}
+    type Alias = Count
+    impl Rank for Count { fn rank(self: &Self) -> i64 = 1 }
+
+    fn wrong(value: &Alias) -> i64 = Alias.rank(value)
+    fn main!() -> Res[Str, Str] { yield Ok("unreachable") }
+  expect:
+    compile_error:
+      code: METHOD_NOT_FOUND
+      message_contains: []
+      data_keys: []
 - id: TRT-trait-method-ness-cannot-be-changed-by-impl
   category: traits
   title: Trait method !-ness cannot be changed by impl

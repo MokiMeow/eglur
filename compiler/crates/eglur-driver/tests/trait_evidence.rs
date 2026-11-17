@@ -5,8 +5,9 @@ use eglur_driver::{
 };
 use eglur_hir::ItemKind;
 use eglur_sema::{
-    CanonicalTarget, CheckedDispatch, CompileCapability, DeclarationKind, EvidenceSource,
-    FactState, InvocationTarget, PhaseProduct, ResolveCapability, TypecheckCapability,
+    CanonicalTarget, CheckedDispatch, CheckedInvocation, CompileCapability, DeclarationKind,
+    EvidenceSource, FactState, InvocationTarget, PhaseProduct, ResolveCapability,
+    TypecheckCapability,
 };
 
 fn trait_profile() -> SupportProfile {
@@ -226,7 +227,7 @@ fn generic_bounds_materialize_bound_and_impl_evidence() {
     let sources = evidence
         .environments()
         .flat_map(|environment| environment.entries())
-        .map(|entry| entry.source())
+        .map(|entry| evidence.proof(entry.proof()).expect("entry proof exists"))
         .collect::<Vec<_>>();
 
     assert!(
@@ -270,7 +271,8 @@ fn method_dispatch_distinguishes_witnesses_and_impl_templates() {
     let dispatches = evidence
         .invocations()
         .filter_map(|(_, fact)| match fact {
-            FactState::Known(invocation) => Some(invocation.dispatch()),
+            FactState::Known(CheckedInvocation::Static { dispatch, .. }) => Some(dispatch),
+            FactState::Known(CheckedInvocation::Indirect { .. }) => None,
             FactState::Poisoned(_) | FactState::NotApplicable | FactState::Unperformed => None,
         })
         .collect::<Vec<_>>();
@@ -575,10 +577,11 @@ fn omitted_default_method_dispatches_to_the_trait_callable() {
     let callable = evidence
         .invocations()
         .find_map(|(_, fact)| match fact {
-            FactState::Known(invocation) => match invocation.dispatch() {
-                CheckedDispatch::ImplTemplate { callable, .. } => Some(callable),
-                CheckedDispatch::Direct(_) | CheckedDispatch::Bound { .. } => None,
-            },
+            FactState::Known(CheckedInvocation::Static {
+                dispatch: CheckedDispatch::ImplTemplate { callable, .. },
+                ..
+            }) => Some(callable),
+            FactState::Known(_) => None,
             FactState::Poisoned(_) | FactState::NotApplicable | FactState::Unperformed => None,
         })
         .expect("concrete default call has checked impl-template dispatch");
@@ -625,10 +628,18 @@ fn generic_impl_and_method_substitutions_remain_separate_and_complete() {
     let (key, impl_substitution) = evidence
         .invocations()
         .find_map(|(key, fact)| match fact {
-            FactState::Known(invocation) => match invocation.dispatch() {
-                CheckedDispatch::ImplTemplate { substitution, .. } => Some((key, *substitution)),
-                CheckedDispatch::Direct(_) | CheckedDispatch::Bound { .. } => None,
-            },
+            FactState::Known(CheckedInvocation::Static {
+                dispatch: CheckedDispatch::ImplTemplate { proof, .. },
+                ..
+            }) => {
+                let Some(EvidenceSource::Implementation { substitution, .. }) =
+                    evidence.proof(*proof)
+                else {
+                    panic!("impl-template proof selects one implementation");
+                };
+                Some((key, *substitution))
+            }
+            FactState::Known(_) => None,
             FactState::Poisoned(_) | FactState::NotApplicable | FactState::Unperformed => None,
         })
         .expect("generic trait call has checked impl dispatch");

@@ -112,7 +112,34 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         Ok(SourceTypeContext {
             generics,
             self_binding,
+            structure_validation: TypeStructureValidation::Immediate,
+            application_region: self.application_region(owner),
         })
+    }
+
+    fn application_region(
+        &self,
+        owner: DefId,
+    ) -> super::super::applications::TypeApplicationRegion {
+        use super::super::applications::TypeApplicationRegion;
+
+        let Some(declaration) = self.collection.declaration(owner) else {
+            return TypeApplicationRegion::Declaration;
+        };
+        match declaration.kind() {
+            DeclarationKind::Impl => TypeApplicationRegion::ImplHeader,
+            DeclarationKind::AssociatedTypeBinding => TypeApplicationRegion::ImplBinding,
+            DeclarationKind::Function
+                if declaration.parent().is_some_and(|parent| {
+                    self.collection
+                        .declaration(parent)
+                        .is_some_and(|parent| parent.kind() == DeclarationKind::Impl)
+                }) =>
+            {
+                TypeApplicationRegion::ImplMethodSignature
+            }
+            _ => TypeApplicationRegion::Declaration,
+        }
     }
 
     pub(super) fn self_binding(

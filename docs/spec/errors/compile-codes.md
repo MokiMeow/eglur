@@ -372,7 +372,7 @@ Data contract summary (if `data` is present):
 
 Severity: `error`
 
-Trigger: a call provides a named argument that does not match any declared callee parameter.
+Trigger: a call provides a named argument that does not match any exposed callee parameter name, including any named argument on a `Fn`-typed value call because `Fn` types expose no parameter names.
 
 Message contract summary:
 
@@ -448,6 +448,33 @@ Data contract summary:
 
 The producer MUST NOT select an arbitrary overload or family member merely to
 emit `expected_type`.
+
+
+### `CALLABLE_VALUE_NO_MATCH`
+
+Severity: `error`
+
+Trigger: an expected `Fn(...) -> ...` type is available for a named overload
+set used as a function value, but no candidate is compatible after complete
+generic instantiation and directional callable assignability. A single
+non-generic function already has a callable type, so its incompatibility uses
+the enclosing assignment or call-argument diagnostic. A single generic
+function whose type arguments cannot be determined uses
+`TYPE_ARG_INFERENCE_FAILED`.
+
+Message contract summary:
+
+1. `callable`.
+2. `value`.
+3. `no matching candidate`.
+
+Data contract summary:
+
+1. `expected_type`: the canonical expected `Fn` type.
+2. `candidates`: the rejected callable signatures in declaration-candidate
+   order.
+
+The producer MUST NOT invent an `actual_type` for an unselected overload set.
 
 
 ### `CONSTRUCTOR_TARGET_KIND_MISMATCH`
@@ -620,7 +647,9 @@ Severity: `error`
 
 Trigger: overload resolution for a call leaves more than one applicable
 candidate after v0.1 applicability filtering, or expected-`Fn` coercion of a
-named overload set leaves more than one callable-compatible candidate.
+named overload set leaves more than one callable-compatible candidate before
+checking their declared trait bounds. A bound failure does not remove a
+callable-compatible candidate from this ambiguity check.
 
 Message contract summary:
 

@@ -103,6 +103,18 @@ pub(crate) fn record_visibility_violation(
     )
 }
 
+pub(crate) fn record_public_contract_visibility_violation(
+    store: &mut DiagnosticStore,
+    span: SourceSpan,
+) -> Result<Poison, SemanticDiagnosticError> {
+    record_import_error(
+        store,
+        "VISIBILITY_VIOLATION",
+        "visibility violation: public type contract exposes a private declaration",
+        span,
+    )
+}
+
 pub(crate) const fn impl_argument_diagnostic(
     violation: crate::ImplArgumentViolation,
 ) -> (&'static str, &'static str) {

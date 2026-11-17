@@ -3,10 +3,87 @@ use super::invocation::InvocationFrame;
 use super::*;
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
+    pub(super) fn qualified_method_owner(
+        &mut self,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
+        written: &CanonicalTarget,
+    ) -> Result<Outcome<QualifiedMethodOwner>, BodyTypingError> {
+        match self.signatures.declaration(written) {
+            FactState::Known(DeclarationSignature::TypeAlias {
+                generic_parameters,
+                value,
+            }) => {
+                if !generic_parameters.is_empty() {
+                    let data = BTreeMap::from([
+                        (
+                            Box::<str>::from("expected_count"),
+                            self.diagnostic_count(generic_parameters.len())?,
+                        ),
+                        (Box::<str>::from("actual_count"), self.diagnostic_count(0)?),
+                    ]);
+                    return self
+                        .type_error(
+                            source,
+                            origin,
+                            "TYPE_ARG_ARITY_MISMATCH",
+                            "type argument arity mismatch: generic alias requires arguments",
+                            data,
+                        )
+                        .map(Outcome::Poisoned);
+                }
+                let value = *value;
+                let TypeKind::Nominal {
+                    head: NominalHead::Declaration(target),
+                    ..
+                } = self.signatures.types().kind(value)?
+                else {
+                    return Ok(Outcome::Known(QualifiedMethodOwner {
+                        target: written.clone(),
+                        fixed_subject: None,
+                    }));
+                };
+                Ok(Outcome::Known(QualifiedMethodOwner {
+                    target: target.clone(),
+                    fixed_subject: Some(value),
+                }))
+            }
+            FactState::Known(_) | FactState::NotApplicable => {
+                Ok(Outcome::Known(QualifiedMethodOwner {
+                    target: written.clone(),
+                    fixed_subject: None,
+                }))
+            }
+            FactState::Poisoned(poison) => Ok(Outcome::Poisoned(poison.clone())),
+            FactState::Unperformed => Ok(Outcome::Unperformed),
+        }
+    }
+
     pub(super) fn method_subject(&self, receiver: TypeId) -> Result<TypeId, BodyTypingError> {
         Ok(match self.signatures.types().kind(receiver)? {
             TypeKind::Reference { referent, .. } => *referent,
             _ => receiver,
+        })
+    }
+
+    pub(super) fn qualified_receiver_subject(
+        &self,
+        owner: &CanonicalTarget,
+        callable: &CallableSignature,
+        actual: TypeId,
+    ) -> Result<Option<TypeId>, BodyTypingError> {
+        let Some(receiver) = callable.parameters().first() else {
+            return Ok(None);
+        };
+        Ok(match self.signatures.types().kind(receiver.ty())? {
+            TypeKind::SelfType(found) if found == owner => Some(actual),
+            TypeKind::Reference { referent, .. } if matches!(self.signatures.types().kind(*referent)?, TypeKind::SelfType(found) if found == owner) => {
+                match self.signatures.types().kind(actual)? {
+                    TypeKind::Reference { referent, .. } => Some(*referent),
+                    _ => None,
+                }
+            }
+            _ => None,
         })
     }
 
@@ -118,62 +195,90 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn trait_method_candidates(
         &mut self,
         module: ModuleId,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
         subject: TypeId,
         name: &NameKey,
+    ) -> Result<Outcome<Vec<MethodCandidate>>, BodyTypingError> {
+        let mut candidates = Vec::new();
+        for trait_target in self.visible_traits(module)? {
+            match self.trait_method_candidates_for_owner(
+                source,
+                origin,
+                subject,
+                name,
+                &trait_target,
+            )? {
+                Outcome::Known(found) => candidates.extend(found),
+                Outcome::Poisoned(poison) => return Ok(Outcome::Poisoned(poison)),
+                Outcome::Unperformed => return Ok(Outcome::Unperformed),
+                Outcome::Deferred => return Ok(Outcome::Deferred),
+                Outcome::NotApplicable => return Ok(Outcome::NotApplicable),
+            }
+        }
+        Ok(Outcome::Known(candidates))
+    }
+
+    pub(super) fn trait_method_candidates_for_owner(
+        &mut self,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
+        subject: TypeId,
+        name: &NameKey,
+        trait_target: &CanonicalTarget,
     ) -> Result<Outcome<Vec<MethodCandidate>>, BodyTypingError> {
         let owner = self
             .current_owner
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
+        let trait_parameters = match self.signatures.declaration(trait_target) {
+            FactState::Known(DeclarationSignature::Trait {
+                generic_parameters, ..
+            }) => generic_parameters.to_vec(),
+            FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
+            FactState::Unperformed => return Ok(Outcome::Unperformed),
+            FactState::Known(_) | FactState::NotApplicable => {
+                return Ok(Outcome::Known(Vec::new()));
+            }
+        };
+        let methods = self
+            .signatures
+            .trait_methods(trait_target)
+            .iter()
+            .filter(|method| method.name() == name)
+            .map(|method| method.declaration().clone())
+            .collect::<Vec<_>>();
+        if methods.is_empty() {
+            return Ok(Outcome::Known(Vec::new()));
+        }
+        let receiver_candidates = match self.trait_environment.receiver_candidates_for_trait(
+            owner,
+            self.signatures,
+            subject,
+            trait_target,
+        )? {
+            Ok(candidates) => candidates,
+            Err(failure) => return self.normalization_failure_at(source, origin, failure),
+        };
         let mut candidates = Vec::new();
-        for trait_target in self.visible_traits(module)? {
-            let trait_parameters = match self.signatures.declaration(&trait_target) {
-                FactState::Known(DeclarationSignature::Trait {
-                    generic_parameters, ..
-                }) => generic_parameters.to_vec(),
-                FactState::Poisoned(poison) => {
-                    return Ok(Outcome::Poisoned(poison.clone()));
-                }
+        for method in methods {
+            let callable = match self.signatures.declaration(&method) {
+                FactState::Known(DeclarationSignature::Callable(callable)) => self
+                    .signatures
+                    .callable(*callable)
+                    .cloned()
+                    .ok_or(BodyTypingError::UnknownCallable(*callable))?,
+                FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
                 FactState::Unperformed => return Ok(Outcome::Unperformed),
                 FactState::Known(_) | FactState::NotApplicable => continue,
             };
-            let methods = self
-                .signatures
-                .trait_methods(&trait_target)
-                .iter()
-                .filter(|method| method.name() == name)
-                .map(|method| method.declaration().clone())
-                .collect::<Vec<_>>();
-            if methods.is_empty() {
-                continue;
-            }
-            let receiver_candidates = self.trait_environment.receiver_candidates_for_trait(
-                owner,
-                self.signatures,
-                subject,
-                &trait_target,
-            )?;
-            for method in methods {
-                let callable = match self.signatures.declaration(&method) {
-                    FactState::Known(DeclarationSignature::Callable(callable)) => self
-                        .signatures
-                        .callable(*callable)
-                        .cloned()
-                        .ok_or(BodyTypingError::UnknownCallable(*callable))?,
-                    FactState::Poisoned(poison) => {
-                        return Ok(Outcome::Poisoned(poison.clone()));
-                    }
-                    FactState::Unperformed => return Ok(Outcome::Unperformed),
-                    FactState::Known(_) | FactState::NotApplicable => continue,
-                };
-                for receiver_candidate in &receiver_candidates {
-                    candidates.push(self.trait_method_candidate(
-                        subject,
-                        &trait_target,
-                        &trait_parameters,
-                        &callable,
-                        receiver_candidate,
-                    )?);
-                }
+            for receiver_candidate in &receiver_candidates {
+                candidates.push(self.trait_method_candidate(
+                    subject,
+                    trait_target,
+                    &trait_parameters,
+                    &callable,
+                    receiver_candidate,
+                )?);
             }
         }
         Ok(Outcome::Known(candidates))
@@ -215,10 +320,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             combined,
         )?;
         let method = callable.declaration().clone();
+        let mut preset_replacements = receiver.replacements().clone();
+        preset_replacements.extend(replacements);
         Ok(MethodCandidate {
             callable,
             explicit_parameters,
-            preset_replacements: receiver.replacements().clone(),
+            preset_replacements,
             dispatch: MethodDispatchTemplate::Trait {
                 subject,
                 trait_ref: receiver.trait_ref().clone(),
@@ -459,6 +566,46 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             "METHOD_NOT_FOUND",
             format!("method `{name}` not found for receiver type"),
             BTreeMap::new(),
+        )
+        .map(Outcome::Poisoned)
+    }
+
+    pub(super) fn qualified_trait_impl_missing<T>(
+        &mut self,
+        source: &SemanticSource<'_>,
+        origin: OriginId,
+        trait_target: &CanonicalTarget,
+        subject: TypeId,
+    ) -> Result<Outcome<T>, BodyTypingError> {
+        let FactState::Known(DeclarationSignature::Trait {
+            generic_parameters, ..
+        }) = self.signatures.declaration(trait_target)
+        else {
+            return Ok(Outcome::Unperformed);
+        };
+        let parameters = generic_parameters.to_vec();
+        let arguments = parameters
+            .into_iter()
+            .map(|parameter| self.signatures.types_mut().generic_parameter(parameter))
+            .collect::<Result<Vec<_>, _>>()?;
+        let substitution = self.signatures.types_mut().intern_substitution(arguments)?;
+        let trait_ref = TraitRef::new(trait_target.clone(), substitution);
+        let data = BTreeMap::from([
+            (
+                Box::<str>::from("trait"),
+                DiagnosticDataValue::from(self.format_trait_ref(&trait_ref)?),
+            ),
+            (
+                Box::<str>::from("type"),
+                DiagnosticDataValue::from(self.format_type(subject)?),
+            ),
+        ]);
+        self.type_error(
+            source,
+            origin,
+            "TRAIT_BOUND_NOT_SATISFIED",
+            "trait bound is not satisfied",
+            data,
         )
         .map(Outcome::Poisoned)
     }
@@ -1293,7 +1440,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
     pub(super) fn record_trait_obligations(
         &mut self,
-        invocation: ExpressionKey,
+        site: ExpressionKey,
         source: &SemanticSource<'_>,
         origin: OriginId,
         parameters: &[GenericParameterId],
@@ -1304,15 +1451,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
         for parameter in parameters {
             let signature = match self.signatures.generic_parameter(parameter) {
-                FactState::Known(signature) => signature,
+                FactState::Known(signature) => signature.clone(),
                 FactState::Unperformed | FactState::Poisoned(_) | FactState::NotApplicable => {
                     return Err(BodyTypingError::UnavailableGenericParameter(
                         parameter.clone(),
                     ));
                 }
             };
-            let bounds = signature.bounds().to_vec();
-            for bound in bounds {
+            for (bound_index, bound) in signature
+                .instantiate_bounds(self.signatures.types_mut(), replacements)?
+                .into_iter()
+                .enumerate()
+            {
                 let destination = match parameter {
                     GenericParameterId::Source(declaration) => {
                         let owner = self
@@ -1326,9 +1476,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             .generic_parameter(parameter.clone())?;
                         Some(
                             self.trait_environment
-                                .witness_for_obligation(
+                                .declared_witness_for_obligation(
                                     owner,
-                                    &TraitObligation::new(subject, bound.clone()),
+                                    &TraitObligation::new(subject, bound.declared().clone()),
                                 )
                                 .ok_or_else(|| {
                                     BodyTypingError::MissingBoundWitness(parameter.clone())
@@ -1337,27 +1487,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     }
                     GenericParameterId::Trusted { .. } => None,
                 };
-                let arguments = self
-                    .signatures
-                    .types()
-                    .substitution(bound.substitution())?
-                    .to_vec();
-                let arguments = arguments
-                    .into_iter()
-                    .map(|argument| {
-                        self.signatures
-                            .types_mut()
-                            .substitute(argument, replacements)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let substitution = self.signatures.types_mut().intern_substitution(arguments)?;
+                let obligation = bound.into_obligation();
                 self.obligations.push(PendingTraitObligation {
-                    invocation,
+                    site,
                     owner,
                     location: SemanticLocation::origin(source.file(), origin),
                     parameter: parameter.clone(),
-                    subject: replacements[parameter],
-                    trait_ref: TraitRef::new(bound.declaration().clone(), substitution),
+                    bound_index,
+                    subject: obligation.subject(),
+                    trait_ref: obligation.trait_ref().clone(),
                     destination,
                 });
             }

@@ -176,7 +176,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 FactState::Unperformed => Ok(Outcome::Unperformed),
                 FactState::NotApplicable => Ok(Outcome::NotApplicable),
             },
-            FactState::Known(ResolvedName::Declarations(_)) => Ok(Outcome::Known(None)),
+            FactState::Known(ResolvedName::Declarations(_) | ResolvedName::TypeMemberOwner(_)) => {
+                Ok(Outcome::Known(None))
+            }
             FactState::Poisoned(poison) => Ok(Outcome::Poisoned(poison.clone())),
             FactState::Unperformed => Ok(Outcome::Unperformed),
             FactState::NotApplicable => Ok(Outcome::NotApplicable),
