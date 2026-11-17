@@ -4,8 +4,36 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn prepare_alias_plan(
         &mut self,
         request: AliasRequest,
-    ) -> Result<AliasPlan, SignatureResolutionError> {
+    ) -> Result<AliasPlan, SignatureFlow> {
         let alias = request.alias;
+        let declaration = self
+            .collection
+            .declaration(alias)
+            .expect("alias belongs to collection");
+        let module = self
+            .collection
+            .module(alias.module())
+            .expect("alias module belongs to collection");
+        let file = module.file();
+        let hir = self.source_hir(file)?;
+        let item_id = declaration
+            .item()
+            .ok_or(SignatureResolutionError::MissingDeclarationItem(alias))?;
+        let ItemKind::TypeAlias(item) = hir.item(item_id).kind() else {
+            return Err(SignatureFlow::Internal(
+                SignatureResolutionError::WrongDeclarationItem(alias),
+            ));
+        };
+        let value = item.value;
+        let custody = match request.custody {
+            AliasCustody::Original => {
+                self.original_source_custody(TypeOccurrenceId::new(file, value))?
+            }
+            AliasCustody::Inherited(custody) => custody,
+        };
+        self.claim_source_custody(&custody)?;
+        #[cfg(test)]
+        super::custody_tests::observe(self, TypeOccurrenceId::new(file, value), &custody)?;
         if let Some(state) = self.alias_states.get(&alias).cloned() {
             let result = match state {
                 AliasState::Resolving => {
@@ -43,27 +71,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             return Ok(AliasPlan::Complete(result));
         }
         self.alias_states.insert(alias, AliasState::Resolving);
-        let declaration = self
-            .collection
-            .declaration(alias)
-            .expect("alias belongs to collection");
-        let module = self
-            .collection
-            .module(alias.module())
-            .expect("alias module belongs to collection");
-        let hir = self.source_hir(module.file())?;
-        let item_id = declaration
-            .item()
-            .ok_or(SignatureResolutionError::MissingDeclarationItem(alias))?;
-        let ItemKind::TypeAlias(item) = hir.item(item_id).kind() else {
-            return Err(SignatureResolutionError::WrongDeclarationItem(alias));
-        };
-        let value = item.value;
         let context = self.source_context(alias, false)?;
         let site = Rc::new(SourceSite {
             owner: alias,
-            file: module.file(),
+            file,
             context,
+            custody,
         });
         Ok(AliasPlan::Body {
             request: TypeRequest {
@@ -79,7 +92,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         frame: AliasFrame,
         result: Resolution<TypeId>,
-    ) -> Result<Resolution<AliasTemplate>, SignatureResolutionError> {
+    ) -> Result<Resolution<AliasTemplate>, SignatureFlow> {
+        self.claim_source_custody(&frame.site.custody)?;
         let generic_parameters = frame.generic_parameters;
         let state = match &result {
             Resolution::Known(value) => AliasState::Resolved {

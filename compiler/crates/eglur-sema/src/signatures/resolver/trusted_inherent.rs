@@ -1,9 +1,7 @@
 use super::*;
 
 impl SignatureResolver<'_, '_> {
-    pub(super) fn resolve_trusted_inherent_owners(
-        &mut self,
-    ) -> Result<(), SignatureResolutionError> {
+    pub(super) fn resolve_trusted_inherent_owners(&mut self) -> Result<(), SignatureFlow> {
         let Some(trusted) = self.trusted else {
             return Ok(());
         };
@@ -14,7 +12,9 @@ impl SignatureResolver<'_, '_> {
                 let FactState::Known(DeclarationSignature::Callable(id)) =
                     self.declarations.state(&target)
                 else {
-                    return Err(SignatureResolutionError::MissingTrustedSignature(target));
+                    return Err(SignatureFlow::Internal(
+                        SignatureResolutionError::MissingTrustedSignature(target),
+                    ));
                 };
                 let id = *id;
                 let pattern = self.resolve_trusted_type(
@@ -44,12 +44,12 @@ impl SignatureResolver<'_, '_> {
                     }
                 };
                 if !receiver_matches {
-                    return Err(SignatureResolutionError::Trusted(
+                    return Err(SignatureFlow::Internal(SignatureResolutionError::Trusted(
                         TrustedSignatureError::InvalidInherentMember {
                             callable: member.callable.clone(),
                             reason: "receiver type differs from the complete owner pattern",
                         },
-                    ));
+                    )));
                 }
                 families.entry(member.name.clone()).or_default().push(
                     InherentMemberSignature::new(

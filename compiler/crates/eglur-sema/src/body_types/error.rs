@@ -15,6 +15,11 @@ use crate::{
 /// Infrastructure failures remain separate from source-language diagnostics.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BodyTypingError {
+    MissingAnalysisStop,
+    UnexpectedUnmeteredInterruption,
+    AnalysisRootClaim(crate::AnalysisRootClaimError),
+    SourceInputs(crate::AnalysisSourceInputFailure),
+    CallInputs(crate::AnalysisCallRegistryFailure),
     DuplicateSource(FileId),
     MissingSource(FileId),
     MissingHir(FileId),
@@ -109,6 +114,17 @@ pub enum BodyTypingError {
 impl fmt::Display for BodyTypingError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MissingAnalysisStop => {
+                formatter.write_str("body interruption has no accounting stop")
+            }
+            Self::UnexpectedUnmeteredInterruption => {
+                formatter.write_str("unmetered body analysis returned an interruption")
+            }
+            Self::AnalysisRootClaim(error) => {
+                write!(formatter, "invalid body analysis root claim: {error:?}")
+            }
+            Self::SourceInputs(error) => error.fmt(formatter),
+            Self::CallInputs(error) => error.fmt(formatter),
             Self::DuplicateSource(file) => write!(formatter, "duplicate semantic source {file:?}"),
             Self::MissingSource(file) => write!(formatter, "missing semantic source {file:?}"),
             Self::MissingHir(file) => write!(formatter, "semantic source {file:?} has no HIR"),
@@ -311,7 +327,12 @@ impl std::error::Error for BodyTypingError {
             Self::TraitEnvironment(error) => Some(error),
             Self::Inhabitance(error) => Some(error),
             Self::DiagnosticStore(error) => Some(error),
-            Self::DuplicateSource(_)
+            Self::SourceInputs(error) => Some(error),
+            Self::CallInputs(error) => Some(error),
+            Self::MissingAnalysisStop
+            | Self::UnexpectedUnmeteredInterruption
+            | Self::AnalysisRootClaim(_)
+            | Self::DuplicateSource(_)
             | Self::MissingSource(_)
             | Self::MissingHir(_)
             | Self::UnknownModule(_)

@@ -46,7 +46,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         block: ExprId,
         request: TypeRequest,
-    ) -> Result<FailurePlan, BodyTypingError> {
+    ) -> Result<FailurePlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::CheckFailureFlow),
@@ -56,7 +56,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
 
         let expected = request
-            .expected
+            .expected_type()
             .map(|ty| self.failure_carrier(ty))
             .transpose()?
             .flatten();
@@ -70,7 +70,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let region = ControlRegionKey::Result(ExpressionKey::new(module, expression));
         Ok(FailurePlan::ResultBlock {
             block,
-            request: TypeRequest::definitive(expected.map(|carrier| carrier.ty)),
+            request: request.definitive_child(expected.map(|carrier| carrier.ty)),
             context: ResultContext {
                 region,
                 expected,
@@ -86,7 +86,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         frame: ResultFrame,
         result_context: ResultContext,
         body_outcome: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BodyContext { source, body, .. } = context;
         let ResultFrame { origin, block } = frame;
         let expected = result_context.expected;
@@ -174,7 +174,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         operand: ExprId,
-    ) -> Result<FailurePlan, BodyTypingError> {
+    ) -> Result<FailurePlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::CheckFailureFlow),
@@ -209,7 +209,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         frame: QuestionFrame,
         operand: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let QuestionFrame {
             key,
             origin,
@@ -294,7 +294,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         block: ExprId,
         request: TypeRequest,
-    ) -> Result<FailurePlan, BodyTypingError> {
+    ) -> Result<FailurePlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::CheckFailureFlow),
@@ -306,7 +306,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(FailurePlan::Complete(Outcome::Unperformed));
         };
         let expected_carrier = request
-            .expected
+            .expected_type()
             .map(|ty| self.failure_carrier(ty))
             .transpose()?
             .flatten();
@@ -329,7 +329,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let region = ControlRegionKey::Checked(ExpressionKey::new(module, expression));
         Ok(FailurePlan::CheckedBlock {
             block,
-            request: TypeRequest::definitive(expected_success),
+            request: request.definitive_child(expected_success),
             context: CheckedContext {
                 region: region.clone(),
             },
@@ -346,7 +346,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         frame: CheckedFrame,
         body_outcome: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BodyContext { module, body, .. } = context;
         let CheckedFrame {
             region,
@@ -373,7 +373,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             FactState::Unperformed
                             | FactState::Poisoned(_)
                             | FactState::NotApplicable => {
-                                return Err(BodyTypingError::MissingFinalYieldType(final_yield));
+                                return Err(BodyFlow::Internal(
+                                    BodyTypingError::MissingFinalYieldType(final_yield),
+                                ));
                             }
                         }
                     }
@@ -403,7 +405,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         left: Outcome<TypedExpression>,
         right: Outcome<TypedExpression>,
-    ) -> Result<Outcome<(TypedExpression, TypedExpression)>, BodyTypingError> {
+    ) -> Result<Outcome<(TypedExpression, TypedExpression)>, BodyFlow> {
         match (left, right) {
             (Outcome::Known(left), Outcome::Known(right)) => Ok(Outcome::Known((left, right))),
             (Outcome::Poisoned(left), Outcome::Poisoned(right)) => {
@@ -426,7 +428,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         continuation: NormalContinuation,
         total: bool,
         conversion_can_fail: bool,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let faults = if total {
             Box::new([]) as Box<[NumericFaultCause]>
         } else {
@@ -476,10 +478,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         (self.result_contexts.len() > floor).then(|| self.result_contexts.len() - 1)
     }
 
-    pub(super) fn failure_carrier(
-        &self,
-        ty: TypeId,
-    ) -> Result<Option<FailureCarrier>, BodyTypingError> {
+    pub(super) fn failure_carrier(&self, ty: TypeId) -> Result<Option<FailureCarrier>, BodyFlow> {
         let TypeKind::Nominal {
             head: NominalHead::Intrinsic(head),
             substitution,
@@ -509,7 +508,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         origin: OriginId,
-    ) -> Result<Option<TypeId>, BodyTypingError> {
+    ) -> Result<Option<TypeId>, BodyFlow> {
         let Some(declaration) = self
             .signatures
             .language_items()
@@ -535,12 +534,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         body: &Body,
         block: ExprId,
-    ) -> Result<Option<ExprId>, BodyTypingError> {
+    ) -> Result<Option<ExprId>, BodyFlow> {
         let expression = body
             .expression(block)
             .ok_or(BodyTypingError::WrongBodyExpression(block))?;
         let ExprKind::Block { statements } = expression.kind() else {
-            return Err(BodyTypingError::FailureBodyIsNotBlock(block));
+            return Err(BodyFlow::Internal(BodyTypingError::FailureBodyIsNotBlock(
+                block,
+            )));
         };
         let Some(statement) = statements.last() else {
             return Ok(None);
@@ -567,7 +568,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         module: ModuleId,
         body: &Body,
         expression: ExprId,
-    ) -> Result<bool, BodyTypingError> {
+    ) -> Result<bool, BodyFlow> {
         let mut pending = vec![(expression, false)];
         while let Some((current, visited)) = pending.pop() {
             let key = ExpressionKey::new(module, current);
@@ -626,7 +627,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         outcome: Outcome<T>,
         additional: Option<Poison>,
-    ) -> Result<Outcome<T>, BodyTypingError> {
+    ) -> Result<Outcome<T>, BodyFlow> {
         let Some(additional) = additional else {
             return Ok(outcome);
         };

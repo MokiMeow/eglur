@@ -31,6 +31,197 @@ pub(super) fn with_checker_inputs(
     trusted: Option<&crate::TrustedSignatureEnvironment>,
     inspect: impl FnOnce(&mut BodyChecker<'_, '_, '_>),
 ) {
+    with_checker_declarations(
+        text,
+        external,
+        trusted.map(|signatures| crate::TrustedDeclarationInputs::new(signatures, None)),
+        inspect,
+    );
+}
+
+pub(super) fn with_checker_declarations(
+    text: &str,
+    external: &ExternalNameEnvironment,
+    trusted: Option<crate::TrustedDeclarationInputs<'_>>,
+    inspect: impl FnOnce(&mut BodyChecker<'_, '_, '_>),
+) {
+    with_checker_work(text, external, trusted, None, inspect);
+}
+
+pub(super) fn with_checker_work(
+    text: &str,
+    external: &ExternalNameEnvironment,
+    trusted: Option<crate::TrustedDeclarationInputs<'_>>,
+    analysis_work: Option<&mut crate::AnalysisWorkAccounting>,
+    inspect: impl FnOnce(&mut BodyChecker<'_, '_, '_>),
+) {
+    with_checker_owned(text, external, trusted, analysis_work, |mut checker| {
+        inspect(&mut checker);
+    });
+}
+
+pub(super) fn with_checker_owned(
+    text: &str,
+    external: &ExternalNameEnvironment,
+    trusted: Option<crate::TrustedDeclarationInputs<'_>>,
+    analysis_work: Option<&mut crate::AnalysisWorkAccounting>,
+    inspect: impl FnOnce(BodyChecker<'_, '_, '_>),
+) {
+    with_phase_inputs(text, external, trusted, |inputs| {
+        let mut source_inputs;
+        let mut body_inputs;
+        let analysis_work = if let Some(accounting) = analysis_work {
+            (source_inputs, body_inputs) = analysis_inputs(accounting, &inputs);
+            Some(BodyAnalysisWork::new(
+                accounting,
+                &mut source_inputs,
+                &mut body_inputs,
+                &|_| 100_000,
+            ))
+        } else {
+            None
+        };
+        let (signatures, inhabitance) = inputs.declarations.parts_mut();
+        let checker = BodyChecker {
+            collection: inputs.collection,
+            imports: inputs.imports,
+            names: inputs.names,
+            external_names: Some(external),
+            sources: inputs
+                .sources
+                .iter()
+                .map(|source| (source.file(), source))
+                .collect(),
+            signatures,
+            inhabitance,
+            trait_environment: inputs.trait_environment,
+            diagnostics: inputs.diagnostics,
+            recorder: DemandRecorder::new(&Support),
+            expressions: FactTable::new(),
+            const_eligibility: BTreeMap::new(),
+            preparing_numeric_tree: false,
+            evaluate_constant_declarations: true,
+            locals: FactTable::new(),
+            members: FactTable::new(),
+            invocations: FactTable::new(),
+            callable_values: FactTable::new(),
+            reduce_by_commitments: FactTable::new(),
+            regions: FactTable::new(),
+            checked_numeric: FactTable::new(),
+            ownership_operations: FactTable::new(),
+            bodies: FactTable::new(),
+            transfers: Vec::new(),
+            callable_instances: Vec::new(),
+            callable_instance_ids: BTreeMap::new(),
+            obligations: Vec::new(),
+            method_dispatches: Vec::new(),
+            region_stack: Vec::new(),
+            block_region_overrides: Vec::new(),
+            result_contexts: Vec::new(),
+            question_floors: vec![0],
+            checked_contexts: Vec::new(),
+            control_path_barriers: Vec::new(),
+            current_return: None,
+            current_owner: None,
+            analysis_work,
+            internal_failures: Vec::new(),
+        };
+        inspect(checker);
+    });
+}
+
+pub(super) struct BodyPhaseInputs<'input, 'hir> {
+    pub collection: &'input DeclarationCollection,
+    pub imports: &'input ResolvedImports,
+    pub names: &'input NameResolution,
+    pub sources: &'input [SemanticSource<'hir>],
+    pub declarations: &'input mut ResolvedDeclarationSemantics,
+    pub trait_environment: &'input mut TraitEnvironment,
+    pub diagnostics: &'input mut DiagnosticStore,
+}
+
+pub(super) fn fingerprints(
+    inputs: &mut BodyPhaseInputs<'_, '_>,
+    bodies: &BodyTypes,
+) -> crate::SemanticFingerprints {
+    let evidence = crate::resolve_trait_evidence(
+        inputs.collection,
+        inputs.sources,
+        &Support,
+        inputs.declarations.signatures_mut(),
+        inputs.trait_environment,
+        bodies,
+        inputs.diagnostics,
+    )
+    .unwrap()
+    .into_parts()
+    .0;
+    let PhaseProduct::Performed(evidence) = evidence else {
+        panic!("incomplete evidence")
+    };
+    let effects = crate::analyze_effects(
+        inputs.collection,
+        inputs.names,
+        inputs.sources,
+        &Support,
+        inputs.declarations.signatures(),
+        bodies,
+        &evidence,
+        None,
+        inputs.diagnostics,
+    )
+    .unwrap()
+    .into_parts()
+    .0;
+    crate::SemanticFingerprints::compute(
+        inputs.collection,
+        inputs.imports,
+        inputs.names,
+        inputs.declarations.signatures(),
+        inputs.sources,
+        bodies,
+        inputs.trait_environment,
+        &PhaseProduct::Performed(evidence),
+        &effects,
+    )
+    .unwrap()
+    .expect("complete bodies must retain fingerprints")
+}
+
+pub(super) fn analysis_inputs<'hir>(
+    accounting: &crate::AnalysisWorkAccounting,
+    inputs: &BodyPhaseInputs<'_, 'hir>,
+) -> (
+    crate::AnalysisSourceInputs<'hir>,
+    crate::AnalysisBodyInputs<'hir>,
+) {
+    let source_inputs = crate::AnalysisSourceInputs::new(
+        accounting,
+        inputs.sources.iter().map(|source| (0, source)),
+    )
+    .unwrap();
+    let sources = inputs
+        .sources
+        .iter()
+        .map(|source| (source.file(), source))
+        .collect::<BTreeMap<_, _>>();
+    let body_inputs = crate::AnalysisBodyInputs::new(
+        accounting,
+        inputs
+            .collection
+            .modules()
+            .map(|module| (0, module, sources[&module.file()])),
+    )
+    .unwrap();
+    (source_inputs, body_inputs)
+}
+
+pub(super) fn with_phase_inputs(
+    text: &str,
+    external: &ExternalNameEnvironment,
+    trusted: Option<crate::TrustedDeclarationInputs<'_>>,
+    inspect: impl FnOnce(BodyPhaseInputs<'_, '_>),
+) {
     let file = FileId::new(0);
     let raw = SourceFile::new(file, text.as_bytes().to_vec());
     let validated = raw.validate().unwrap();
@@ -97,10 +288,7 @@ pub(super) fn with_checker_inputs(
             &imports,
             &sources,
             &Support,
-            crate::SignatureResolutionInputs::new(
-                Some(external),
-                trusted.map(|signatures| crate::TrustedDeclarationInputs::new(signatures, None)),
-            ),
+            crate::SignatureResolutionInputs::new(Some(external), trusted),
             &mut diagnostics,
         )
         .unwrap(),
@@ -115,46 +303,15 @@ pub(super) fn with_checker_inputs(
         )
         .unwrap(),
     );
-    let (signatures, inhabitance) = declarations.parts_mut();
-    let mut checker = BodyChecker {
+    inspect(BodyPhaseInputs {
         collection: &collection,
         imports: &imports,
         names: &names,
-        external_names: Some(external),
-        sources: BTreeMap::from([(file, &sources[0])]),
-        signatures,
-        inhabitance,
+        sources: &sources,
+        declarations: &mut declarations,
         trait_environment: &mut trait_environment,
         diagnostics: &mut diagnostics,
-        recorder: DemandRecorder::new(&Support),
-        expressions: FactTable::new(),
-        const_eligibility: BTreeMap::new(),
-        preparing_numeric_tree: false,
-        evaluate_constant_declarations: true,
-        locals: FactTable::new(),
-        members: FactTable::new(),
-        invocations: FactTable::new(),
-        callable_values: FactTable::new(),
-        reduce_by_commitments: FactTable::new(),
-        regions: FactTable::new(),
-        checked_numeric: FactTable::new(),
-        ownership_operations: FactTable::new(),
-        bodies: FactTable::new(),
-        transfers: Vec::new(),
-        callable_instances: Vec::new(),
-        callable_instance_ids: BTreeMap::new(),
-        obligations: Vec::new(),
-        method_dispatches: Vec::new(),
-        region_stack: Vec::new(),
-        block_region_overrides: Vec::new(),
-        result_contexts: Vec::new(),
-        question_floors: vec![0],
-        checked_contexts: Vec::new(),
-        control_path_barriers: Vec::new(),
-        current_return: None,
-        current_owner: None,
-    };
-    inspect(&mut checker);
+    });
 }
 
 pub(super) fn root(store: &mut DiagnosticStore, i: usize) -> Poison {

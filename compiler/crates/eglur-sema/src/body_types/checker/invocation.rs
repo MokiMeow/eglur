@@ -17,6 +17,19 @@ pub(super) enum InvocationPlan {
     },
 }
 
+impl InvocationPlan {
+    pub(super) fn analysis_work(&self) -> Option<&crate::AnalysisRootTicket> {
+        match self {
+            Self::Application { continuation, .. } => continuation.work.as_ref(),
+            Self::Expression {
+                continuation: InvocationContinuation::Dispatch(dispatch),
+                ..
+            } => dispatch.analysis_work(),
+            Self::Expression { .. } | Self::Complete(_) => None,
+        }
+    }
+}
+
 pub(super) enum InvocationContinuation {
     ReduceBy(Box<ReduceByFrame>),
     TensorConstructor(Box<TensorConstructorFrame>),
@@ -28,6 +41,7 @@ pub(super) struct InvocationFrame {
     origin: OriginId,
     slots: Vec<ApplicationSlot>,
     contract: InvocationContract,
+    work: Option<crate::AnalysisRootTicket>,
 }
 
 impl InvocationFrame {
@@ -38,11 +52,13 @@ impl InvocationFrame {
         callee: ExprId,
         candidate: MethodCandidate,
         member_origin: OriginId,
+        work: Option<crate::AnalysisRootTicket>,
     ) -> Self {
         Self {
             expression,
             origin,
             slots,
+            work,
             contract: InvocationContract::Method {
                 candidate: Box::new(candidate),
                 member_origin,
@@ -57,11 +73,13 @@ impl InvocationFrame {
         slots: Vec<ApplicationSlot>,
         target: CanonicalTarget,
         parameters: Box<[GenericParameterId]>,
+        work: Option<crate::AnalysisRootTicket>,
     ) -> Self {
         Self {
             expression,
             origin,
             slots,
+            work,
             contract: InvocationContract::Constructor {
                 target,
                 parameters,
@@ -96,7 +114,7 @@ impl InvocationContract {
     fn generic_parameters<'a>(
         &'a self,
         signatures: &'a DeclarationSignatures,
-    ) -> Result<&'a [GenericParameterId], BodyTypingError> {
+    ) -> Result<&'a [GenericParameterId], BodyFlow> {
         Ok(match self {
             Self::Callable { callable, .. } => callable.generic_parameters(),
             Self::CallableValue { .. } => &[],
@@ -133,7 +151,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         call: &CallExpr,
         request: TypeRequest,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         if call.partial_application {
             return Ok(InvocationPlan::Complete(self.unsupported(
@@ -142,6 +160,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin,
             )));
         }
+
+        let request = self.prepare_call_work(
+            ExpressionKey::new(module, expression),
+            context.body,
+            request,
+        )?;
 
         let (callee_id, callee) = context
             .body
@@ -296,11 +320,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         call: &CallExpr,
-        request: TypeRequest,
+        request: CallTypingRequest,
         callable: CallableSignature,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
-        let slots = match self.bind_call_slots(source, origin, &callable, &call.arguments)? {
+        let slots = match self.bind_call_slots(source, origin, request.original, &callable, call)? {
             Outcome::Known(slots) => slots,
             outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
         };
@@ -309,6 +333,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
+                custody: ExpectationCustody::selection(request.original),
+                selection_work: request.selection.as_ref(),
                 generic_parameters: callable.generic_parameters(),
                 slots: &slots,
                 result_template: callable.result(),
@@ -316,7 +342,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 explicit_parameters: None,
                 preset_replacements: None,
                 allowed_ownership_parameter: None,
-                ty: request,
+                ty: request.expected,
                 defer_underconstrained: false,
             },
         )?;
@@ -326,6 +352,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 expression,
                 origin,
                 slots,
+                work: request.selection,
                 contract: InvocationContract::Callable {
                     callable,
                     callee: call.callee,
@@ -344,11 +371,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         call: &CallExpr,
-        request: TypeRequest,
+        request: CallTypingRequest,
         ty: TypeId,
         parameters: &[TypeId],
         result: TypeId,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         if let Some((argument, name)) = call
             .arguments
@@ -420,6 +447,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: index,
+                custody: ExpectationCustody::call_argument(request.original, index),
                 passing: ArgumentPassing::Value,
             })
             .collect::<Vec<_>>();
@@ -427,6 +455,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
+                custody: ExpectationCustody::selection(request.original),
+                selection_work: request.selection.as_ref(),
                 generic_parameters: &[],
                 slots: &slots,
                 result_template: result,
@@ -434,7 +464,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 explicit_parameters: None,
                 preset_replacements: None,
                 allowed_ownership_parameter: None,
-                ty: request,
+                ty: request.expected,
                 defer_underconstrained: false,
             },
         )?;
@@ -444,6 +474,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 expression,
                 origin,
                 slots,
+                work: request.selection,
                 contract: InvocationContract::CallableValue {
                     callee: call.callee,
                     ty,
@@ -456,7 +487,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: IntrinsicCallRequest<'_>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext { source, body, .. } = context;
         let IntrinsicCallRequest {
             expression,
@@ -554,6 +585,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: index,
+                custody: ExpectationCustody::call_argument(request.original, index),
                 passing: ArgumentPassing::Value,
             })
             .collect::<Vec<_>>();
@@ -569,6 +601,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin,
+                custody: ExpectationCustody::selection(request.original),
+                selection_work: request.selection.as_ref(),
                 generic_parameters: constructor.generic_parameters(),
                 slots: &slots,
                 result_template: constructor.result(),
@@ -577,7 +611,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 preset_replacements: None,
                 allowed_ownership_parameter: self
                     .conditional_ownership_parameter(target, constructor.generic_parameters()),
-                ty: request,
+                ty: request.expected,
                 defer_underconstrained: !qualified && self.is_reserved_constructor(target),
             },
         )?;
@@ -592,6 +626,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     target: target.clone(),
                     parameters: constructor.generic_parameters().into(),
                 },
+                work: request.selection,
             }),
         })
     }
@@ -602,7 +637,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: MethodCallRequest<'_>,
         candidate: MethodCandidate,
         passing: ArgumentPassing,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let bindings =
             Self::bind_method_argument_indices(&candidate.callable, &request.call.arguments)
@@ -618,6 +653,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             origin: self.expression_origin(source, request.receiver)?,
             related: self.parameter_span(&candidate.callable, receiver_parameter)?,
             evaluation_order: 0,
+            custody: ExpectationCustody::Caller,
             passing,
         });
         for (parameter_index, parameter) in candidate.callable.parameters()[1..].iter().enumerate()
@@ -634,6 +670,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: self.parameter_span(&candidate.callable, parameter)?,
                 evaluation_order: argument_index + 1,
+                custody: ExpectationCustody::call_argument(request.ty.original, argument_index),
                 passing: ArgumentPassing::Value,
             });
         }
@@ -641,6 +678,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin: request.origin,
+                custody: ExpectationCustody::selection(request.ty.original),
+                selection_work: request.ty.selection.as_ref(),
                 generic_parameters: candidate.callable.generic_parameters(),
                 slots: &slots,
                 result_template: candidate.callable.result(),
@@ -648,7 +687,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 explicit_parameters: Some(&candidate.explicit_parameters),
                 preset_replacements: Some(&candidate.preset_replacements),
                 allowed_ownership_parameter: None,
-                ty: request.ty,
+                ty: request.ty.expected,
                 defer_underconstrained: false,
             },
         )?;
@@ -663,6 +702,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     candidate: Box::new(candidate),
                     member_origin: request.member.origin(),
                 },
+                work: request.ty.selection,
             }),
         })
     }
@@ -672,12 +712,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         frame: InvocationFrame,
         outcome: Outcome<ResolvedApplication>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let Outcome::Known(application) = outcome else {
             return Ok(outcome.map(|_| unreachable!()));
         };
 
         let BodyContext { module, source, .. } = context;
+        self.expectation_work(
+            source.file(),
+            ExpectationCustody::Caller,
+            frame.work.as_ref(),
+        )?;
         if let InvocationContract::Method { candidate, .. } = &frame.contract
             && let Some(constraint) = &candidate.owner_constraint
             && !constraint.matches(self.signatures.types_mut(), &application.replacements)?
@@ -810,10 +855,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         callee: ExprId,
         ty: TypeId,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let mut chain = context.body.grouping_chain(callee).peekable();
         if chain.peek().is_none() {
-            return Err(BodyTypingError::WrongBodyExpression(callee));
+            return Err(BodyFlow::Internal(BodyTypingError::WrongBodyExpression(
+                callee,
+            )));
         }
         for (expression, _) in chain {
             self.record_expression(
@@ -831,7 +878,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         candidate: ReduceByCandidateExpr,
         request: TypeRequest,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -889,7 +936,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         continuation: InvocationContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         match continuation {
             InvocationContinuation::TensorConstructor(frame) => {
                 self.resume_tensor_constructor(context, frame, outcome)
@@ -908,7 +955,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         frame: ReduceByFrame,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let Outcome::Known(_) = outcome else {
             return Ok(InvocationPlan::Complete(outcome));
         };
@@ -935,7 +982,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         origin: OriginId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         self.type_error(
             source,
             origin,

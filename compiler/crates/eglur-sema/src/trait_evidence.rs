@@ -10,6 +10,7 @@ use crate::capability::{
     TypecheckCapability,
 };
 use crate::diagnostic::{SemanticDiagnosticError, record_type_error};
+use crate::record_reservation::RecordReservation;
 use crate::type_rendering::{DiagnosticTypeRenderer, DiagnosticTypeRenderingError};
 use crate::{
     BodyTypes, CallableInstanceId, CanonicalTarget, DeclarationCollection, DeclarationSignatures,
@@ -22,6 +23,10 @@ use crate::{
 
 mod proof;
 mod route;
+
+#[cfg(test)]
+mod record_growth_tests;
+
 use proof::ProofArena;
 use route::build_method_routes;
 
@@ -605,6 +610,9 @@ fn intern_environment(
         return Ok(id);
     }
     let id = EvidenceEnvironmentId::from_index(environments.len())?;
+
+    RecordReservation::for_append(environments).reserve(environments);
+
     ids.insert(entries.clone(), id);
     environments.push(EvidenceEnvironment { id, entries });
     Ok(id)

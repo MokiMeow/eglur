@@ -26,7 +26,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         value: &eglur_hir::ImplDecl,
         trait_ref: &TraitRef,
         target: TypeId,
-    ) -> Result<Resolution<Vec<AssociatedBindingSignature>>, SignatureResolutionError> {
+    ) -> Result<Resolution<Vec<AssociatedBindingSignature>>, SignatureFlow> {
         let info = self
             .trait_info
             .get(trait_ref.declaration())
@@ -226,7 +226,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         source: &SemanticSource<'hir>,
         hir: &HirFile,
         root: TypeRefId,
-    ) -> Result<Option<(OriginId, &'static str, &'static str)>, SignatureResolutionError> {
+    ) -> Result<Option<(OriginId, &'static str, &'static str)>, SignatureFlow> {
         let mut pending = vec![root];
         let mut reference = None;
         while let Some(type_ref) = pending.pop() {
@@ -278,7 +278,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         trait_ref: &TraitRef,
         target: TypeId,
         bindings: &[(AssociatedBindingSignature, TypeRefId)],
-    ) -> Result<Option<(Poison, BTreeSet<CanonicalTarget>)>, SignatureResolutionError> {
+    ) -> Result<Option<(Poison, BTreeSet<CanonicalTarget>)>, SignatureFlow> {
         let signatures = bindings
             .iter()
             .map(|(binding, _)| binding.clone())
@@ -309,7 +309,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         trait_ref: &TraitRef,
         target: TypeId,
         supplied: &[TrustedAssociatedBinding],
-    ) -> Result<Vec<AssociatedBindingSignature>, SignatureResolutionError> {
+    ) -> Result<Vec<AssociatedBindingSignature>, SignatureFlow> {
         let info = self
             .trait_info
             .get(trait_ref.declaration())
@@ -324,15 +324,15 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         for binding in supplied {
             let associated = CanonicalTarget::External(binding.associated.clone());
             if !expected.contains(&associated) || !seen.insert(associated) {
-                return Err(SignatureResolutionError::Trusted(
+                return Err(SignatureFlow::Internal(SignatureResolutionError::Trusted(
                     TrustedSignatureError::UnknownAssociatedType(binding.associated.clone()),
-                ));
+                )));
             }
         }
         if let Some(CanonicalTarget::External(missing)) = expected.difference(&seen).next() {
-            return Err(SignatureResolutionError::Trusted(
+            return Err(SignatureFlow::Internal(SignatureResolutionError::Trusted(
                 TrustedSignatureError::UnknownAssociatedType(missing.clone()),
-            ));
+            )));
         }
 
         let mut bindings = Vec::with_capacity(supplied.len());
@@ -354,30 +354,30 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             .cycle_sets()
             .is_some()
         {
-            return Err(SignatureResolutionError::Trusted(
+            return Err(SignatureFlow::Internal(SignatureResolutionError::Trusted(
                 TrustedSignatureError::InvalidTypePosition {
                     declaration: owner.clone(),
                     reason: "associated type binding cycle",
                 },
-            ));
+            )));
         }
         for (binding, input) in bindings.iter().zip(supplied) {
             if self.types.contains_ownership(binding.value)? {
-                return Err(SignatureResolutionError::Trusted(
+                return Err(SignatureFlow::Internal(SignatureResolutionError::Trusted(
                     TrustedSignatureError::InvalidTypePosition {
                         declaration: owner.clone(),
                         reason: "ownership type outside a complete callable boundary",
                     },
-                ));
+                )));
             }
             self.resolve_trusted_type(owner, generic_count, &input.value, TypePosition::Ordinary)?;
             if self.types.contains_reference(binding.value)? {
-                return Err(SignatureResolutionError::Trusted(
+                return Err(SignatureFlow::Internal(SignatureResolutionError::Trusted(
                     TrustedSignatureError::InvalidTypePosition {
                         declaration: owner.clone(),
                         reason: "reference-bearing associated type binding",
                     },
-                ));
+                )));
             }
         }
         for binding in &bindings {

@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod analysis_work;
 mod body_types;
 mod capability;
 mod declaration;
@@ -21,6 +22,7 @@ mod overloads;
 mod owned_poison;
 mod ownership;
 mod program;
+mod record_reservation;
 mod resolve;
 mod signatures;
 mod source;
@@ -31,6 +33,14 @@ mod type_patterns;
 mod type_rendering;
 mod types;
 
+pub use analysis_work::{
+    AnalysisBodyInputs, AnalysisCallInputFailure, AnalysisCallInputRegistry, AnalysisCallInputs,
+    AnalysisCallRegistryFailure, AnalysisRootBalance, AnalysisRootClaimError, AnalysisRootIdentity,
+    AnalysisRootScope, AnalysisRootStopReason, AnalysisRootTicket, AnalysisSourceInputFailure,
+    AnalysisSourceInputRegistry, AnalysisSourceInputs, AnalysisWork, AnalysisWorkAccounting,
+    AnalysisWorkCategory, AnalysisWorkFailure, AnalysisWorkIncomplete, AnalysisWorkOverflow,
+    AnalysisWorkPricing, AnalysisWorkUnits,
+};
 pub use body_types::*;
 pub use capability::*;
 pub use declaration::*;

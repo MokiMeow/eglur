@@ -199,7 +199,7 @@ impl DiagnosticTypeNames {
         })
     }
 
-    fn target_name(&self, target: &CanonicalTarget) -> Option<&str> {
+    pub(crate) fn target_name(&self, target: &CanonicalTarget) -> Option<&str> {
         self.target_names.get(target).map(AsRef::as_ref)
     }
 

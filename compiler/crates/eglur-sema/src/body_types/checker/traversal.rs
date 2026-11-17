@@ -24,7 +24,7 @@ enum Step {
     InCurrentRegion(ExprId, TypeRequest),
     Publish(ExpressionKey),
     Block(BlockFrame),
-    Statement(StmtId, Option<TypeId>),
+    Statement(StmtId, TypeRequest),
     ResumeStatement(StatementContinuation),
     ResumeBlock(BlockFrame),
     Value(Box<ValuePlan>),
@@ -50,13 +50,32 @@ enum Step {
     Cleanup(Cleanup),
 }
 
+struct ScopedStep {
+    step: Step,
+    work: Option<crate::AnalysisRootTicket>,
+}
+
+struct ScopedSteps<'a> {
+    pending: &'a mut Vec<ScopedStep>,
+    work: Option<&'a crate::AnalysisRootTicket>,
+}
+
+impl ScopedSteps<'_> {
+    fn push(&mut self, step: Step) {
+        self.pending.push(ScopedStep {
+            step,
+            work: self.work.cloned(),
+        });
+    }
+}
+
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn type_expression_steps(
         &mut self,
         context: BodyContext<'_, '_>,
         expression: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         self.execute_body_steps(context, vec![Step::Expression(expression, request)])
     }
 
@@ -68,13 +87,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         body: &Body,
         expression: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         self.execute_body_steps(
             BodyContext {
                 module,
                 source,
                 hir,
                 body,
+                work: None,
             },
             vec![Step::InCurrentRegion(expression, request)],
         )
@@ -83,19 +103,28 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     fn execute_body_steps(
         &mut self,
         context: BodyContext<'_, '_>,
-        mut pending: Vec<Step>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        pending: Vec<Step>,
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
+        let mut pending = pending
+            .into_iter()
+            .map(|step| ScopedStep {
+                step,
+                work: context.work.cloned(),
+            })
+            .collect();
         let result = self.run_body_steps(context, &mut pending);
-        let Err(mut error) = result else {
+        let Err(error) = result else {
             return result;
         };
 
         // Unwind lexical scopes without publishing or resuming failed work.
-        while let Some(step) = pending.pop() {
+        #[cfg(test)]
+        execution::tests::sweep_support::before_unwind(self);
+        while let Some(ScopedStep { step, .. }) = pending.pop() {
             if let Step::Cleanup(cleanup) = step
                 && let Err(cleanup_error) = self.finish_typing_scope(cleanup)
             {
-                error = cleanup_error;
+                self.retain_cleanup_failure(cleanup_error);
             }
         }
         Err(error)
@@ -104,13 +133,68 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     fn run_body_steps(
         &mut self,
         context: BodyContext<'_, '_>,
-        pending: &mut Vec<Step>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+        pending: &mut Vec<ScopedStep>,
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let mut expression_value = None;
         let mut statement_value = None;
         let mut completed_match_arm = None;
         let mut completed_result_context = None;
-        while let Some(step) = pending.pop() {
+        while let Some(ScopedStep { mut step, mut work }) = pending.pop() {
+            if !matches!(step, Step::Cleanup(_)) {
+                self.ensure_analysis_active()?;
+            }
+            if let Step::Invocation(plan) = &step
+                && let Some(selection) = plan.analysis_work()
+            {
+                work = Some(selection.clone());
+            }
+            match &mut step {
+                Step::Expression(_, request)
+                | Step::InCurrentRegion(_, request)
+                | Step::Statement(_, request) => {
+                    if request.work.is_none()
+                        && matches!(request.custody(), ExpectationCustody::Caller)
+                    {
+                        request.work = work.clone();
+                    }
+                    *request = self.attach_request_work(context.source.file(), request.clone())?;
+                    work = request.work.clone();
+                }
+                _ => {}
+            }
+            let context = BodyContext {
+                work: work.as_ref(),
+                ..context
+            };
+            #[cfg(test)]
+            {
+                use expectation::tests::{Event, ResumeKind, observe};
+                let kind = match &step {
+                    Step::ResumeValue(_) => Some(ResumeKind::Value),
+                    Step::ResumeApplication { .. } => Some(ResumeKind::Application),
+                    Step::ResumeInvocation(_) => Some(ResumeKind::Invocation),
+                    Step::ResumeStatement(_) => Some(ResumeKind::Statement),
+                    Step::ResumeBranch(_) => Some(ResumeKind::Branch),
+                    Step::ResumeNumeric(_) => Some(ResumeKind::Numeric),
+                    Step::ResumeNumericTree(_) => Some(ResumeKind::NumericTree),
+                    Step::FinishResult(_) => Some(ResumeKind::Result),
+                    Step::FinishChecked(_) => Some(ResumeKind::Checked),
+                    Step::FinishQuestion(_) => Some(ResumeKind::Question),
+                    _ => None,
+                };
+                if let Some(kind) = kind {
+                    observe(Event::Resume {
+                        owner: self.current_owner,
+                        kind,
+                        work: work.clone(),
+                    });
+                }
+            }
+            let mut scoped = ScopedSteps {
+                pending,
+                work: work.as_ref(),
+            };
+            let pending = &mut scoped;
             match step {
                 Step::Expression(expression, request) => {
                     match self.prepare_expression(context, expression, request)? {
@@ -122,7 +206,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         ExpressionPlan::Block {
                             key,
                             statements,
-                            expected,
+                            request,
                         } => {
                             pending.push(Step::Publish(key));
                             if self.block_region_overrides.last() != Some(&expression) {
@@ -130,7 +214,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 self.enter_control_region(region.clone())?;
                                 pending.push(Step::Cleanup(Cleanup::Region(region)));
                             }
-                            pending.push(Step::Block(BlockFrame::new(statements, expected)));
+                            pending.push(Step::Block(BlockFrame::new(statements, request)));
                         }
                         ExpressionPlan::Forward {
                             key,
@@ -194,17 +278,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     self.record_expression(key, outcome.clone())?;
                 }
                 Step::Block(mut block) => {
-                    if let Some((statement, expected, path)) = block.next_statement() {
+                    if let Some((statement, request, path)) = block.next_statement() {
                         let barrier = self.push_control_path_barrier(path);
                         pending.push(Step::ResumeBlock(block));
                         pending.push(Step::Cleanup(Cleanup::PathBarrier(barrier)));
-                        pending.push(Step::Statement(statement, expected));
+                        pending.push(Step::Statement(statement, request));
                     } else {
                         expression_value = Some(self.finish_block(block)?);
                     }
                 }
-                Step::Statement(statement, expected) => {
-                    let plan = self.prepare_statement(context, statement, expected)?;
+                Step::Statement(statement, request) => {
+                    let plan = self.prepare_statement(context, statement, request)?;
                     self.schedule_statement(plan, &mut statement_value, pending);
                 }
                 Step::ResumeStatement(continuation) => {
@@ -497,8 +581,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         plan: ApplicationPlan,
         invocation: Box<InvocationFrame>,
         value: &mut Option<Outcome<TypedExpression>>,
-        pending: &mut Vec<Step>,
-    ) -> Result<(), BodyTypingError> {
+        pending: &mut ScopedSteps<'_>,
+    ) -> Result<(), BodyFlow> {
         match plan {
             ApplicationPlan::Complete(outcome) => {
                 *value = Some(self.finish_invocation(context, *invocation, outcome)?);
@@ -525,8 +609,18 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         plan: StatementPlan,
         value: &mut Option<Outcome<BlockStep>>,
-        pending: &mut Vec<Step>,
+        pending: &mut ScopedSteps<'_>,
     ) {
+        let work = match &plan {
+            StatementPlan::Expression { request, .. } => {
+                request.work.clone().or_else(|| pending.work.cloned())
+            }
+            StatementPlan::Complete(_) => pending.work.cloned(),
+        };
+        let mut pending = ScopedSteps {
+            pending: &mut *pending.pending,
+            work: work.as_ref(),
+        };
         match plan {
             StatementPlan::Complete(outcome) => *value = Some(outcome),
             StatementPlan::Expression {

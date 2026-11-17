@@ -42,6 +42,7 @@ use crate::{
     TrustedInhabitanceEnvironment, TrustedLanguageItemEnvironment, TrustedNominalInhabitance,
     TypeId, TypeKind, TypeStoreError,
 };
+use execution::{CompletedSignatureTraversal, SignatureFlow};
 
 mod associated_bindings;
 mod contexts;
@@ -49,6 +50,7 @@ mod declarations;
 mod diagnostics;
 mod enum_variants;
 mod enums;
+mod execution;
 mod generic_names;
 mod generic_redeclarations;
 mod impl_headers;
@@ -94,6 +96,63 @@ pub fn resolve_declaration_signatures(
     inputs: SignatureResolutionInputs<'_>,
     diagnostics: &mut DiagnosticStore,
 ) -> Result<PhaseAnalysis<ResolvedDeclarationSemantics>, SignatureResolutionError> {
+    match resolve_signatures_inner(
+        collection,
+        imports,
+        sources,
+        support,
+        inputs,
+        diagnostics,
+        None,
+    )? {
+        SignatureExecution::Completed(phase) => Ok(*phase),
+        SignatureExecution::Interrupted(_) => {
+            Err(SignatureResolutionError::UnexpectedUnmeteredInterruption)
+        }
+    }
+}
+
+/// Admits original written inputs and carries their tickets through source work.
+/// Semantic operation metering and driver activation are separate responsibilities.
+pub fn resolve_declaration_signatures_with_work<'hir>(
+    collection: &DeclarationCollection,
+    imports: &ResolvedImports,
+    sources: &[SemanticSource<'hir>],
+    support: &dyn CompileSupport,
+    inputs: SignatureResolutionInputs<'_>,
+    diagnostics: &mut DiagnosticStore,
+    work: SignatureAnalysisWork<'_, 'hir>,
+) -> Result<SignatureExecution, SignatureResolutionError> {
+    resolve_signatures_inner(
+        collection,
+        imports,
+        sources,
+        support,
+        inputs,
+        diagnostics,
+        Some(work),
+    )
+}
+
+fn resolve_signatures_inner<'hir>(
+    collection: &DeclarationCollection,
+    imports: &ResolvedImports,
+    sources: &[SemanticSource<'hir>],
+    support: &dyn CompileSupport,
+    inputs: SignatureResolutionInputs<'_>,
+    diagnostics: &mut DiagnosticStore,
+    work: Option<SignatureAnalysisWork<'_, 'hir>>,
+) -> Result<SignatureExecution, SignatureResolutionError> {
+    if let Some(stop) = work.as_ref().and_then(|work| work.accounting.incomplete()) {
+        return Ok(SignatureExecution::Interrupted(Box::new(
+            InterruptedSignatures {
+                stop,
+                prefix: None,
+                demands: Vec::new(),
+                internal_failures: Vec::new(),
+            },
+        )));
+    }
     let mut recorder = DemandRecorder::new(support);
     let sources = sources_by_file(collection, sources)?;
     let capability =
@@ -103,7 +162,17 @@ pub fn resolve_declaration_signatures(
         supported &= recorder.require(capability, SemanticLocation::source(module.file()));
     }
     if !supported {
-        return Ok(recorder.finish(PhaseProduct::Unperformed));
+        return Ok(SignatureExecution::Completed(Box::new(
+            recorder.finish(PhaseProduct::Unperformed),
+        )));
+    }
+
+    if let Some(work) = &work {
+        for source in sources.values() {
+            work.inputs
+                .validate_source(work.accounting, source)
+                .map_err(SignatureResolutionError::AnalysisSourceInput)?;
+        }
     }
 
     let mut resolver = SignatureResolver::new(
@@ -115,25 +184,8 @@ pub fn resolve_declaration_signatures(
         inputs.trusted,
         diagnostics,
     )?;
-    resolver.resolve_trusted()?;
-    resolver.resolve_trusted_inherent_owners()?;
-    resolver.validate_language_items()?;
-    resolver.resolve_source_generics()?;
-    resolver.prime_source_impl_headers()?;
-    resolver.validate_source_impl_headers()?;
-    resolver.resolve_source_declarations()?;
-    resolver.validate_source_overload_families()?;
-    resolver.resolve_body_type_occurrences()?;
-    resolver.index_enum_variant_names()?;
-    let trusted_inhabitance = resolver.resolve_trusted_inhabitance()?;
-    let signatures = resolver.finish();
-    let inhabitance = InhabitanceFacts::new(trusted_inhabitance)?;
-    Ok(
-        recorder.finish(PhaseProduct::Performed(ResolvedDeclarationSemantics {
-            signatures,
-            inhabitance,
-        })),
-    )
+    resolver.analysis_work = work;
+    resolver.execute(recorder)
 }
 
 #[derive(Clone)]
@@ -259,6 +311,8 @@ impl<'hir> SourceCallable<'hir> {
 }
 
 struct SignatureResolver<'input, 'hir> {
+    analysis_work: Option<SignatureAnalysisWork<'input, 'hir>>,
+    language_items: LanguageItems,
     type_applications: super::applications::TypeApplicationFacts,
     collection: &'input DeclarationCollection,
     imports: &'input ResolvedImports,

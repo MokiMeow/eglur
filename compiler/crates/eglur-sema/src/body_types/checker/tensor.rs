@@ -21,7 +21,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         call: eglur_hir::DTypeCallExpr,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let (callee_id, callee) = context
             .body
@@ -73,7 +73,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         source: &SemanticSource<'_>,
         origin: OriginId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         self.type_error(
             source,
             origin,
@@ -92,7 +92,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         call: eglur_hir::DTypeCallExpr,
         declaration: CanonicalTarget,
         constructor: crate::TensorSourceConstructor,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let BodyContext { source, hir, .. } = context;
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::CheckTensorConstructors),
@@ -169,7 +169,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         frame: Box<TensorConstructorFrame>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         if let Some(argument) = frame.arguments.get(frame.next) {
             if argument.name.is_some() {
                 return Ok(InvocationPlan::Complete(self.unsupported(
@@ -180,7 +180,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             return Ok(InvocationPlan::Expression {
                 expression: argument.value,
-                request: TypeRequest::definitive(Some(frame.nat)),
+                request: TypeRequest::local(Some(frame.nat)),
                 path: frame.normal_continuation,
                 continuation: InvocationContinuation::TensorConstructor(frame),
             });
@@ -217,7 +217,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         mut frame: Box<TensorConstructorFrame>,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let value = match outcome {
             Outcome::Known(value) => value,
             other => return Ok(InvocationPlan::Complete(other)),
@@ -231,6 +231,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 origin: argument.origin,
                 related: None,
                 evaluation_order: 0,
+                custody: ExpectationCustody::Caller,
                 passing: ArgumentPassing::Value,
             };
             return self

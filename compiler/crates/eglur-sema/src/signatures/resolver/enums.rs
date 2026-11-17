@@ -9,7 +9,7 @@ impl SignatureResolver<'_, '_> {
         owner: &ExternalDefId,
         generic_parameters: &[GenericParameterId],
         variants: &[TrustedEnumVariant],
-    ) -> Result<DeclarationSignature, SignatureResolutionError> {
+    ) -> Result<DeclarationSignature, SignatureFlow> {
         let owner_target = CanonicalTarget::External(owner.clone());
         let mut members = Vec::with_capacity(variants.len());
         for variant in variants {
@@ -68,7 +68,7 @@ impl SignatureResolver<'_, '_> {
         })
     }
 
-    pub(super) fn index_enum_variant_names(&mut self) -> Result<(), SignatureResolutionError> {
+    pub(super) fn index_enum_variant_names(&mut self) -> Result<(), SignatureFlow> {
         for (target, fact) in self.declarations.iter() {
             let signature = match fact {
                 SemanticFact::Known(signature) => signature,

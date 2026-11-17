@@ -13,17 +13,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .map(|declaration| declaration.semantic_owner())
     }
 
-    pub(super) fn primitive(
-        &mut self,
-        primitive: PrimitiveType,
-    ) -> Result<TypeId, BodyTypingError> {
+    pub(super) fn primitive(&mut self, primitive: PrimitiveType) -> Result<TypeId, BodyFlow> {
         Ok(self.signatures.types_mut().primitive(primitive)?)
     }
 
-    pub(super) fn diagnostic_count(
-        &self,
-        count: usize,
-    ) -> Result<DiagnosticDataValue, BodyTypingError> {
+    pub(super) fn diagnostic_count(&self, count: usize) -> Result<DiagnosticDataValue, BodyFlow> {
         let count =
             i64::try_from(count).map_err(|_| BodyTypingError::DiagnosticCountOutOfRange(count))?;
         Ok(DiagnosticDataValue::from(count))
@@ -60,10 +54,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     }
 
     pub(super) fn type_occurrence(
-        &self,
+        &mut self,
         source: &SemanticSource<'_>,
         ty: TypeRefId,
-    ) -> Result<Outcome<TypeId>, BodyTypingError> {
+    ) -> Result<Outcome<TypeId>, BodyFlow> {
+        if let Some(work) = &mut self.analysis_work {
+            work.written_ticket(TypeOccurrenceId::new(source.file(), ty))?;
+        }
         match self
             .signatures
             .occurrence(TypeOccurrenceId::new(source.file(), ty))
@@ -71,7 +68,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             FactState::Known(occurrence) => occurrence
                 .canonical_type()
                 .map(Outcome::Known)
-                .ok_or(BodyTypingError::NonTypeOccurrence(ty)),
+                .ok_or(BodyFlow::Internal(BodyTypingError::NonTypeOccurrence(ty))),
             FactState::Poisoned(poison) => Ok(Outcome::Poisoned(poison.clone())),
             FactState::Unperformed => Ok(Outcome::Unperformed),
             FactState::NotApplicable => Ok(Outcome::NotApplicable),
@@ -82,19 +79,21 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         source: &SemanticSource<'_>,
         expression: ExprId,
-    ) -> Result<OriginId, BodyTypingError> {
+    ) -> Result<OriginId, BodyFlow> {
         source
             .hir()
             .and_then(|hir| hir.body(expression.body()).expression(expression))
             .map(eglur_hir::Expr::origin)
-            .ok_or(BodyTypingError::WrongBodyExpression(expression))
+            .ok_or(BodyFlow::Internal(BodyTypingError::WrongBodyExpression(
+                expression,
+            )))
     }
 
     pub(super) fn record_expression(
         &mut self,
         key: ExpressionKey,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let fact = match outcome {
             Outcome::Known(value) => Some(SemanticFact::Known(value)),
             Outcome::Poisoned(poison) => Some(SemanticFact::Poisoned(poison)),
@@ -111,7 +110,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         retained: &mut Option<Poison>,
         incoming: &Poison,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         *retained = Some(match retained.take() {
             Some(existing) => existing.merge(incoming)?,
             None => incoming.clone(),
@@ -119,7 +118,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Ok(())
     }
 
-    pub(super) fn is_fixed_width_integer(&self, ty: TypeId) -> Result<bool, BodyTypingError> {
+    pub(super) fn is_fixed_width_integer(&self, ty: TypeId) -> Result<bool, BodyFlow> {
         Ok(matches!(
             self.signatures.types().kind(ty)?,
             TypeKind::Primitive(
@@ -135,10 +134,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         ))
     }
 
-    pub(super) fn is_signed_fixed_width_integer(
-        &self,
-        ty: TypeId,
-    ) -> Result<bool, BodyTypingError> {
+    pub(super) fn is_signed_fixed_width_integer(&self, ty: TypeId) -> Result<bool, BodyFlow> {
         Ok(matches!(
             self.signatures.types().kind(ty)?,
             TypeKind::Primitive(
@@ -152,7 +148,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         ty: TypeId,
-    ) -> Result<Outcome<TypeId>, BodyTypingError> {
+    ) -> Result<Outcome<TypeId>, BodyFlow> {
         let owner = self
             .current_owner
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
@@ -172,7 +168,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         failure: TraitNormalization,
-    ) -> Result<Outcome<T>, BodyTypingError> {
+    ) -> Result<Outcome<T>, BodyFlow> {
         match failure {
             TraitNormalization::Poisoned(poison) => Ok(Outcome::Poisoned(poison)),
             TraitNormalization::InvalidArgument(violation) => {
@@ -223,7 +219,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         code: &'static str,
         message: impl Into<String>,
         data: BTreeMap<Box<str>, DiagnosticDataValue>,
-    ) -> Result<Poison, BodyTypingError> {
+    ) -> Result<Poison, BodyFlow> {
         let span =
             source
                 .origin_span(origin)
@@ -249,7 +245,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         message: impl Into<String>,
         related: impl IntoIterator<Item = RelatedSpan>,
         data: BTreeMap<Box<str>, DiagnosticDataValue>,
-    ) -> Result<Poison, BodyTypingError> {
+    ) -> Result<Poison, BodyFlow> {
         let span =
             source
                 .origin_span(origin)
@@ -274,7 +270,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         expected: TypeId,
         actual: TypeId,
-    ) -> Result<Poison, BodyTypingError> {
+    ) -> Result<Poison, BodyFlow> {
         self.type_error(
             source,
             origin,
@@ -299,7 +295,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         expected: TypeId,
         actual: TypeId,
-    ) -> Result<Poison, BodyTypingError> {
+    ) -> Result<Poison, BodyFlow> {
         let data = BTreeMap::from([
             (
                 Box::<str>::from("expected_type"),
@@ -346,7 +342,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Outcome::Unperformed
     }
 
-    pub(super) fn format_type(&self, ty: TypeId) -> Result<String, BodyTypingError> {
+    pub(super) fn format_type(&self, ty: TypeId) -> Result<String, BodyFlow> {
         let owner = self
             .current_owner
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
@@ -359,7 +355,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         .render_type(ty)?)
     }
 
-    pub(super) fn format_trait_ref(&self, trait_ref: &TraitRef) -> Result<String, BodyTypingError> {
+    pub(super) fn format_trait_ref(&self, trait_ref: &TraitRef) -> Result<String, BodyFlow> {
         let owner = self
             .current_owner
             .ok_or(BodyTypingError::MissingDiagnosticOwner)?;
@@ -390,13 +386,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         module: ModuleId,
         body: BodyId,
         origin: OriginId,
-    ) -> Result<LocalBindingId, BodyTypingError> {
+    ) -> Result<LocalBindingId, BodyFlow> {
         self.names
             .local_binding(module, body, origin)
-            .ok_or(BodyTypingError::MissingLocalOrigin {
+            .ok_or(BodyFlow::Internal(BodyTypingError::MissingLocalOrigin {
                 module,
                 body,
                 origin,
-            })
+            }))
     }
 }

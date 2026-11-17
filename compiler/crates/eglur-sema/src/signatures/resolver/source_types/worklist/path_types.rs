@@ -7,7 +7,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         path: &eglur_hir::Path,
         arguments: &[TypeRefId],
         origin: OriginId,
-    ) -> Result<TypePlan, SignatureResolutionError> {
+    ) -> Result<TypePlan, SignatureFlow> {
         let site = &request.site;
         let source = self.sources[&site.file];
         let context = &site.context;
@@ -193,21 +193,21 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         CanonicalTarget::External(_) => {
                             Ok(Self::position_type(Resolution::Unperformed, Some(target)))
                         }
-                        CanonicalTarget::Primitive(primitive) => {
-                            Err(SignatureResolutionError::UnexpectedPrimitiveTarget {
+                        CanonicalTarget::Primitive(primitive) => Err(SignatureFlow::Internal(
+                            SignatureResolutionError::UnexpectedPrimitiveTarget {
                                 primitive,
                                 expected: "a nominal declaration",
-                            })
-                        }
-                        CanonicalTarget::Intrinsic(intrinsic) => {
-                            Err(SignatureResolutionError::UnexpectedIntrinsicTarget {
+                            },
+                        )),
+                        CanonicalTarget::Intrinsic(intrinsic) => Err(SignatureFlow::Internal(
+                            SignatureResolutionError::UnexpectedIntrinsicTarget {
                                 intrinsic,
                                 expected: "a nominal declaration",
-                            })
-                        }
-                        CanonicalTarget::Source(_) => {
-                            Err(SignatureResolutionError::MissingTrustedSignature(target))
-                        }
+                            },
+                        )),
+                        CanonicalTarget::Source(_) => Err(SignatureFlow::Internal(
+                            SignatureResolutionError::MissingTrustedSignature(target),
+                        )),
                     };
                 };
                 if arguments.len() != expected {
@@ -278,7 +278,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         intrinsic: IntrinsicNominal,
         arguments: &[TypeRefId],
         origin: OriginId,
-    ) -> Result<TypePlan, SignatureResolutionError> {
+    ) -> Result<TypePlan, SignatureFlow> {
         if arguments.len() != intrinsic.arity() {
             let source = self.sources[&request.site.file];
             return Ok(Self::position_type(

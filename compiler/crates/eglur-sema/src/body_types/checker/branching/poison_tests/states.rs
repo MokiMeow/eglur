@@ -68,6 +68,7 @@ fn run(
         })
         .unwrap();
     let context = BodyContext {
+        work: None,
         module,
         source,
         hir,
@@ -88,7 +89,7 @@ fn run(
             source,
             ExpressionKey::new(module, expression_id),
             expression,
-            TypeRequest::definitive(Some(integer)),
+            TypeRequest::local(Some(integer)),
             initial,
         )
         .unwrap();

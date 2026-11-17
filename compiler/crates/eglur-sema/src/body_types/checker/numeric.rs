@@ -14,7 +14,7 @@ pub(super) enum NumericContinuation {
     BinaryLeft {
         frame: BinaryFrame,
         right: ExprId,
-        expected: Option<TypeId>,
+        request: TypeRequest,
     },
     BinaryRight {
         frame: BinaryFrame,
@@ -44,16 +44,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         continuation: NumericContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<NumericPlan, BodyTypingError> {
+    ) -> Result<NumericPlan, BodyFlow> {
         let outcome = match continuation {
             NumericContinuation::BinaryLeft {
                 frame,
                 right,
-                expected,
+                request,
             } => {
                 let right_expected = match &outcome {
                     Outcome::Known(left) if self.is_fixed_width_integer(left.ty)? => Some(left.ty),
-                    _ => expected,
+                    _ => request.expected_type(),
                 };
                 let path = match &outcome {
                     Outcome::Known(left) => left.normal_continuation,
@@ -61,7 +61,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 };
                 return Ok(NumericPlan::Expression {
                     expression: right,
-                    request: TypeRequest::definitive(right_expected),
+                    request: request.definitive_child(right_expected),
                     path,
                     continuation: NumericContinuation::BinaryRight {
                         frame,
@@ -83,7 +83,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: CheckedBinaryRequest,
-    ) -> Result<NumericPlan, BodyTypingError> {
+    ) -> Result<NumericPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -115,13 +115,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
         let left_const = self.is_const_evaluable_expression(module, body, left)?;
         let right_const = self.is_const_evaluable_expression(module, body, right)?;
-        let expected = match request.expected {
+        let expected = match request.expected_type() {
             Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
             _ => None,
         };
+        let request = request.definitive_child(expected);
         Ok(NumericPlan::Expression {
             expression: left,
-            request: TypeRequest::definitive(expected),
+            request: request.clone(),
             path: NormalContinuation::Present,
             continuation: NumericContinuation::BinaryLeft {
                 frame: BinaryFrame {
@@ -133,7 +134,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     right_const,
                 },
                 right,
-                expected,
+                request,
             },
         })
     }
@@ -144,7 +145,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         frame: BinaryFrame,
         left: Outcome<TypedExpression>,
         right: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BinaryFrame {
             key,
             origin,
@@ -248,7 +249,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         operand: ExprId,
         request: TypeRequest,
-    ) -> Result<NumericPlan, BodyTypingError> {
+    ) -> Result<NumericPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -264,13 +265,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(NumericPlan::Complete(Outcome::Unperformed));
         }
         let is_const = self.is_const_evaluable_expression(module, body, operand)?;
-        let expected = match request.expected {
+        let expected = match request.expected_type() {
             Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
             _ => None,
         };
         Ok(NumericPlan::Expression {
             expression: operand,
-            request: TypeRequest::definitive(expected),
+            request: request.definitive_child(expected),
             path: NormalContinuation::Present,
             continuation: NumericContinuation::Negation(NegationFrame {
                 key: ExpressionKey::new(module, expression),
@@ -285,7 +286,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         frame: NegationFrame,
         operand: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let NegationFrame {
             key,
             origin,
@@ -347,7 +348,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         )))
     }
 
-    fn is_nonnumeric_operand(&self, ty: TypeId) -> Result<bool, BodyTypingError> {
+    fn is_nonnumeric_operand(&self, ty: TypeId) -> Result<bool, BodyFlow> {
         Ok(match self.signatures.types().kind(ty)? {
             TypeKind::Primitive(dtype) => !dtype.is_numeric(),
             TypeKind::Never
@@ -367,17 +368,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         value: &TypedExpression,
         destination: PrimitiveType,
-    ) -> Result<bool, BodyTypingError> {
+    ) -> Result<bool, BodyFlow> {
         if let Some(value) = value.integer_constant {
             return Ok(IntegerValue::new(destination, value.value()).is_some());
         }
         let TypeKind::Primitive(source) = self.signatures.types().kind(value.ty)? else {
-            return Err(BodyTypingError::InvalidIntegerConstant);
+            return Err(BodyFlow::Internal(BodyTypingError::InvalidIntegerConstant));
         };
         let (Some((source_min, source_max)), Some((target_min, target_max))) =
             (source.integer_bounds(), destination.integer_bounds())
         else {
-            return Err(BodyTypingError::InvalidIntegerConstant);
+            return Err(BodyFlow::Internal(BodyTypingError::InvalidIntegerConstant));
         };
         Ok(target_min <= source_min && source_max <= target_max)
     }
@@ -398,7 +399,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         operator: CheckedNumericOperator,
         evaluation: IntegerEvaluation,
         primitive: PrimitiveType,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         match evaluation {
             IntegerEvaluation::Value(value) => {
                 let ty = self.primitive(value.primitive())?;
@@ -433,7 +434,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     ]),
                 )?))
             }
-            IntegerEvaluation::Invalid => Err(BodyTypingError::InvalidIntegerConstant),
+            IntegerEvaluation::Invalid => {
+                Err(BodyFlow::Internal(BodyTypingError::InvalidIntegerConstant))
+            }
         }
     }
 
@@ -442,7 +445,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         operator: CheckedNumericOperator,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let symbol = match operator {
             CheckedNumericOperator::Add => "+",
             CheckedNumericOperator::Subtract | CheckedNumericOperator::Negate => "-",

@@ -39,7 +39,7 @@ fn drive(
     checker: &mut BodyChecker<'_, '_, '_>,
     outcomes: Vec<Outcome<TypedExpression>>,
 ) -> (
-    Result<Outcome<TypedExpression>, BodyTypingError>,
+    Result<Outcome<TypedExpression>, BodyFlow>,
     Vec<NormalContinuation>,
 ) {
     let owner = checker
@@ -67,6 +67,7 @@ fn drive(
     assert_eq!(values.len(), outcomes.len());
 
     let context = BodyContext {
+        work: None,
         module,
         source,
         hir,
@@ -78,8 +79,10 @@ fn drive(
         .types_mut()
         .tuple(vec![integer; outcomes.len()])
         .unwrap();
-    let request = TypeRequest::definitive(Some(expected));
-    let mut plan = checker.prepare_tuple(values.clone(), request).unwrap();
+    let request = TypeRequest::local(Some(expected));
+    let mut plan = checker
+        .prepare_tuple(values.clone(), request.clone())
+        .unwrap();
     let mut paths = Vec::new();
     WORK.set(Work::default());
 
@@ -94,7 +97,7 @@ fn drive(
             panic!("every tuple element must be visited")
         };
         assert_eq!(expression, values[index]);
-        assert_eq!(actual.expected, Some(integer));
+        assert_eq!(actual.expected_type(), Some(integer));
         assert_eq!(actual.allow_deferred, request.allow_deferred);
         assert_eq!(actual.default_integer, request.default_integer);
         assert_eq!(actual.value_required, request.value_required);
@@ -349,9 +352,9 @@ fn foreign_tuple_inputs_fail_immediately_without_completion_and_keep_child_facts
                 let (outcome, paths) = drive(checker, outcomes);
                 assert!(matches!(
                     outcome,
-                    Err(BodyTypingError::DiagnosticStore(
+                    Err(BodyFlow::Internal(BodyTypingError::DiagnosticStore(
                         eglur_diagnostics::DiagnosticStoreError::ForeignPoison
-                    ))
+                    )))
                 ));
                 let visited = if foreign_first { 2 } else { count };
                 assert_eq!(paths.len(), visited);

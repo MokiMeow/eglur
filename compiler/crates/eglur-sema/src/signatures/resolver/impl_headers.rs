@@ -7,7 +7,7 @@ use crate::signatures::public_contracts::{
 mod poison_tests;
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
-    pub(super) fn resolve_source_generics(&mut self) -> Result<(), SignatureResolutionError> {
+    pub(super) fn resolve_source_generics(&mut self) -> Result<(), SignatureFlow> {
         let generic_ids = self
             .collection
             .modules()
@@ -27,7 +27,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         Ok(())
     }
 
-    pub(super) fn prime_source_impl_headers(&mut self) -> Result<(), SignatureResolutionError> {
+    pub(super) fn prime_source_impl_headers(&mut self) -> Result<(), SignatureFlow> {
         let implementations = self
             .collection
             .modules()
@@ -66,8 +66,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         declaration_id,
                     ))?;
             let ItemKind::Impl(value) = hir.item(item).kind() else {
-                return Err(SignatureResolutionError::WrongDeclarationItem(
-                    declaration_id,
+                return Err(SignatureFlow::Internal(
+                    SignatureResolutionError::WrongDeclarationItem(declaration_id),
                 ));
             };
             match self.resolve_source_impl_header(declaration_id, source, hir, value)? {
@@ -89,7 +89,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         source: &SemanticSource<'hir>,
         hir: &HirFile,
         value: &eglur_hir::ImplDecl,
-    ) -> Result<Resolution<TraitImplHeader>, SignatureResolutionError> {
+    ) -> Result<Resolution<TraitImplHeader>, SignatureFlow> {
         let mut poison = None;
         let generic_parameters = self.direct_generic_ids(declaration_id);
         if value.negative {
@@ -204,7 +204,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         }))
     }
 
-    pub(super) fn validate_source_impl_headers(&mut self) -> Result<(), SignatureResolutionError> {
+    pub(super) fn validate_source_impl_headers(&mut self) -> Result<(), SignatureFlow> {
         let trusted = self
             .retained_impl_headers
             .iter()
@@ -315,7 +315,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     fn public_impl_header_exposes_private_type(
         &self,
         header: &TraitImplHeader,
-    ) -> Result<bool, SignatureResolutionError> {
+    ) -> Result<bool, SignatureFlow> {
         if !conformance_is_externally_reachable(self.collection, &self.types, header)? {
             return Ok(false);
         }
@@ -340,7 +340,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         declaration_id: DefId,
         poison: Poison,
-    ) -> Result<(), SignatureResolutionError> {
+    ) -> Result<(), SignatureFlow> {
         let header = self
             .impl_headers
             .remove(&declaration_id)
@@ -360,7 +360,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn source_impl_authority_violation(
         &self,
         header: &TraitImplHeader,
-    ) -> Result<Option<(&'static str, &'static str)>, SignatureResolutionError> {
+    ) -> Result<Option<(&'static str, &'static str)>, SignatureFlow> {
         let trait_info = self
             .trait_info
             .get(header.trait_ref().declaration())
@@ -404,7 +404,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         code: &'static str,
         message: &'static str,
         related: Option<DefId>,
-    ) -> Result<Poison, SignatureResolutionError> {
+    ) -> Result<Poison, SignatureFlow> {
         let declaration = self
             .collection
             .declaration(declaration_id)
@@ -452,7 +452,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn prime_source_generic_bounds(
         &mut self,
         generic_ids: &[DefId],
-    ) -> Result<(), SignatureResolutionError> {
+    ) -> Result<(), SignatureFlow> {
         for &declaration_id in generic_ids {
             if self.source_generic_redeclarations.contains(&declaration_id) {
                 continue;
@@ -509,7 +509,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_generic(
         &mut self,
         declaration_id: DefId,
-    ) -> Result<Resolution<()>, SignatureResolutionError> {
+    ) -> Result<Resolution<()>, SignatureFlow> {
         if let Some(state) = self.source_generic_states.get(&declaration_id) {
             return Ok(match state {
                 SourceGenericState::Resolving | SourceGenericState::Unperformed => {
@@ -573,6 +573,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             let mut seen = BTreeSet::new();
             let parameter_name = parameter.name.text().unwrap_or("<invalid>");
             for &bound_id in &parameter.bounds {
+                let custody =
+                    self.original_source_custody(TypeOccurrenceId::new(file, bound_id))?;
+                self.claim_source_custody(&custody)?;
                 let bound = match self
                     .source_generic_bound_seeds
                     .get(&(declaration_id, bound_id))

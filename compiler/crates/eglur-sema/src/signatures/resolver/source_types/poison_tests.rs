@@ -388,7 +388,9 @@ fn source_type_list_foreign_error_preserves_prior_occurrences_and_stops_visiting
             };
             assert_eq!(
                 error,
-                SignatureResolutionError::DiagnosticStore(DiagnosticStoreError::ForeignPoison)
+                SignatureFlow::Internal(SignatureResolutionError::DiagnosticStore(
+                    DiagnosticStoreError::ForeignPoison
+                ))
             );
             assert_eq!(
                 WORK.get(),

@@ -80,6 +80,7 @@ fn checking_frames_preserve_early_abandonment_and_borrowed_foreign_refusal() {
                             .iter()
                             .enumerate()
                             .map(|(i, a)| ApplicationArgument {
+                                work: None,
                                 slot: ApplicationSlot {
                                     name: format!("v{i}").into_boxed_str(),
                                     template: integer,
@@ -87,6 +88,7 @@ fn checking_frames_preserve_early_abandonment_and_borrowed_foreign_refusal() {
                                     origin: body.expression(a.value).unwrap().origin(),
                                     related: None,
                                     evaluation_order: i,
+                                    custody: ExpectationCustody::Caller,
                                     passing: ArgumentPassing::Value,
                                 },
                                 typed: None,
@@ -162,9 +164,9 @@ fn checking_frames_preserve_early_abandonment_and_borrowed_foreign_refusal() {
                 if mode.starts_with("foreign") {
                     assert!(matches!(
                         result,
-                        Err(BodyTypingError::DiagnosticStore(
+                        Err(BodyFlow::Internal(BodyTypingError::DiagnosticStore(
                             DiagnosticStoreError::ForeignPoison
-                        ))
+                        )))
                     ));
                     assert_eq!(visits, if mode.ends_with("first") { 2 } else { count });
                     assert_eq!(

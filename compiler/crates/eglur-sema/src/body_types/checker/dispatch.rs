@@ -9,14 +9,14 @@ struct DispatchRequest {
     expression: ExprId,
     origin: OriginId,
     call: CallExpr,
-    ty: TypeRequest,
+    ty: CallTypingRequest,
 }
 
 pub(super) struct QualifiedMemberCallRequest<'a> {
     pub(super) expression: ExprId,
     pub(super) origin: OriginId,
     pub(super) call: &'a CallExpr,
-    pub(super) ty: TypeRequest,
+    pub(super) ty: CallTypingRequest,
     pub(super) member: &'a Name,
     pub(super) owner: CanonicalTarget,
     pub(super) owner_origin: OriginId,
@@ -28,6 +28,15 @@ pub(super) enum DispatchContinuation {
         frame: Box<DispatchArgumentsFrame>,
         argument: ExprId,
     },
+}
+
+impl DispatchContinuation {
+    pub(super) fn analysis_work(&self) -> Option<&crate::AnalysisRootTicket> {
+        match self {
+            Self::Receiver(frame) => frame.request.ty.selection.as_ref(),
+            Self::Argument { frame, .. } => frame.request.ty.selection.as_ref(),
+        }
+    }
 }
 
 pub(super) struct MethodReceiverFrame {
@@ -102,7 +111,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: QualifiedMemberCallRequest<'_>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         if !request.member.is_valid() {
             return Ok(InvocationPlan::Complete(Outcome::Poisoned(
@@ -200,8 +209,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.bind_call_slots(
                     source,
                     request.origin,
+                    request.ty.original,
                     &first.callable,
-                    &request.call.arguments,
+                    request.call,
                 )?
                 .map(|_| unreachable!()),
             ));
@@ -232,7 +242,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: QualifiedMemberCallRequest<'_>,
         owner: QualifiedMethodOwner,
         name: &NameKey,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let family =
             match self.inherent_method_family(source, request.origin, &owner.target, name)? {
@@ -280,8 +290,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 self.bind_call_slots(
                     source,
                     request.origin,
+                    request.ty.original,
                     first.template.callable(),
-                    &request.call.arguments,
+                    request.call,
                 )?
                 .map(|_| unreachable!()),
             ));
@@ -309,7 +320,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: MethodCallRequest<'_>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let member = request.member;
         if !member.is_valid() {
@@ -331,7 +342,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
 
         Ok(InvocationPlan::Expression {
             expression: request.receiver,
-            request: TypeRequest::definitive(None),
+            request: TypeRequest::definitive(None).with_work(request.ty.selection.clone()),
             path: NormalContinuation::Present,
             continuation: InvocationContinuation::Dispatch(DispatchContinuation::Receiver(
                 Box::new(MethodReceiverFrame {
@@ -353,7 +364,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         frame: MethodReceiverFrame,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let Outcome::Known(value) = outcome else {
             return Ok(InvocationPlan::Complete(outcome));
         };
@@ -446,9 +457,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         origin: OriginId,
         call: &CallExpr,
-        request: TypeRequest,
+        request: CallTypingRequest,
         targets: &[CanonicalTarget],
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         if !self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::ResolveOverloads),
@@ -505,15 +516,21 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             let first = candidates
                 .first()
                 .ok_or(BodyTypingError::EmptyDeclarationSet)?;
-            return match self.bind_call_slots(source, origin, &first.callable, &call.arguments)? {
+            return match self.bind_call_slots(
+                source,
+                origin,
+                request.original,
+                &first.callable,
+                call,
+            )? {
                 Outcome::Poisoned(poison) => {
                     Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)))
                 }
                 Outcome::Unperformed => Ok(InvocationPlan::Complete(Outcome::Unperformed)),
                 Outcome::Deferred => Ok(InvocationPlan::Complete(Outcome::Deferred)),
-                Outcome::Known(_) | Outcome::NotApplicable => {
-                    Err(BodyTypingError::InconsistentOverloadBinding)
-                }
+                Outcome::Known(_) | Outcome::NotApplicable => Err(BodyFlow::Internal(
+                    BodyTypingError::InconsistentOverloadBinding,
+                )),
             };
         }
 
@@ -536,13 +553,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         mut frame: Box<DispatchArgumentsFrame>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         if let Some(argument) = frame.request.call.arguments.get(frame.next) {
+            let custody = ExpectationCustody::call_argument(frame.request.ty.original, frame.next);
             let argument = argument.value;
             frame.next += 1;
             return Ok(InvocationPlan::Expression {
                 expression: argument,
-                request: TypeRequest::definitive(None),
+                request: TypeRequest::definitive(None)
+                    .with_custody(custody)
+                    .with_work(
+                        matches!(custody, ExpectationCustody::Caller)
+                            .then(|| frame.request.ty.selection.clone())
+                            .flatten(),
+                    ),
                 path: frame.normal_continuation,
                 continuation: InvocationContinuation::Dispatch(DispatchContinuation::Argument {
                     frame,
@@ -596,7 +620,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         continuation: DispatchContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         match continuation {
             DispatchContinuation::Receiver(frame) => {
                 self.resume_method_receiver(context, *frame, outcome)
@@ -626,7 +650,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: DispatchRequest,
         selection: MethodSelection,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let call = &request.call;
         let explicit = match self.resolve_explicit_method_arguments(source, &call.type_arguments)? {
@@ -722,7 +746,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         member: &Name,
         candidates: Vec<OverloadCandidate>,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let name = NameKey::from_hir(member).expect("valid method name has canonical spelling");
         let explicit =
@@ -824,7 +848,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         member: &Name,
         candidates: Vec<QualifiedConcreteCandidate>,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let presented = candidates
             .iter()
@@ -930,13 +954,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: DispatchRequest,
         member: &Name,
         candidate: MethodCandidate,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let slots = match self.bind_call_slots(
             source,
             request.origin,
+            request.ty.original,
             &candidate.callable,
-            &request.call.arguments,
+            &request.call,
         )? {
             Outcome::Known(slots) => slots,
             outcome => return Ok(InvocationPlan::Complete(outcome.map(|_| unreachable!()))),
@@ -945,6 +970,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             ApplicationRequest {
                 origin: request.origin,
+                custody: ExpectationCustody::selection(request.ty.original),
+                selection_work: request.ty.selection.as_ref(),
                 generic_parameters: candidate.callable.generic_parameters(),
                 slots: &slots,
                 result_template: candidate.callable.result(),
@@ -952,7 +979,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 explicit_parameters: Some(&candidate.explicit_parameters),
                 preset_replacements: Some(&candidate.preset_replacements),
                 allowed_ownership_parameter: None,
-                ty: request.ty,
+                ty: request.ty.expected,
                 defer_underconstrained: false,
             },
         )?;
@@ -965,6 +992,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 request.call.callee,
                 candidate,
                 member.origin(),
+                request.ty.selection,
             )),
         })
     }
@@ -975,7 +1003,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         request: DispatchRequest,
         candidates: Vec<OverloadCandidate>,
         typed_arguments: BTreeMap<ExprId, TypedExpression>,
-    ) -> Result<InvocationPlan, BodyTypingError> {
+    ) -> Result<InvocationPlan, BodyFlow> {
         let source = context.source;
         let call = &request.call;
         let explicit_arguments = call

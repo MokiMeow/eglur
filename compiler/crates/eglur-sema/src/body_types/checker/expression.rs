@@ -15,7 +15,7 @@ pub(super) enum ExpressionPlan {
     Block {
         key: ExpressionKey,
         statements: Box<[StmtId]>,
-        expected: Option<TypeId>,
+        request: TypeRequest,
     },
     Forward {
         key: ExpressionKey,
@@ -57,13 +57,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         body: &Body,
         expression: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         self.type_expression_steps(
             BodyContext {
                 module,
                 source,
                 hir,
                 body,
+                work: None,
             },
             expression,
             request,
@@ -75,7 +76,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         expression_id: ExprId,
         request: TypeRequest,
-    ) -> Result<ExpressionPlan, BodyTypingError> {
+    ) -> Result<ExpressionPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -83,6 +84,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             ..
         } = context;
         let key = ExpressionKey::new(module, expression_id);
+        #[cfg(test)]
+        execution::tests::checkpoint(self, key)?;
+        #[cfg(test)]
+        work::tests::checkpoint(self, key)?;
+        self.ensure_analysis_active()?;
+        let request = self.attach_request_work(source.file(), request)?;
+        #[cfg(test)]
+        expectation::observe_request(key, request.clone());
+
         match self.expressions.state(&key) {
             FactState::Known(expression) => {
                 return Ok(ExpressionPlan::Complete(Outcome::Known(expression.clone())));
@@ -99,12 +109,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .expression(expression_id)
             .ok_or(BodyTypingError::WrongBodyExpression(expression_id))?;
         let origin = expression.origin();
-        let request = if let Some(expected) = request.expected {
-            match self.normalize_type_at(source, origin, expected)? {
-                Outcome::Known(expected) => TypeRequest {
-                    expected: Some(expected),
-                    ..request
-                },
+        let request = if let Some(expected) = request.expected() {
+            match self.normalize_expected_at(source, origin, expected)? {
+                Outcome::Known(expected) => request.retarget(Some(expected.ty())),
                 Outcome::Poisoned(poison) => {
                     let outcome = Outcome::Poisoned(poison);
                     return Ok(ExpressionPlan::Publish { key, outcome });
@@ -128,7 +135,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 return Ok(ExpressionPlan::Block {
                     key,
                     statements,
-                    expected: request.expected,
+                    request,
                 });
             }
             ExprKind::Literal(literal) => self.type_literal(source, &literal, request)?,
@@ -403,10 +410,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         literal: &Literal,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let primitive = match literal.kind() {
             LiteralKind::Integer => return self.type_integer_literal(source, literal, request),
-            LiteralKind::Float => match request.expected {
+            LiteralKind::Float => match request.expected_type() {
                 Some(expected)
                     if matches!(
                         self.signatures.types().kind(expected)?,
@@ -451,8 +458,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         literal: &Literal,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        let expected = match request.expected {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
+        let expected = match request.expected_type() {
             Some(expected) => match self.signatures.types().kind(expected)? {
                 TypeKind::Primitive(primitive) => Some((expected, *primitive)),
                 _ => None,
@@ -555,7 +562,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         expression: ExprId,
         request: TypeRequest,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let key = ResolutionKey::Expression { module, expression };
         if let Some(deferred) = self.names.deferred(key).cloned() {
@@ -587,9 +594,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 NameLookupMaterialization::Poisoned(poison) => Ok(Outcome::Poisoned(poison)),
                 NameLookupMaterialization::Unperformed => Ok(Outcome::Unperformed),
                 NameLookupMaterialization::NotApplicable => Ok(Outcome::NotApplicable),
-                NameLookupMaterialization::MissingCapabilityInput(capability) => {
-                    Err(BodyTypingError::MissingCapabilityInput(capability))
-                }
+                NameLookupMaterialization::MissingCapabilityInput(capability) => Err(
+                    BodyFlow::Internal(BodyTypingError::MissingCapabilityInput(capability)),
+                ),
             };
         }
         match self.names.fact(key) {
@@ -608,7 +615,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         request: TypeRequest,
         resolution: &ResolvedName,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         match resolution {
             ResolvedName::Local(binding) => match self.locals.state(binding) {
@@ -715,9 +722,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
                 self.type_named_callable_value(module, source, expression, request, &callables)
             }
-            ResolvedName::TypeMemberOwner(_) => {
-                Err(BodyTypingError::WrongBodyExpression(expression))
-            }
+            ResolvedName::TypeMemberOwner(_) => Err(BodyFlow::Internal(
+                BodyTypingError::WrongBodyExpression(expression),
+            )),
         }
     }
 }

@@ -6,7 +6,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         request: &TraitRequest,
         result: Resolution<TraitRef>,
         written: Option<CanonicalTarget>,
-    ) -> Result<Resolution<TraitRef>, SignatureResolutionError> {
+    ) -> Result<Resolution<TraitRef>, SignatureFlow> {
         let source = self.sources[&request.site.file];
         let hir = self.source_hir(request.site.file)?;
         let origin = hir.type_ref(request.type_ref).origin();
@@ -16,7 +16,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn prepare_trait_plan(
         &mut self,
         request: &TraitRequest,
-    ) -> Result<TraitPlan, SignatureResolutionError> {
+    ) -> Result<TraitPlan, SignatureFlow> {
         let site = &request.site;
         let source = self.sources[&site.file];
         let hir = self.source_hir(site.file)?;
@@ -77,21 +77,21 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 CanonicalTarget::External(_) => {
                     Ok(TraitPlan::complete(Resolution::Unperformed, Some(target)))
                 }
-                CanonicalTarget::Primitive(primitive) => {
-                    Err(SignatureResolutionError::UnexpectedPrimitiveTarget {
+                CanonicalTarget::Primitive(primitive) => Err(SignatureFlow::Internal(
+                    SignatureResolutionError::UnexpectedPrimitiveTarget {
                         primitive: *primitive,
                         expected: "a trait declaration",
-                    })
-                }
-                CanonicalTarget::Intrinsic(intrinsic) => {
-                    Err(SignatureResolutionError::UnexpectedIntrinsicTarget {
+                    },
+                )),
+                CanonicalTarget::Intrinsic(intrinsic) => Err(SignatureFlow::Internal(
+                    SignatureResolutionError::UnexpectedIntrinsicTarget {
                         intrinsic: *intrinsic,
                         expected: "a trait declaration",
-                    })
-                }
-                CanonicalTarget::Source(_) => {
-                    Err(SignatureResolutionError::MissingTrustedSignature(target))
-                }
+                    },
+                )),
+                CanonicalTarget::Source(_) => Err(SignatureFlow::Internal(
+                    SignatureResolutionError::MissingTrustedSignature(target),
+                )),
             };
         };
         if arguments.len() != info.arity {
@@ -112,7 +112,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         frame: TraitFrame,
         result: Resolution<TypeId>,
-    ) -> Result<TraitPlan, SignatureResolutionError> {
+    ) -> Result<TraitPlan, SignatureFlow> {
         match frame.continuation {
             TraitContinuation::Arguments {
                 target,
@@ -131,7 +131,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &mut self,
         parent: &TraitRequest,
         continuation: TraitContinuation,
-    ) -> Result<TraitPlan, SignatureResolutionError> {
+    ) -> Result<TraitPlan, SignatureFlow> {
         let TraitContinuation::Arguments { target, children } = continuation;
         if let Some(request) = children.next() {
             return Ok(TraitPlan::await_type(

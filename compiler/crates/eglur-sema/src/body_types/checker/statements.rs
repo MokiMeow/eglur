@@ -30,7 +30,7 @@ pub(super) enum StatementContinuation {
     Return {
         statement: StmtId,
         value: ExprId,
-        expected: TypeId,
+        expected: ExpectedType,
     },
 }
 
@@ -39,38 +39,36 @@ pub(super) struct PreparedLet {
     mutability: Mutability,
     pattern: PatternId,
     initializer: ExprId,
-    expected: Option<TypeId>,
+    expected: Option<ExpectedType>,
 }
 
 pub(super) struct BlockFrame {
     remaining: std::vec::IntoIter<StmtId>,
-    expected: Option<TypeId>,
+    request: TypeRequest,
     state: UnitOutcomeFold,
     result: Option<TypeId>,
     reachable: bool,
 }
 
 impl BlockFrame {
-    pub(super) fn new(statements: Box<[StmtId]>, expected: Option<TypeId>) -> Self {
+    pub(super) fn new(statements: Box<[StmtId]>, request: TypeRequest) -> Self {
         Self {
             remaining: statements.into_vec().into_iter(),
-            expected,
+            request,
             state: UnitOutcomeFold::Known,
             result: None,
             reachable: true,
         }
     }
 
-    pub(super) fn next_statement(
-        &mut self,
-    ) -> Option<(StmtId, Option<TypeId>, NormalContinuation)> {
+    pub(super) fn next_statement(&mut self) -> Option<(StmtId, TypeRequest, NormalContinuation)> {
         let statement = self.remaining.next()?;
         let path = if self.reachable {
             NormalContinuation::Present
         } else {
             NormalContinuation::Absent
         };
-        Some((statement, self.expected, path))
+        Some((statement, self.request.clone(), path))
     }
 }
 
@@ -79,7 +77,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         mut block: BlockFrame,
         next: Outcome<BlockStep>,
-    ) -> Result<BlockFrame, BodyTypingError> {
+    ) -> Result<BlockFrame, BodyFlow> {
         if block.reachable
             && let Outcome::Known(step) = &next
         {
@@ -101,7 +99,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn finish_block(
         &mut self,
         block: BlockFrame,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         match block.state.finish() {
             Outcome::Known(()) => {
                 if block.reachable {
@@ -137,8 +135,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         statement_id: StmtId,
-        expected: Option<TypeId>,
-    ) -> Result<StatementPlan, BodyTypingError> {
+        request: TypeRequest,
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext { source, body, .. } = context;
         let statement = body
             .statement(statement_id)
@@ -195,7 +193,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             },
             StmtKind::Yield(value) => StatementPlan::Expression {
                 expression: *value,
-                request: TypeRequest::definitive(expected),
+                request: request.definitive_child(request.expected_type()),
                 path: NormalContinuation::Present,
                 continuation: StatementContinuation::Yield(statement_id),
             },
@@ -232,7 +230,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         continuation: StatementContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<StatementPlan, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let result = match continuation {
             StatementContinuation::Let(request) => self
@@ -272,7 +270,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 value,
                 expected,
             } => {
-                let outcome = self.check_return_value(source, value, expected, outcome)?;
+                let outcome = self.check_return_value(source, value, expected.ty(), outcome)?;
                 if matches!(&outcome,
                     Outcome::Known(value) if value.normal_continuation.is_present())
                 {
@@ -288,12 +286,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: LetBindingRequest,
-    ) -> Result<StatementPlan, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
             hir,
             body,
+            ..
         } = context;
         let LetBindingRequest {
             origin,
@@ -331,7 +330,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let expected = match annotation {
             Some(annotation) => match self.type_occurrence(source, annotation)? {
                 Outcome::Known(ty) => {
-                    match self.normalize_type_at(source, hir.type_ref(annotation).origin(), ty)? {
+                    let expected = ExpectedType::written(ty, source.file(), annotation);
+                    match self.normalize_expected_at(
+                        source,
+                        hir.type_ref(annotation).origin(),
+                        expected,
+                    )? {
                         Outcome::Known(ty) => Some(ty),
                         Outcome::Poisoned(poison) => {
                             return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
@@ -377,7 +381,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
         Ok(StatementPlan::Expression {
             expression: initializer,
-            request: TypeRequest::definitive(expected),
+            request: TypeRequest::definitive(expected.clone()),
             path: NormalContinuation::Present,
             continuation: StatementContinuation::Let(PreparedLet {
                 origin,
@@ -394,7 +398,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         request: PreparedLet,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+    ) -> Result<Outcome<NormalContinuation>, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -427,14 +431,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             Outcome::Unperformed | Outcome::NotApplicable => return Ok(Outcome::Unperformed),
         };
-        if let Some(expected) = expected
-            && !self.signatures.types().is_assignable(value.ty, expected)?
+        if let Some(expected) = expected.as_ref()
+            && !self
+                .signatures
+                .types()
+                .is_assignable(value.ty, expected.ty())?
         {
             let value_origin = body
                 .expression(initializer)
                 .ok_or(BodyTypingError::WrongBodyExpression(initializer))?
                 .origin();
-            let poison = self.assignment_mismatch(source, value_origin, expected, value.ty)?;
+            let poison = self.assignment_mismatch(source, value_origin, expected.ty(), value.ty)?;
             self.bind_pattern_poison(module, body, pattern, poison.clone())?;
             return Ok(Outcome::Poisoned(poison));
         }
@@ -444,7 +451,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             source,
             body,
             pattern,
-            expected.unwrap_or(value.ty),
+            expected.as_ref().map_or(value.ty, ExpectedType::ty),
             PatternBindingMode::Let(mutability),
         )
         .map(|outcome| outcome.map(|_| normal_continuation))
@@ -457,7 +464,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: ExprId,
         value: ExprId,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<StatementPlan, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext {
             module,
             source,
@@ -516,7 +523,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .origin();
         Ok(StatementPlan::Expression {
             expression: value,
-            request: TypeRequest::definitive(Some(target_value.ty)),
+            request: TypeRequest::local(Some(target_value.ty)),
             path: target_value.normal_continuation,
             continuation: StatementContinuation::AssignmentValue {
                 origin,
@@ -533,7 +540,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         target: TypedExpression,
         value_origin: OriginId,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+    ) -> Result<Outcome<NormalContinuation>, BodyFlow> {
         match outcome {
             Outcome::Known(value)
                 if self.signatures.types().is_assignable(value.ty, target.ty)? =>
@@ -564,14 +571,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         request: ReturnStatementRequest,
-    ) -> Result<StatementPlan, BodyTypingError> {
+    ) -> Result<StatementPlan, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let ReturnStatementRequest {
             statement,
             origin,
             value,
         } = request;
-        let Some(expected) = self.current_return else {
+        let Some(expected) = self.current_return.clone() else {
             let poison = self.type_error(
                 source,
                 origin,
@@ -582,7 +589,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             return Ok(StatementPlan::Complete(Outcome::Poisoned(poison)));
         };
         let unit = self.primitive(PrimitiveType::Unit)?;
-        match (value, expected == unit) {
+        match (value, expected.ty() == unit) {
             (None, true) => {
                 self.record_return_transfer(module, statement)?;
                 Ok(StatementPlan::Complete(Outcome::Known(BlockStep::exit())))
@@ -609,7 +616,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             (Some(value), false) => Ok(StatementPlan::Expression {
                 expression: value,
-                request: TypeRequest::definitive(Some(expected)),
+                request: TypeRequest::definitive(Some(expected.clone())),
                 path: NormalContinuation::Present,
                 continuation: StatementContinuation::Return {
                     statement,
@@ -625,7 +632,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         origin: OriginId,
         value: Outcome<TypedExpression>,
-    ) -> Result<Outcome<NormalContinuation>, BodyTypingError> {
+    ) -> Result<Outcome<NormalContinuation>, BodyFlow> {
         match value {
             Outcome::Known(value)
                 if self.signatures.types().ownership_root(value.ty)?.is_some() =>
@@ -653,7 +660,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         expected: TypeId,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let Outcome::Known(value) = outcome else {
             return Ok(outcome);
         };

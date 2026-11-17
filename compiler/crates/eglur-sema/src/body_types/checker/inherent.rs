@@ -75,7 +75,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         owner: &CanonicalTarget,
         name: &NameKey,
-    ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyTypingError> {
+    ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyFlow> {
         match owner {
             CanonicalTarget::Primitive(owner) => self.trusted_inherent_method_family(
                 source,
@@ -121,7 +121,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         head: &ConcreteOwnerHead,
         missing: crate::UnavailableCompileInput,
         name: &NameKey,
-    ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyTypingError> {
+    ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyFlow> {
         let location = SemanticLocation::origin(source.file(), origin);
         let supported = self.recorder.require(
             CompileCapability::Typecheck(TypecheckCapability::ResolveTrustedInherentMethods),
@@ -148,7 +148,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         subject: TypeId,
         name: &NameKey,
-    ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyTypingError> {
+    ) -> Result<Outcome<Option<InherentMethodFamily>>, BodyFlow> {
         let owner = match self.signatures.types().kind(subject)? {
             TypeKind::Primitive(primitive) => CanonicalTarget::Primitive(*primitive),
             TypeKind::Nominal {
@@ -168,7 +168,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &self,
         module: ModuleId,
         family: &InherentMethodFamily,
-    ) -> Result<bool, BodyTypingError> {
+    ) -> Result<bool, BodyFlow> {
         match family {
             InherentMethodFamily::Source(targets) => {
                 self.inherent_family_is_inaccessible(module, targets)
@@ -180,7 +180,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn inherent_family_templates(
         &self,
         family: &InherentMethodFamily,
-    ) -> Result<Outcome<Vec<InherentMethodTemplate>>, BodyTypingError> {
+    ) -> Result<Outcome<Vec<InherentMethodTemplate>>, BodyFlow> {
         let members = match family {
             InherentMethodFamily::Source(targets) => targets
                 .iter()
@@ -196,7 +196,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .ok_or(BodyTypingError::UnknownCallable(member.callable()))?;
                     Ok((callable.declaration().clone(), Some(member.clone())))
                 })
-                .collect::<Result<Vec<_>, BodyTypingError>>()?,
+                .collect::<Result<Vec<_>, BodyFlow>>()?,
         };
         let mut templates = Vec::with_capacity(members.len());
         for (target, member) in members {
@@ -222,7 +222,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         template: InherentMethodTemplate,
         subject: Option<TypeId>,
-    ) -> Result<Outcome<Option<MethodCandidate>>, BodyTypingError> {
+    ) -> Result<Outcome<Option<MethodCandidate>>, BodyFlow> {
         match template {
             InherentMethodTemplate::Source(callable) => {
                 let Some(subject) = subject else {
@@ -272,7 +272,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         subject: TypeId,
         parameters: &[GenericParameterId],
         replacements: &mut BTreeMap<GenericParameterId, TypeId>,
-    ) -> Result<bool, BodyTypingError> {
+    ) -> Result<bool, BodyFlow> {
         Ok(crate::overloads::match_inference_patterns(
             self.signatures.types_mut(),
             [(pattern, subject, false)],

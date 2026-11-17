@@ -1,7 +1,12 @@
 use super::*;
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
-    pub(super) fn finish(mut self) -> PhaseAnalysis<BodyTypes> {
+    pub(super) fn finish(
+        mut self,
+        _: execution::CompletedBodyTraversal,
+    ) -> PhaseAnalysis<BodyTypes> {
+        #[cfg(test)]
+        execution::tests::sweep_support::finished();
         self.transfers.sort();
         self.transfers.dedup();
         debug_assert!(self.region_stack.is_empty());
@@ -28,7 +33,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }))
     }
 
-    pub(super) fn check_all(&mut self) -> Result<(), BodyTypingError> {
+    pub(super) fn check_all(&mut self) -> Result<(), BodyFlow> {
+        self.ensure_analysis_active()?;
         let declarations = self
             .collection
             .modules()
@@ -61,7 +67,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         Ok(())
     }
 
-    pub(super) fn check_declaration(&mut self, declaration: DefId) -> Result<(), BodyTypingError> {
+    pub(super) fn check_declaration(&mut self, declaration: DefId) -> Result<(), BodyFlow> {
+        self.ensure_analysis_active()?;
         let signature = match self.signatures.source_declaration(declaration) {
             FactState::Known(signature) => signature.clone(),
             FactState::Poisoned(poison) => {
@@ -90,6 +97,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             Ok(())
         })();
         self.current_owner = previous_owner;
+        #[cfg(test)]
+        if let Some(fact) = self.bodies.recorded_state(&declaration) {
+            execution::tests::sweep_support::published_body(declaration, fact);
+        }
         result
     }
 
@@ -97,14 +108,20 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         declaration: DefId,
         signature: &CallableSignature,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let (module, source, hir, item) = self.source_item(declaration)?;
         let ItemKind::Function(function) = item.kind() else {
-            return Err(BodyTypingError::WrongDeclarationKind(declaration));
+            return Err(BodyFlow::Internal(BodyTypingError::WrongDeclarationKind(
+                declaration,
+            )));
         };
         let body = hir.body(function.body);
-        let result_ty =
-            match self.normalize_type_at(source, function.name.origin(), signature.result())? {
+        let result_expected = function.return_type.map_or_else(
+            || ExpectedType::caller(signature.result()),
+            |type_ref| ExpectedType::written(signature.result(), source.file(), type_ref),
+        );
+        let result_expected =
+            match self.normalize_expected_at(source, function.name.origin(), result_expected)? {
                 Outcome::Known(ty) => ty,
                 Outcome::Poisoned(poison) => {
                     return self.record_body_outcome(
@@ -115,7 +132,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
                 Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => return Ok(()),
             };
-        let previous_return = self.current_return.replace(result_ty);
+        let result_ty = result_expected.ty();
+        let previous_return = self.current_return.replace(result_expected.clone());
         let region = ControlRegionKey::Callable(declaration);
         self.enter_control_region(region.clone())?;
         let outcome = (|| {
@@ -159,7 +177,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             hir,
                             body,
                             expression,
-                            TypeRequest::definitive(Some(result_ty)),
+                            TypeRequest::definitive(Some(result_expected)),
                         )?;
                         self.check_return_value(source, expression, result_ty, value)
                     }
@@ -169,9 +187,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 Outcome::Deferred | Outcome::NotApplicable => Ok(Outcome::Unperformed),
             }
         })();
-        self.leave_control_region(&region)?;
+        let cleanup = self.leave_control_region(&region);
         self.current_return = previous_return;
+        if let Err(error) = cleanup {
+            self.retain_cleanup_failure(error.clone());
+            if outcome.is_ok() {
+                return Err(error.into());
+            }
+        }
         let outcome = outcome?;
+        self.ensure_analysis_active()?;
         self.record_body_outcome(declaration, result_ty, outcome)
     }
 
@@ -179,10 +204,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         declaration: DefId,
         expected: TypeId,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let (module, source, hir, item) = self.source_item(declaration)?;
         let ItemKind::Const(value) = item.kind() else {
-            return Err(BodyTypingError::WrongDeclarationKind(declaration));
+            return Err(BodyFlow::Internal(BodyTypingError::WrongDeclarationKind(
+                declaration,
+            )));
         };
         let body = hir.body(value.body);
         if self.evaluate_constant_declarations {
@@ -226,7 +253,8 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 );
             }
         }
-        let expected = match self.normalize_type_at(source, item.origin(), expected)? {
+        let original_expected = ExpectedType::written(expected, source.file(), value.ty);
+        let expected = match self.normalize_expected_at(source, item.origin(), original_expected)? {
             Outcome::Known(ty) => ty,
             Outcome::Poisoned(poison) => {
                 return self.record_body_outcome(declaration, expected, Outcome::Poisoned(poison));
@@ -239,11 +267,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             hir,
             body,
             value.value,
-            TypeRequest::definitive(Some(expected)),
+            TypeRequest::definitive(Some(expected.clone())),
         )?;
         let outcome = match outcome {
             Outcome::Known(actual)
-                if self.signatures.types().is_assignable(actual.ty, expected)? =>
+                if self
+                    .signatures
+                    .types()
+                    .is_assignable(actual.ty, expected.ty())? =>
             {
                 Outcome::Known(actual)
             }
@@ -252,7 +283,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     .expression(value.value)
                     .ok_or(BodyTypingError::WrongBodyExpression(value.value))?
                     .origin();
-                Outcome::Poisoned(self.assignment_mismatch(source, origin, expected, actual.ty)?)
+                Outcome::Poisoned(self.assignment_mismatch(
+                    source,
+                    origin,
+                    expected.ty(),
+                    actual.ty,
+                )?)
             }
             other => other,
         };
@@ -267,7 +303,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         } else {
             outcome
         };
-        self.record_body_outcome(declaration, expected, outcome)
+        self.record_body_outcome(declaration, expected.ty(), outcome)
     }
 
     pub(super) fn record_body_outcome(
@@ -275,7 +311,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         declaration: DefId,
         result: TypeId,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let fact = match outcome {
             Outcome::Known(_) => Some(SemanticFact::Known(BodyTypeSummary { result })),
             Outcome::Poisoned(poison) => Some(SemanticFact::Poisoned(poison)),

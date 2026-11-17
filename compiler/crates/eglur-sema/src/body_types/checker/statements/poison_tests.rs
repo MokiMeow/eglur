@@ -38,7 +38,7 @@ fn source(count: usize) -> String {
 }
 
 struct BlockRun {
-    outcome: Result<Outcome<TypedExpression>, BodyTypingError>,
+    outcome: Result<Outcome<TypedExpression>, BodyFlow>,
     paths: Vec<NormalContinuation>,
     metadata: Vec<(Option<TypeId>, bool)>,
 }
@@ -77,7 +77,7 @@ fn drive(checker: &mut BodyChecker<'_, '_, '_>, outcomes: Vec<Outcome<BlockStep>
     checker.current_owner = Some(owner);
     let region = ControlRegionKey::Callable(owner);
     checker.enter_control_region(region.clone()).unwrap();
-    let mut frame = BlockFrame::new(statements.clone(), Some(integer));
+    let mut frame = BlockFrame::new(statements.clone(), TypeRequest::local(Some(integer)));
     let mut paths = Vec::new();
     let mut metadata = Vec::new();
     WORK.set(Work::default());
@@ -87,7 +87,7 @@ fn drive(checker: &mut BodyChecker<'_, '_, '_>, outcomes: Vec<Outcome<BlockStep>
             .next_statement()
             .expect("every later statement must be visited");
         assert_eq!(statement, statements[index]);
-        assert_eq!(expected, Some(integer));
+        assert_eq!(expected.expected_type(), Some(integer));
         paths.push(path);
         let child = next.clone().map(|_| checker.value_expression(integer));
         checker
@@ -402,9 +402,9 @@ fn foreign_block_inputs_fail_immediately_and_keep_published_child_pools() {
                 let run = drive(checker, outcomes);
                 assert!(matches!(
                     run.outcome,
-                    Err(BodyTypingError::DiagnosticStore(
+                    Err(BodyFlow::Internal(BodyTypingError::DiagnosticStore(
                         eglur_diagnostics::DiagnosticStoreError::ForeignPoison
-                    ))
+                    )))
                 ));
                 let visited = if foreign_first { 2 } else { count };
                 assert_eq!(run.paths.len(), visited);

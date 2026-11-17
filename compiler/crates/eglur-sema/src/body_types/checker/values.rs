@@ -62,9 +62,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         values: Box<[ExprId]>,
         request: TypeRequest,
-    ) -> Result<ValuePlan, BodyTypingError> {
-        let expected = match request.expected {
-            Some(expected) => match self.signatures.types().kind(expected)? {
+    ) -> Result<ValuePlan, BodyFlow> {
+        let expected = match request.expected() {
+            Some(expected) => match self.signatures.types().kind(expected.ty())? {
                 TypeKind::Tuple(elements) if elements.len() == values.len() => {
                     Some(elements.to_vec())
                 }
@@ -86,12 +86,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }))
     }
 
-    fn advance_tuple(&mut self, mut frame: Box<TupleFrame>) -> Result<ValuePlan, BodyTypingError> {
+    fn advance_tuple(&mut self, mut frame: Box<TupleFrame>) -> Result<ValuePlan, BodyFlow> {
         if let Some(&expression) = frame.values.get(frame.next) {
-            let request = TypeRequest {
-                expected: frame.expected.as_ref().map(|elements| elements[frame.next]),
-                ..frame.request
-            };
+            let request = frame
+                .request
+                .retarget(frame.expected.as_ref().map(|elements| elements[frame.next]));
             frame.next += 1;
             return Ok(ValuePlan::Expression {
                 expression,
@@ -123,7 +122,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         receiver: ExprId,
         member: Name,
-    ) -> Result<ValuePlan, BodyTypingError> {
+    ) -> Result<ValuePlan, BodyFlow> {
         let source = context.source;
         if !member.is_valid() {
             return Ok(ValuePlan::Complete(Outcome::Poisoned(
@@ -156,7 +155,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         context: BodyContext<'_, '_>,
         continuation: ValueContinuation,
         outcome: Outcome<TypedExpression>,
-    ) -> Result<ValuePlan, BodyTypingError> {
+    ) -> Result<ValuePlan, BodyFlow> {
         let outcome = match continuation {
             ValueContinuation::Tuple(mut frame) => {
                 match outcome {
@@ -202,7 +201,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         receiver: ExprId,
         member: &Name,
         receiver_value: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let BodyContext { module, source, .. } = context;
         let Outcome::Known(receiver_value) = receiver_value else {
             return Ok(receiver_value);
@@ -239,10 +238,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 }
                 FactState::Known(DeclarationSignature::Nominal { .. }) => {
                     let CanonicalTarget::External(owner) = owner else {
-                        return Err(BodyTypingError::UnexpectedSignatureKind {
-                            target: owner,
-                            expected: "struct or enum",
-                        });
+                        return Err(BodyFlow::Internal(
+                            BodyTypingError::UnexpectedSignatureKind {
+                                target: owner,
+                                expected: "struct or enum",
+                            },
+                        ));
                     };
                     self.recorder.refuse_input(
                         crate::UnavailableCompileInput::TrustedValueMemberInventory { owner },
@@ -251,10 +252,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     return Ok(Outcome::Unperformed);
                 }
                 FactState::Known(_) | FactState::NotApplicable => {
-                    return Err(BodyTypingError::UnexpectedSignatureKind {
-                        target: owner,
-                        expected: "struct, enum or trusted nominal",
-                    });
+                    return Err(BodyFlow::Internal(
+                        BodyTypingError::UnexpectedSignatureKind {
+                            target: owner,
+                            expected: "struct, enum or trusted nominal",
+                        },
+                    ));
                 }
             };
         let member_name = member.text().expect("valid member has text");
@@ -266,10 +269,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
                 FactState::Unperformed => return Ok(Outcome::Unperformed),
                 FactState::Known(_) | FactState::NotApplicable => {
-                    return Err(BodyTypingError::UnexpectedSignatureKind {
-                        target: declaration,
-                        expected: "stored field",
-                    });
+                    return Err(BodyFlow::Internal(
+                        BodyTypingError::UnexpectedSignatureKind {
+                            target: declaration,
+                            expected: "stored field",
+                        },
+                    ));
                 }
             };
             let mutability = self.storage_field_mutability(&declaration)?;
@@ -284,10 +289,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 FactState::Poisoned(poison) => return Ok(Outcome::Poisoned(poison.clone())),
                 FactState::Unperformed => return Ok(Outcome::Unperformed),
                 FactState::Known(_) | FactState::NotApplicable => {
-                    return Err(BodyTypingError::UnexpectedSignatureKind {
-                        target: declaration,
-                        expected: "property",
-                    });
+                    return Err(BodyFlow::Internal(
+                        BodyTypingError::UnexpectedSignatureKind {
+                            target: declaration,
+                            expected: "property",
+                        },
+                    ));
                 }
             };
             (declaration, MemberKind::Property, template)
@@ -342,7 +349,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         member: &Name,
         subject: TypeId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let name = member.text().expect("valid member has text");
         let receiver_type = self.format_type(subject)?;
         let poison = self.type_error(
@@ -367,7 +374,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         value_id: ExprId,
         mutability: Mutability,
         value: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let Outcome::Known(value) = value else {
             return Ok(value);
         };
@@ -405,7 +412,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         source: &SemanticSource<'_>,
         operand: ExprId,
         operand_value: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let Outcome::Known(operand_value) = operand_value else {
             return Ok(operand_value);
         };
@@ -441,7 +448,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         index: &str,
         origin: OriginId,
         receiver_value: Outcome<TypedExpression>,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let Outcome::Known(receiver_value) = receiver_value else {
             return Ok(receiver_value);
         };

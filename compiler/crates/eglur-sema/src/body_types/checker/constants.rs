@@ -30,7 +30,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn check_constant_declarations(
         &mut self,
         declarations: &[DefId],
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let positions = declarations
             .iter()
             .enumerate()
@@ -41,7 +41,9 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             let (module, source, hir, item) = self.source_item(declaration)?;
             self.require_constant_declarations(source, item.origin());
             let ItemKind::Const(value) = item.kind() else {
-                return Err(BodyTypingError::WrongDeclarationKind(declaration));
+                return Err(BodyFlow::Internal(BodyTypingError::WrongDeclarationKind(
+                    declaration,
+                )));
             };
             let mut edges = BTreeMap::new();
             for (expression, value) in hir.body(value.body).expressions() {
@@ -163,7 +165,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         origin: OriginId,
         code: &'static str,
         message: &str,
-    ) -> Result<(), BodyTypingError> {
+    ) -> Result<(), BodyFlow> {
         let (_, source, _, _) = self.source_item(declaration)?;
         let previous = self.current_owner.replace(declaration);
         let poison = self.type_error(source, origin, code, message, BTreeMap::new());
@@ -179,7 +181,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         expression: ExprId,
         target: &CanonicalTarget,
         ty: TypeId,
-    ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
+    ) -> Result<Outcome<TypedExpression>, BodyFlow> {
         let origin = self.expression_origin(source, expression)?;
         if !self.require_constant_declarations(source, origin) {
             return Ok(Outcome::Unperformed);
@@ -205,11 +207,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
         let (module, _, _, item) = self.source_item(*declaration)?;
         let ItemKind::Const(value) = item.kind() else {
-            return Err(BodyTypingError::WrongDeclarationKind(*declaration));
+            return Err(BodyFlow::Internal(BodyTypingError::WrongDeclarationKind(
+                *declaration,
+            )));
         };
         let key = ExpressionKey::new(module, value.value);
         let FactState::Known(initializer) = self.expressions.state(&key) else {
-            return Err(BodyTypingError::InvalidIntegerConstant);
+            return Err(BodyFlow::Internal(BodyTypingError::InvalidIntegerConstant));
         };
         let Some(value) = initializer.integer_constant else {
             return Ok(self.unsupported(

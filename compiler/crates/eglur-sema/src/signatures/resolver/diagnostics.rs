@@ -8,7 +8,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         origin: OriginId,
         written_target: Option<CanonicalTarget>,
         result: Resolution<TypeId>,
-    ) -> Result<Resolution<TypeId>, SignatureResolutionError> {
+    ) -> Result<Resolution<TypeId>, SignatureFlow> {
+        self.ensure_analysis_active()?;
         let fact = match &result {
             Resolution::Known(ty) => Some(SemanticFact::Known(ResolvedTypeOccurrence {
                 resolved: ResolvedType::Type(*ty),
@@ -32,7 +33,8 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         origin: OriginId,
         written_target: Option<CanonicalTarget>,
         result: Resolution<TraitRef>,
-    ) -> Result<Resolution<TraitRef>, SignatureResolutionError> {
+    ) -> Result<Resolution<TraitRef>, SignatureFlow> {
+        self.ensure_analysis_active()?;
         let fact = match &result {
             Resolution::Known(trait_ref) => Some(SemanticFact::Known(ResolvedTypeOccurrence {
                 resolved: ResolvedType::Trait(trait_ref.clone()),
@@ -53,22 +55,24 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &self,
         source: &SemanticSource<'hir>,
         origin: OriginId,
-    ) -> Result<Resolution<T>, SignatureResolutionError> {
+    ) -> Result<Resolution<T>, SignatureFlow> {
         source
             .invalid_poison(origin)
             .cloned()
             .map(Resolution::Poisoned)
-            .ok_or(SignatureResolutionError::MissingInvalidPoison {
-                file: source.file(),
-                origin,
-            })
+            .ok_or(SignatureFlow::Internal(
+                SignatureResolutionError::MissingInvalidPoison {
+                    file: source.file(),
+                    origin,
+                },
+            ))
     }
 
     pub(super) fn invalid_path_resolution<T>(
         &self,
         source: &SemanticSource<'hir>,
         path: &eglur_hir::Path,
-    ) -> Result<Resolution<T>, SignatureResolutionError> {
+    ) -> Result<Resolution<T>, SignatureFlow> {
         let mut poison = None;
         for segment in path.segments().iter().filter(|segment| !segment.is_valid()) {
             let found = source.invalid_poison(segment.origin()).ok_or(
@@ -81,10 +85,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         }
         poison
             .map(Resolution::Poisoned)
-            .ok_or(SignatureResolutionError::MissingInvalidPoison {
-                file: source.file(),
-                origin: path.origin(),
-            })
+            .ok_or(SignatureFlow::Internal(
+                SignatureResolutionError::MissingInvalidPoison {
+                    file: source.file(),
+                    origin: path.origin(),
+                },
+            ))
     }
 
     pub(super) fn source_error(
@@ -94,7 +100,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         code: &'static str,
         message: impl Into<String>,
         data: BTreeMap<Box<str>, DiagnosticDataValue>,
-    ) -> Result<Poison, SignatureResolutionError> {
+    ) -> Result<Poison, SignatureFlow> {
         Ok(record_type_error(
             self.diagnostics,
             code,
@@ -112,7 +118,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         code: &'static str,
         message: impl Into<String>,
         data: BTreeMap<Box<str>, DiagnosticDataValue>,
-    ) -> Result<Poison, SignatureResolutionError> {
+    ) -> Result<Poison, SignatureFlow> {
         Ok(record_type_error_for_obligation(
             self.diagnostics,
             key,
@@ -129,7 +135,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         origin: OriginId,
         expected: usize,
         actual: usize,
-    ) -> Result<Poison, SignatureResolutionError> {
+    ) -> Result<Poison, SignatureFlow> {
         self.source_error(
             source,
             origin,
@@ -150,7 +156,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         source: &SemanticSource<'hir>,
         origin: OriginId,
         reason: &str,
-    ) -> Result<Poison, SignatureResolutionError> {
+    ) -> Result<Poison, SignatureFlow> {
         self.source_error(
             source,
             origin,
@@ -167,14 +173,16 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         &self,
         source: &SemanticSource<'hir>,
         origin: OriginId,
-    ) -> Result<SourceSpan, SignatureResolutionError> {
+    ) -> Result<SourceSpan, SignatureFlow> {
         source
             .origin_span(origin)
             .cloned()
-            .ok_or(SignatureResolutionError::MissingOriginSpan {
-                file: source.file(),
-                origin,
-            })
+            .ok_or(SignatureFlow::Internal(
+                SignatureResolutionError::MissingOriginSpan {
+                    file: source.file(),
+                    origin,
+                },
+            ))
     }
 
     pub(super) fn source_hir(

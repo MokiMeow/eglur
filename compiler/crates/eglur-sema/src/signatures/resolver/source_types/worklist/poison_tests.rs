@@ -40,6 +40,7 @@ fn with_children(count: usize, inspect: impl FnOnce(TypeChildren, [TypeId; 3])) 
         };
         let request = TypeRequest {
             site: Rc::new(SourceSite {
+                custody: SourceCustody::Unmetered,
                 owner,
                 file: source.file(),
                 context: resolver.source_context(owner, false).unwrap(),
@@ -219,7 +220,9 @@ fn foreign_child_error_retains_prior_roots_and_does_not_advance_cursor() {
             .unwrap_err();
         assert_eq!(
             error,
-            SignatureResolutionError::DiagnosticStore(DiagnosticStoreError::ForeignPoison)
+            SignatureFlow::Internal(SignatureResolutionError::DiagnosticStore(
+                DiagnosticStoreError::ForeignPoison
+            ))
         );
         assert_eq!(children.next, 2);
         assert!(children.next().is_some());

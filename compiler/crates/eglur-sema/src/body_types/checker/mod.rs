@@ -43,6 +43,8 @@ mod constants;
 mod construction;
 mod control;
 mod dispatch;
+mod execution;
+mod expectation;
 mod expression;
 mod failure;
 mod inherent;
@@ -58,6 +60,13 @@ mod support;
 mod tensor;
 mod traversal;
 mod values;
+mod work;
+
+use work::CallTypingRequest;
+pub use work::{BodyAnalysisInput, BodyAnalysisWork};
+
+use execution::BodyFlow;
+use expectation::{ExpectationCustody, ExpectedType};
 
 #[cfg(test)]
 mod test_support;
@@ -81,6 +90,85 @@ pub fn typecheck_bodies(
     trait_environment: &mut TraitEnvironment,
     diagnostics: &mut DiagnosticStore,
 ) -> Result<PhaseAnalysis<BodyTypes>, BodyTypingError> {
+    match typecheck_bodies_inner(
+        collection,
+        imports,
+        names,
+        external_names,
+        sources,
+        support,
+        declarations,
+        trait_environment,
+        diagnostics,
+        None,
+    )? {
+        BodyExecution::Completed(phase) => Ok(*phase),
+        BodyExecution::Interrupted(_) => Err(BodyTypingError::UnexpectedUnmeteredInterruption),
+    }
+}
+
+/// Runs body analysis with explicit attempt custody, without implicit limits.
+///
+/// The caller retains source and body inputs across phases and passes. This
+/// boundary preserves interruptions; operation metering and per-request ticket
+/// attachment remain the analysis consumers' responsibility.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the phase boundary keeps independently owned semantic products explicit"
+)]
+pub fn typecheck_bodies_with_work<'hir>(
+    collection: &DeclarationCollection,
+    imports: &ResolvedImports,
+    names: &NameResolution,
+    external_names: Option<&ExternalNameEnvironment>,
+    sources: &[SemanticSource<'hir>],
+    support: &dyn CompileSupport,
+    declarations: &mut ResolvedDeclarationSemantics,
+    trait_environment: &mut TraitEnvironment,
+    diagnostics: &mut DiagnosticStore,
+    analysis_work: BodyAnalysisWork<'_, 'hir>,
+) -> Result<BodyExecution, BodyTypingError> {
+    typecheck_bodies_inner(
+        collection,
+        imports,
+        names,
+        external_names,
+        sources,
+        support,
+        declarations,
+        trait_environment,
+        diagnostics,
+        Some(analysis_work),
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "both execution modes share the independently owned phase inputs"
+)]
+fn typecheck_bodies_inner<'hir>(
+    collection: &DeclarationCollection,
+    imports: &ResolvedImports,
+    names: &NameResolution,
+    external_names: Option<&ExternalNameEnvironment>,
+    sources: &[SemanticSource<'hir>],
+    support: &dyn CompileSupport,
+    declarations: &mut ResolvedDeclarationSemantics,
+    trait_environment: &mut TraitEnvironment,
+    diagnostics: &mut DiagnosticStore,
+    analysis_work: Option<BodyAnalysisWork<'_, 'hir>>,
+) -> Result<BodyExecution, BodyTypingError> {
+    if let Some(stop) = analysis_work
+        .as_ref()
+        .and_then(|work| work.accounting().incomplete())
+    {
+        return Ok(BodyExecution::Interrupted(Box::new(InterruptedBody {
+            stop,
+            prefix: BodyTypingPrefix::empty(),
+            demands: Vec::new(),
+            internal_failures: Vec::new(),
+        })));
+    }
     let mut recorder = DemandRecorder::new(support);
     let capability = CompileCapability::Typecheck(TypecheckCapability::CheckBodies);
     let mut supported = true;
@@ -88,7 +176,9 @@ pub fn typecheck_bodies(
         supported &= recorder.require(capability, SemanticLocation::source(module.file()));
     }
     if !supported {
-        return Ok(recorder.finish(PhaseProduct::Unperformed));
+        return Ok(BodyExecution::Completed(Box::new(
+            recorder.finish(PhaseProduct::Unperformed),
+        )));
     }
 
     let mut source_map = BTreeMap::new();
@@ -97,8 +187,16 @@ pub fn typecheck_bodies(
             return Err(BodyTypingError::DuplicateSource(source.file()));
         }
     }
+    if let Some(work) = &analysis_work {
+        for module in collection.modules() {
+            let source = source_map
+                .get(&module.file())
+                .ok_or(BodyTypingError::MissingSource(module.file()))?;
+            work.validate_source(module, source)?;
+        }
+    }
     let (signatures, inhabitance) = declarations.parts_mut();
-    let mut checker = BodyChecker {
+    let checker = BodyChecker {
         collection,
         imports,
         names,
@@ -137,9 +235,10 @@ pub fn typecheck_bodies(
         control_path_barriers: Vec::new(),
         current_return: None,
         current_owner: None,
+        analysis_work,
+        internal_failures: Vec::new(),
     };
-    checker.check_all()?;
-    Ok(checker.finish())
+    checker.execute()
 }
 
 struct BodyChecker<'input, 'hir, 'support> {
@@ -177,8 +276,10 @@ struct BodyChecker<'input, 'hir, 'support> {
     question_floors: Vec<usize>,
     checked_contexts: Vec<CheckedContext>,
     control_path_barriers: Vec<usize>,
-    current_return: Option<TypeId>,
+    current_return: Option<ExpectedType>,
     current_owner: Option<DefId>,
+    analysis_work: Option<BodyAnalysisWork<'input, 'hir>>,
+    internal_failures: Vec<BodyTypingError>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -245,7 +346,7 @@ enum UnitOutcomeFold {
 }
 
 impl UnitOutcomeFold {
-    fn include(self, next: Outcome<()>) -> Result<Self, BodyTypingError> {
+    fn include(self, next: Outcome<()>) -> Result<Self, BodyFlow> {
         let (mut pending, poison) = match (self, next) {
             (Self::Poisoned(pending), Outcome::Poisoned(poison)) => (pending, poison),
             (Self::Poisoned(pending), _) => return Ok(Self::Poisoned(pending)),
@@ -314,9 +415,11 @@ impl BlockStep {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct TypeRequest {
     expected: Option<TypeId>,
+    custody: ExpectationCustody,
+    work: Option<crate::AnalysisRootTicket>,
     allow_deferred: bool,
     default_integer: bool,
     value_required: bool,
@@ -328,6 +431,7 @@ struct BodyContext<'input, 'hir> {
     source: &'input SemanticSource<'hir>,
     hir: &'hir HirFile,
     body: &'hir Body,
+    work: Option<&'input crate::AnalysisRootTicket>,
 }
 
 #[derive(Clone, Copy)]
@@ -340,7 +444,7 @@ struct LetBindingRequest {
     initializer: Option<ExprId>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct CheckedBinaryRequest {
     expression: ExprId,
     origin: OriginId,
@@ -357,29 +461,31 @@ struct ReturnStatementRequest {
     value: Option<ExprId>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct IntrinsicCallRequest<'a> {
     expression: ExprId,
     origin: OriginId,
     call: &'a CallExpr,
     target: &'a CanonicalTarget,
     constructor: &'a crate::ConstructorSignature,
-    ty: TypeRequest,
+    ty: CallTypingRequest,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MethodCallRequest<'a> {
     expression: ExprId,
     origin: OriginId,
     call: &'a CallExpr,
     receiver: ExprId,
     member: &'a Name,
-    ty: TypeRequest,
+    ty: CallTypingRequest,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ApplicationRequest<'a> {
     origin: OriginId,
+    custody: ExpectationCustody,
+    selection_work: Option<&'a crate::AnalysisRootTicket>,
     generic_parameters: &'a [GenericParameterId],
     slots: &'a [ApplicationSlot],
     result_template: TypeId,
@@ -391,7 +497,7 @@ struct ApplicationRequest<'a> {
     defer_underconstrained: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct StructLiteralRequest<'a> {
     expression: ExprId,
     origin: OriginId,
@@ -400,7 +506,7 @@ struct StructLiteralRequest<'a> {
     ty: TypeRequest,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct VariantConstructorRequest<'a> {
     expression: ExprId,
     origin: OriginId,
@@ -500,6 +606,7 @@ struct ApplicationSlot {
     origin: OriginId,
     related: Option<SourceSpan>,
     evaluation_order: usize,
+    custody: ExpectationCustody,
     passing: ArgumentPassing,
 }
 
@@ -714,9 +821,18 @@ impl ConstructorPayloadForm {
 }
 
 impl TypeRequest {
-    const fn definitive(expected: Option<TypeId>) -> Self {
+    fn definitive(expected: Option<ExpectedType>) -> Self {
+        let (expected, custody, work) = match expected {
+            Some(expected) => {
+                let (ty, custody, work) = expected.into_parts();
+                (Some(ty), custody, work)
+            }
+            None => (None, ExpectationCustody::Caller, None),
+        };
         Self {
             expected,
+            custody,
+            work,
             allow_deferred: false,
             default_integer: true,
             value_required: true,
@@ -726,15 +842,19 @@ impl TypeRequest {
     const fn discarded() -> Self {
         Self {
             expected: None,
+            custody: ExpectationCustody::Caller,
+            work: None,
             allow_deferred: false,
             default_integer: true,
             value_required: false,
         }
     }
 
-    const fn probe() -> Self {
+    const fn probe(custody: ExpectationCustody) -> Self {
         Self {
             expected: None,
+            custody,
+            work: None,
             allow_deferred: true,
             default_integer: false,
             value_required: true,

@@ -83,7 +83,7 @@ impl NumericTreeFrame {
         &mut self,
         body: &Body,
         expression: ExprId,
-    ) -> Result<bool, BodyTypingError> {
+    ) -> Result<bool, BodyFlow> {
         let known = &mut self.literal_trees;
         let mut pending = vec![(expression, false)];
         while let Some((current, finishing)) = pending.pop() {
@@ -135,7 +135,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         context: BodyContext<'_, '_>,
         mut frame: Box<NumericTreeFrame>,
-    ) -> Result<NumericTreePlan, BodyTypingError> {
+    ) -> Result<NumericTreePlan, BodyFlow> {
         let BodyContext { module, body, .. } = context;
         while let Some(step) = frame.pending.pop() {
             let (expression, request, path, finishing) = match step {
@@ -159,7 +159,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .expression(current)
                         .ok_or(BodyTypingError::WrongBodyExpression(current))?
                         .kind();
-                    let expected = match request.expected {
+                    let expected = match request.expected_type() {
                         Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
                         _ => None,
                     };
@@ -167,7 +167,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         ExprKind::Group(inner) => {
                             frame.pending.push(NumericTypeStep::Finish(
                                 current,
-                                request,
+                                request.clone(),
                                 continuation,
                             ));
                             frame.pending.push(NumericTypeStep::Enter(
@@ -183,12 +183,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         } => {
                             frame.pending.push(NumericTypeStep::Finish(
                                 current,
-                                request,
+                                request.clone(),
                                 continuation,
                             ));
                             frame.pending.push(NumericTypeStep::Enter(
                                 *operand,
-                                TypeRequest::definitive(expected),
+                                request.definitive_child(expected),
                                 continuation,
                             ));
                             continue;
@@ -204,12 +204,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                     expression: current,
                                     left: *left,
                                     right: *right,
-                                    request,
+                                    request: request.clone(),
                                     continuation,
                                 });
                                 frame.pending.push(NumericTypeStep::Enter(
                                     *right,
-                                    TypeRequest::probe(),
+                                    TypeRequest::probe(request.custody())
+                                        .with_work(request.work.clone()),
                                     continuation,
                                 ));
                                 continue;
@@ -218,12 +219,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 expression: current,
                                 left: *left,
                                 right: *right,
-                                request,
+                                request: request.clone(),
                                 continuation,
                             });
                             frame.pending.push(NumericTypeStep::Enter(
                                 *left,
-                                TypeRequest::definitive(expected),
+                                request.definitive_child(expected),
                                 continuation,
                             ));
                             continue;
@@ -249,12 +250,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         expression,
                         left,
                         right,
-                        request,
+                        request: request.clone(),
                         continuation,
                     });
                     frame.pending.push(NumericTypeStep::Enter(
                         left,
-                        TypeRequest::definitive(expected),
+                        request.definitive_child(expected),
                         continuation,
                     ));
                     continue;
@@ -271,7 +272,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         FactState::Known(left) if self.is_fixed_width_integer(left.ty)? => {
                             Some(left.ty)
                         }
-                        _ => match request.expected {
+                        _ => match request.expected_type() {
                             Some(ty) if self.is_fixed_width_integer(ty)? => Some(ty),
                             _ => None,
                         },
@@ -280,12 +281,14 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         FactState::Known(left) => left.normal_continuation,
                         _ => NormalContinuation::Absent,
                     });
-                    frame
-                        .pending
-                        .push(NumericTypeStep::Finish(expression, request, continuation));
+                    frame.pending.push(NumericTypeStep::Finish(
+                        expression,
+                        request.clone(),
+                        continuation,
+                    ));
                     frame.pending.push(NumericTypeStep::Enter(
                         right,
-                        TypeRequest::definitive(expected),
+                        request.definitive_child(expected),
                         right_path,
                     ));
                     continue;

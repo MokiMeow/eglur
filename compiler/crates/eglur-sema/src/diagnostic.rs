@@ -257,8 +257,13 @@ fn record_root(
     store: &mut DiagnosticStore,
     diagnostic: Diagnostic,
 ) -> Result<Poison, SemanticDiagnosticError> {
+    #[cfg(test)]
+    let observed = observation::prepare(&diagnostic, None);
     let root = DiagnosticRoot::source(diagnostic)?;
-    Ok(store.record_failure(DiagnosticFailure::Root(root))?)
+    let poison = store.record_failure(DiagnosticFailure::Root(root))?;
+    #[cfg(test)]
+    observation::publish(observed);
+    Ok(poison)
 }
 
 fn record_root_for_obligation(
@@ -266,9 +271,17 @@ fn record_root_for_obligation(
     key: SourceObligationKey,
     diagnostic: Diagnostic,
 ) -> Result<Poison, SemanticDiagnosticError> {
+    #[cfg(test)]
+    let observed = observation::prepare(&diagnostic, Some(&key));
     let root = DiagnosticRoot::source_obligation(key, diagnostic)?;
-    Ok(store.record_failure(DiagnosticFailure::Root(root))?)
+    let poison = store.record_failure(DiagnosticFailure::Root(root))?;
+    #[cfg(test)]
+    observation::publish(observed);
+    Ok(poison)
 }
+
+#[cfg(test)]
+pub(crate) mod observation;
 
 fn code(spelling: &'static str) -> DiagnosticCode {
     DiagnosticCode::new(spelling).expect("semantic diagnostic code is statically valid")

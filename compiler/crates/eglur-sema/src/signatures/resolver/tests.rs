@@ -131,22 +131,24 @@ fn generic_hir_recovery_preserves_prerequisites_and_slot_bounds() {
             }
             assert_eq!(
                 resolver.source_generic_parameter(owner).unwrap_err(),
-                SignatureResolutionError::MissingGenericDeclaration(owner)
+                SignatureFlow::Internal(SignatureResolutionError::MissingGenericDeclaration(owner))
             );
             resolver.sources.clear();
             assert_eq!(
                 resolver.source_generic_parameter(generics[1]).unwrap_err(),
-                SignatureResolutionError::MissingHir(module.file())
+                SignatureFlow::Internal(SignatureResolutionError::MissingHir(module.file()))
             );
             resolver.sources.insert(module.file(), &sources[1]);
             assert_eq!(
                 resolver.source_generic_parameter(generics[1]).unwrap_err(),
-                SignatureResolutionError::WrongDeclarationItem(owner)
+                SignatureFlow::Internal(SignatureResolutionError::WrongDeclarationItem(owner))
             );
             resolver.sources.insert(module.file(), &sources[2]);
             assert_eq!(
                 resolver.source_generic_parameter(generics[1]).unwrap_err(),
-                SignatureResolutionError::MissingGenericDeclaration(generics[1])
+                SignatureFlow::Internal(SignatureResolutionError::MissingGenericDeclaration(
+                    generics[1]
+                ))
             );
             assert!(resolver.source_generic_parameter(generics[0]).is_ok());
         },
@@ -166,7 +168,7 @@ fn non_generic_children_keep_missing_item_and_missing_generic_errors() {
                 .id();
             assert_eq!(
                 resolver.source_generic_parameter(field).unwrap_err(),
-                SignatureResolutionError::MissingGenericDeclaration(field)
+                SignatureFlow::Internal(SignatureResolutionError::MissingGenericDeclaration(field))
             );
             let field = module
                 .declarations()
@@ -174,12 +176,14 @@ fn non_generic_children_keep_missing_item_and_missing_generic_errors() {
                 .unwrap();
             assert_eq!(
                 resolver.source_generic_parameter(field.id()).unwrap_err(),
-                SignatureResolutionError::MissingDeclarationItem(field.parent().unwrap())
+                SignatureFlow::Internal(SignatureResolutionError::MissingDeclarationItem(
+                    field.parent().unwrap()
+                ))
             );
             resolver.sources.clear();
             assert_eq!(
                 resolver.source_generic_parameter(field.id()).unwrap_err(),
-                SignatureResolutionError::MissingHir(module.file())
+                SignatureFlow::Internal(SignatureResolutionError::MissingHir(module.file()))
             );
         },
     );
