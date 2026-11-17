@@ -46,8 +46,12 @@ mod contexts;
 mod declarations;
 mod diagnostics;
 mod enums;
+mod generic_names;
+mod generic_redeclarations;
 mod impl_headers;
 mod source_types;
+#[cfg(test)]
+mod tests;
 mod trusted_resolution;
 
 /// Boundary inputs selected by the driver for declaration-signature resolution.
@@ -276,6 +280,9 @@ struct SignatureResolver<'input, 'hir> {
     generic_types: BTreeMap<GenericParameterId, TypeId>,
     generic_bounds: BTreeMap<GenericParameterId, Box<[TraitRef]>>,
     source_generic_redeclarations: BTreeSet<DefId>,
+    source_generic_names: std::rc::Rc<generic_names::SourceGenericNameIndex>,
+    frozen_source_generic_scopes: Option<BTreeMap<DefId, Resolution<()>>>,
+    static_self_bindings: BTreeMap<DefId, SelfBinding>,
     source_generic_bound_seeds: BTreeMap<(DefId, TypeRefId), Resolution<TraitRef>>,
     source_generic_states: BTreeMap<DefId, SourceGenericState>,
     source_generic_stack: Vec<DefId>,
@@ -337,7 +344,7 @@ fn item_generic_parameters(kind: &ItemKind) -> Option<&[GenericParameter]> {
 fn type_ref_contains_generic_projection(
     hir: &HirFile,
     root: TypeRefId,
-    generics: &BTreeMap<Box<str>, GenericParameterId>,
+    generics: &generic_names::SourceGenericNames,
 ) -> bool {
     let mut pending = vec![root];
     let mut seen = BTreeSet::new();
@@ -429,7 +436,7 @@ enum MethodReceiverKind {
 
 #[derive(Clone)]
 struct SourceTypeContext {
-    generics: BTreeMap<Box<str>, GenericParameterId>,
+    generics: generic_names::SourceGenericNames,
     self_binding: Option<SelfBinding>,
     structure_validation: TypeStructureValidation,
     application_region: super::applications::TypeApplicationRegion,

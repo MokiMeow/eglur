@@ -6,7 +6,7 @@ pub(super) enum BodyNode {
     Statement(StmtId),
 }
 
-impl NodeHasher<'_> {
+impl NodeHasher<'_, '_> {
     pub(super) fn hash_body_nodes(
         &mut self,
         root: BodyNode,

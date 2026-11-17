@@ -2,7 +2,7 @@ use super::*;
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn generic_context_state(
-        &self,
+        &mut self,
         owner: DefId,
     ) -> Result<Resolution<()>, SignatureResolutionError> {
         let mut chain = Vec::new();
@@ -17,15 +17,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let mut poison = None;
         let mut unperformed = false;
         for declaration in chain {
-            for generic in self.child_declarations(declaration, DeclarationKind::GenericParameter) {
-                match self
-                    .generic_parameters
-                    .state(&GenericParameterId::Source(generic))
-                {
-                    FactState::Poisoned(found) => merge_poison(&mut poison, found)?,
-                    FactState::Unperformed => unperformed = true,
-                    FactState::Known(_) | FactState::NotApplicable => {}
-                }
+            match self.direct_generic_state(declaration)? {
+                Resolution::Poisoned(found) => merge_poison(&mut poison, &found)?,
+                Resolution::Unperformed => unperformed = true,
+                Resolution::Known(()) => {}
             }
         }
         Ok(if let Some(poison) = poison {
@@ -35,6 +30,78 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         } else {
             Resolution::Known(())
         })
+    }
+
+    fn direct_generic_state(
+        &mut self,
+        owner: DefId,
+    ) -> Result<Resolution<()>, SignatureResolutionError> {
+        #[cfg(test)]
+        generic_state_tests::observe(generic_state_tests::Step::Lookup);
+
+        if let Some(state) = self
+            .frozen_source_generic_scopes
+            .as_ref()
+            .and_then(|scopes| scopes.get(&owner))
+        {
+            #[cfg(test)]
+            generic_state_tests::observe(generic_state_tests::Step::Hit);
+
+            return Ok(state.clone());
+        }
+        #[cfg(test)]
+        generic_state_tests::observe(generic_state_tests::Step::Query);
+
+        let generics = self.child_declarations(owner, DeclarationKind::GenericParameter);
+        if generics.len() == 0 {
+            return Ok(Resolution::Known(()));
+        }
+        #[cfg(test)]
+        generic_state_tests::observe(generic_state_tests::Step::Build);
+
+        let mut poison = None;
+        let mut unperformed = false;
+        for generic in generics {
+            #[cfg(test)]
+            generic_state_tests::observe(generic_state_tests::Step::Read);
+
+            match self
+                .generic_parameters
+                .state(&GenericParameterId::Source(generic))
+            {
+                FactState::Poisoned(found) => {
+                    #[cfg(test)]
+                    generic_state_tests::observe(generic_state_tests::Step::Poisoned);
+                    #[cfg(test)]
+                    generic_state_tests::observe(generic_state_tests::Step::Merge);
+
+                    merge_poison(&mut poison, found)?;
+                }
+                FactState::Unperformed => {
+                    #[cfg(test)]
+                    generic_state_tests::observe(generic_state_tests::Step::Unperformed);
+
+                    unperformed = true;
+                }
+                FactState::Known(_) | FactState::NotApplicable => {
+                    #[cfg(test)]
+                    generic_state_tests::observe(generic_state_tests::Step::Neutral);
+                }
+            }
+        }
+        let state = if let Some(poison) = poison {
+            Resolution::Poisoned(poison)
+        } else if unperformed {
+            Resolution::Unperformed
+        } else {
+            Resolution::Known(())
+        };
+        if let Some(scopes) = &mut self.frozen_source_generic_scopes {
+            scopes.insert(owner, state.clone());
+            #[cfg(test)]
+            generic_state_tests::observe(generic_state_tests::Step::Row(scopes.len()));
+        }
+        Ok(state)
     }
 
     pub(super) fn declaration_context_state(
@@ -86,31 +153,13 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .and_then(Declaration::parent);
         }
         chain.reverse();
-        let mut generics = BTreeMap::new();
-        for declaration in &chain {
-            for generic in self.child_declarations(*declaration, DeclarationKind::GenericParameter)
-            {
-                if self.source_generic_redeclarations.contains(&generic) {
-                    continue;
-                }
-                let generic_declaration = self
-                    .collection
-                    .declaration(generic)
-                    .expect("generic child belongs to collection");
-                if let Some(name) = generic_declaration.name() {
-                    generics
-                        .entry(Box::<str>::from(name.text()))
-                        .or_insert(GenericParameterId::Source(generic));
-                }
-            }
-        }
         let self_binding = if allow_self {
             self.self_binding(&chain)?
         } else {
             None
         };
         Ok(SourceTypeContext {
-            generics,
+            generics: self.source_generic_names.for_chain(chain),
             self_binding,
             structure_validation: TypeStructureValidation::Immediate,
             application_region: self.application_region(owner),
@@ -152,39 +201,71 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .declaration(candidate)
                 .expect("context declaration belongs to collection");
             match declaration.kind() {
-                DeclarationKind::Trait => {
-                    let target = CanonicalTarget::Source(candidate);
+                DeclarationKind::Trait | DeclarationKind::Struct => {
+                    #[cfg(test)]
+                    tests::observe_lookup();
+
+                    if let Some(binding) = self.static_self_bindings.get(&candidate) {
+                        #[cfg(test)]
+                        tests::observe_hit();
+
+                        return Ok(Some(binding.clone()));
+                    }
+                    #[cfg(test)]
+                    tests::observe_build();
+                    #[cfg(test)]
+                    tests::observe_query();
+
                     let arguments = self
                         .direct_generic_ids(candidate)
                         .iter()
-                        .map(|id| self.generic_types[id])
+                        .map(|id| {
+                            #[cfg(test)]
+                            tests::observe_argument();
+
+                            self.generic_types[id]
+                        })
                         .collect::<Vec<_>>();
-                    let substitution = self.types.intern_substitution(arguments)?;
-                    let ty = self.types.self_type(target.clone())?;
-                    return Ok(Some(SelfBinding {
-                        ty,
-                        trait_ref: Some(TraitRef::new(target, substitution)),
-                    }));
+                    #[cfg(test)]
+                    tests::observe_prepared(arguments.len());
+
+                    let binding = if declaration.kind() == DeclarationKind::Trait {
+                        let target = CanonicalTarget::Source(candidate);
+                        #[cfg(test)]
+                        tests::observe_trait_substitution();
+
+                        let substitution = self.types.intern_substitution(arguments)?;
+                        #[cfg(test)]
+                        tests::observe_self_type();
+
+                        let ty = self.types.self_type(target.clone())?;
+                        SelfBinding {
+                            ty,
+                            trait_ref: Some(TraitRef::new(target, substitution)),
+                        }
+                    } else {
+                        #[cfg(test)]
+                        tests::observe_nominal();
+
+                        let ty = self.types.nominal(
+                            NominalHead::Declaration(CanonicalTarget::Source(candidate)),
+                            arguments,
+                        )?;
+                        SelfBinding {
+                            ty,
+                            trait_ref: None,
+                        }
+                    };
+                    self.static_self_bindings.insert(candidate, binding.clone());
+                    #[cfg(test)]
+                    tests::observe_row(self.static_self_bindings.len());
+
+                    return Ok(Some(binding));
                 }
                 DeclarationKind::Impl => {
                     return Ok(self.impl_headers.get(&candidate).map(|header| SelfBinding {
                         ty: header.target(),
                         trait_ref: Some(header.trait_ref().clone()),
-                    }));
-                }
-                DeclarationKind::Struct => {
-                    let arguments = self
-                        .direct_generic_ids(candidate)
-                        .iter()
-                        .map(|id| self.generic_types[id])
-                        .collect::<Vec<_>>();
-                    let ty = self.types.nominal(
-                        NominalHead::Declaration(CanonicalTarget::Source(candidate)),
-                        arguments,
-                    )?;
-                    return Ok(Some(SelfBinding {
-                        ty,
-                        trait_ref: None,
                     }));
                 }
                 _ => {}
@@ -193,3 +274,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod generic_state_tests;

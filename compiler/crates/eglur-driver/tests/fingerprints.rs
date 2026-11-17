@@ -12,6 +12,12 @@ use eglur_sema::{
 #[path = "fingerprints/traversal.rs"]
 mod traversal;
 
+#[path = "fingerprints/binder_contexts.rs"]
+mod binder_contexts;
+
+#[path = "fingerprints/reexports.rs"]
+mod reexports;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FingerprintSnapshot {
     analysis: AnalysisFingerprints,
@@ -139,6 +145,41 @@ fn bound_priority_does_not_change_semantic_contract_or_evidence_fingerprints() {
     let forward = resolve_bounds("Zulu + Alpha");
     let reverse = resolve_bounds("Alpha + Zulu");
     assert_eq!(forward.semantics, reverse.semantics);
+}
+
+#[test]
+fn overload_fingerprints_preserve_function_and_receiver_families_under_reordering() {
+    let families = [
+        [
+            "pub overload fn choose(value: Bool) -> Bool = value\n",
+            "pub overload fn choose(value: Str) -> Str = value\n",
+        ],
+        [
+            "pub overload fn parse(self: Self, value: Bool) -> Bool = value\n",
+            "pub overload fn parse(self: &Self, value: Bool) -> Bool = value\n",
+        ],
+    ];
+    for (index, family) in families.into_iter().enumerate() {
+        let source = |members: [&str; 2]| {
+            let members = members.concat();
+            if index == 0 {
+                format!(
+                    "{members}\n\
+                     pub fn boolean(value: Bool) -> Bool = choose(value)\n\
+                     pub fn text(value: Str) -> Str = choose(value)\n"
+                )
+            } else {
+                format!("pub struct Parser {{\n{members}}}\n")
+            }
+        };
+        let ordered = resolve([file("main.eglur", &source(family))], "main.eglur", false);
+        let reversed = resolve(
+            [file("main.eglur", &source([family[1], family[0]]))],
+            "main.eglur",
+            false,
+        );
+        assert_eq!(ordered.semantics, reversed.semantics);
+    }
 }
 
 #[test]
@@ -780,4 +821,41 @@ fn conformance_fingerprints_ignore_source_insertion_order() {
         canonical.analysis.conformance(),
         shuffled.analysis.conformance()
     );
+}
+
+#[test]
+fn generic_ordinal_fingerprints_preserve_owner_contexts_under_reordering() {
+    fn source(reversed: bool) -> String {
+        let mut methods = [
+            "pub fn first[U](self: &Self, value: U) -> U = value\n",
+            "pub fn second[V](self: &Self, value: V) -> V = value\n",
+        ];
+        if reversed {
+            methods.reverse();
+        }
+        let mut declarations = vec![
+            "pub trait Mark {}\n".to_owned(),
+            "pub struct Host {}\n".to_owned(),
+            "impl Mark for Host {}\n".to_owned(),
+            "pub enum Either[A, B] { Left(A)\n Right(B) }\n".to_owned(),
+            "pub type Pair[A, B] = (A, B)\n".to_owned(),
+            "pub trait Echo[A] { fn echo[B: Mark](self: &Self, value: B) -> B }\n".to_owned(),
+            format!("pub struct Wrap[X, Y] {{\n{}}}\n", methods.concat()),
+            "impl[X, Y] Echo[X] for Wrap[X, Y] {\n\
+                fn echo[C: Mark](self: &Self, value: C) -> C = value\n}\n"
+                .to_owned(),
+            "pub fn identity[D](value: D) -> D = value\n".to_owned(),
+            "pub fn use(value: Wrap[Bool, Str], item: Host) -> Host = value.echo(identity(item))\n"
+                .to_owned(),
+        ];
+        if reversed {
+            declarations.reverse();
+        }
+        declarations.concat()
+    }
+
+    let canonical = resolve([file("main.eglur", &source(false))], "main.eglur", false);
+    let reordered = resolve([file("main.eglur", &source(true))], "main.eglur", false);
+
+    assert_eq!(canonical.semantics, reordered.semantics);
 }

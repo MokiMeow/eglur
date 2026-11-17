@@ -23,6 +23,8 @@ use eglur_syntax::parse_validated;
 
 #[path = "signatures/associated_bindings.rs"]
 mod associated_bindings;
+#[path = "signatures/direct_children.rs"]
+mod direct_children;
 #[path = "signatures/enums.rs"]
 mod enums;
 #[path = "signatures/impl_arguments.rs"]

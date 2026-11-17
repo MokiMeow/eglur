@@ -1,5 +1,10 @@
 use super::*;
 
+mod cycles;
+mod dependencies;
+
+use dependencies::BindingDependencies;
+
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_impl_bindings(
         &mut self,
@@ -238,7 +243,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             .map(|(binding, _)| binding.clone())
             .collect::<Vec<_>>();
         let Some(cycles) =
-            associated_binding_cycle_sets(&self.types, trait_ref, target, &signatures)?
+            BindingDependencies::new(&self.types, trait_ref, target, &signatures)?.cycle_sets()
         else {
             return Ok(None);
         };
@@ -304,7 +309,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 value,
             });
         }
-        if associated_binding_cycle_sets(&self.types, trait_ref, target, &bindings)?.is_some() {
+        if BindingDependencies::new(&self.types, trait_ref, target, &bindings)?
+            .cycle_sets()
+            .is_some()
+        {
             return Err(SignatureResolutionError::Trusted(
                 TrustedSignatureError::InvalidTypePosition {
                     declaration: owner.clone(),
@@ -339,105 +347,4 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         }
         Ok(bindings)
     }
-}
-
-fn associated_binding_cycle_sets(
-    types: &CanonicalTypeStore,
-    trait_ref: &TraitRef,
-    target: TypeId,
-    bindings: &[AssociatedBindingSignature],
-) -> Result<Option<AssociatedBindingCycles>, TypeStoreError> {
-    let binding_targets = bindings
-        .iter()
-        .map(|binding| binding.associated.clone())
-        .collect::<BTreeSet<_>>();
-    let mut dependencies = binding_targets
-        .iter()
-        .cloned()
-        .map(|associated| (associated, BTreeSet::new()))
-        .collect::<BTreeMap<_, _>>();
-    for binding in bindings {
-        for projection in types.associated_projections(binding.value)? {
-            if projection.base() == target
-                && projection.trait_ref() == trait_ref
-                && binding_targets.contains(projection.associated())
-            {
-                dependencies
-                    .get_mut(&binding.associated)
-                    .expect("binding dependency node was registered")
-                    .insert(projection.associated().clone());
-            }
-        }
-    }
-    let cyclic = binding_targets
-        .iter()
-        .filter(|associated| projection_path_reaches(associated, associated, &dependencies))
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    if cyclic.is_empty() {
-        return Ok(None);
-    }
-    let affected = binding_targets
-        .into_iter()
-        .filter(|associated| {
-            cyclic.contains(associated)
-                || projection_path_reaches_any(associated, &cyclic, &dependencies)
-        })
-        .collect();
-    Ok(Some(AssociatedBindingCycles { cyclic, affected }))
-}
-
-fn projection_path_reaches(
-    start: &CanonicalTarget,
-    goal: &CanonicalTarget,
-    dependencies: &BTreeMap<CanonicalTarget, BTreeSet<CanonicalTarget>>,
-) -> bool {
-    let mut pending = dependencies
-        .get(start)
-        .into_iter()
-        .flat_map(|targets| targets.iter().cloned())
-        .collect::<Vec<_>>();
-    let mut seen = BTreeSet::new();
-    while let Some(current) = pending.pop() {
-        if &current == goal {
-            return true;
-        }
-        if !seen.insert(current.clone()) {
-            continue;
-        }
-        if let Some(targets) = dependencies.get(&current) {
-            pending.extend(targets.iter().cloned());
-        }
-    }
-    false
-}
-
-fn projection_path_reaches_any(
-    start: &CanonicalTarget,
-    goals: &BTreeSet<CanonicalTarget>,
-    dependencies: &BTreeMap<CanonicalTarget, BTreeSet<CanonicalTarget>>,
-) -> bool {
-    let mut pending = dependencies
-        .get(start)
-        .into_iter()
-        .flat_map(|targets| targets.iter().cloned())
-        .collect::<Vec<_>>();
-    let mut seen = BTreeSet::new();
-    while let Some(current) = pending.pop() {
-        if goals.contains(&current) {
-            return true;
-        }
-        if !seen.insert(current.clone()) {
-            continue;
-        }
-        if let Some(targets) = dependencies.get(&current) {
-            pending.extend(targets.iter().cloned());
-        }
-    }
-    false
-}
-
-struct AssociatedBindingCycles {
-    cyclic: BTreeSet<CanonicalTarget>,
-    affected: BTreeSet<CanonicalTarget>,
 }

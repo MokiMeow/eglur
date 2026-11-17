@@ -182,6 +182,31 @@ fn structural_and_bound_failures_precede_public_visibility() {
 }
 
 #[test]
+fn erased_alias_payloads_preserve_written_argument_and_bound_checks() {
+    let prelude = concat!(
+        "trait Mark {}\n",
+        "impl Mark for i64 {}\n",
+        "type Erased[T: Mark] = i64\n",
+    );
+    for (argument, expected) in [
+        ("i64", None),
+        ("Str", Some("TRAIT_BOUND_NOT_SATISFIED")),
+        ("Missing", Some("NAME_NOT_FOUND")),
+        ("i64, Str", Some("TYPE_ARG_ARITY_MISMATCH")),
+    ] {
+        let source = format!("{prelude}fn f(value: Erased[{argument}]) -> i64 = value\n");
+        let (codes, disposition) = compile(&source);
+        if let Some(expected) = expected {
+            assert_eq!(codes, [expected], "{source}: {codes:?}");
+            assert_eq!(disposition, CompileDisposition::Rejected, "{source}");
+        } else {
+            assert!(codes.is_empty(), "{source}: {codes:?}");
+            assert_eq!(disposition, CompileDisposition::Succeeded, "{source}");
+        }
+    }
+}
+
+#[test]
 fn public_conformance_headers_are_checked_before_missing_bindings() {
     for header in [
         "impl Marker[i64] for Carrier[Hidden] {}",

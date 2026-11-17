@@ -105,10 +105,7 @@ fn push_reexported_summaries(
     let module = declarations
         .module(declaration.module())
         .ok_or(SemanticFingerprintError::UnknownDeclaration(declaration))?;
-    for child in module
-        .declarations()
-        .filter(|child| child.parent() == Some(declaration))
-    {
+    for child in module.children(declaration) {
         if child_is_externally_reachable(child, declaration, declarations)? {
             push_reexported_summaries(summaries, child.id(), declarations, effects, keys)?;
         }

@@ -16,6 +16,9 @@ use crate::{
     SemanticLocation, SemanticSource,
 };
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 /// Declaration role retained independently from later canonical type facts.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DeclarationKind {
@@ -205,6 +208,10 @@ pub struct ModuleDeclarations {
     declarations: Vec<Declaration>,
     item_defs: BTreeMap<ItemId, DefId>,
     module_bindings: BTreeMap<(Namespace, NameKey), Vec<DefId>>,
+    direct_declarations: BTreeMap<(Option<DefId>, DeclarationKind, Option<NameKey>), Vec<DefId>>,
+    children_by_parent: BTreeMap<DefId, Vec<DefId>>,
+    children_by_kind: BTreeMap<(DefId, DeclarationKind), Vec<DefId>>,
+    source_generic_indices: BTreeMap<DefId, usize>,
     imports: Vec<ImportRecord>,
     declaration_poison: Option<Poison>,
     import_poison: Option<Poison>,
@@ -228,7 +235,15 @@ impl ModuleDeclarations {
     }
 
     pub fn declarations(&self) -> impl ExactSizeIterator<Item = &Declaration> {
-        self.declarations.iter()
+        #[cfg(test)]
+        let declarations = self
+            .declarations
+            .iter()
+            .inspect(|_| tests::observe_declaration_visit());
+        #[cfg(not(test))]
+        let declarations = self.declarations.iter();
+
+        declarations
     }
 
     #[must_use]
@@ -246,6 +261,51 @@ impl ModuleDeclarations {
         self.module_bindings
             .get(&(namespace, name.clone()))
             .map_or(&[], Vec::as_slice)
+    }
+
+    pub(crate) fn direct_candidates(
+        &self,
+        parent: Option<DefId>,
+        name: Option<&NameKey>,
+        kind: DeclarationKind,
+    ) -> &[DefId] {
+        self.direct_declarations
+            .get(&(parent, kind, name.cloned()))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Immediate children in allocation order, without visibility or role filtering.
+    pub(crate) fn children(&self, parent: DefId) -> impl ExactSizeIterator<Item = &Declaration> {
+        #[cfg(test)]
+        tests::observe_child_query();
+
+        let children = self
+            .children_by_parent
+            .get(&parent)
+            .map_or(&[][..], Vec::as_slice);
+        #[cfg(test)]
+        let children = children.iter().inspect(|_| tests::observe_child_visit());
+        #[cfg(not(test))]
+        let children = children.iter();
+
+        children.map(|id| &self.declarations[id.index()])
+    }
+
+    pub(crate) fn child_ids(&self, parent: DefId, kind: DeclarationKind) -> &[DefId] {
+        #[cfg(test)]
+        tests::observe_role_query();
+
+        self.children_by_kind
+            .get(&(parent, kind))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Position in the owner's HIR generic list, independent of name validity.
+    pub(crate) fn source_generic_index(&self, generic: DefId) -> Option<usize> {
+        #[cfg(test)]
+        tests::observe_generic_index_query();
+
+        self.source_generic_indices.get(&generic).copied()
     }
 
     pub fn imports(&self) -> impl ExactSizeIterator<Item = &ImportRecord> {
@@ -356,15 +416,11 @@ impl DeclarationCollection {
         kind: DeclarationKind,
     ) -> Vec<DefId> {
         self.module(parent.module())
-            .into_iter()
-            .flat_map(ModuleDeclarations::declarations)
-            .filter(|declaration| {
-                declaration.parent() == Some(parent)
-                    && declaration.kind() == kind
-                    && declaration.name() == Some(name)
+            .map_or_else(Vec::new, |module| {
+                module
+                    .direct_candidates(Some(parent), Some(name), kind)
+                    .to_vec()
             })
-            .map(Declaration::id)
-            .collect()
     }
 
     #[must_use]
@@ -433,6 +489,10 @@ pub fn collect_declarations(
             declarations: Vec::new(),
             item_defs: BTreeMap::new(),
             module_bindings: BTreeMap::new(),
+            direct_declarations: BTreeMap::new(),
+            children_by_parent: BTreeMap::new(),
+            children_by_kind: BTreeMap::new(),
+            source_generic_indices: BTreeMap::new(),
             imports: Vec::new(),
             declaration_poison: source.source_poison().cloned(),
             import_poison: source.source_poison().cloned(),
@@ -607,9 +667,9 @@ fn collect_generics(
     owner: DefId,
     parameters: &[eglur_hir::GenericParameter],
 ) -> Result<(), CollectionError> {
-    for parameter in parameters {
+    for (index, parameter) in parameters.iter().enumerate() {
         let name = collect_name(source, module, Some(owner), &parameter.name)?;
-        allocate_declaration(
+        let generic = allocate_declaration(
             module,
             Some(owner),
             name,
@@ -618,6 +678,9 @@ fn collect_generics(
             parameter.origin,
             None,
         )?;
+        #[cfg(test)]
+        tests::observe_generic_index_insertion();
+        module.source_generic_indices.insert(generic, index);
     }
     Ok(())
 }
@@ -642,6 +705,27 @@ fn allocate_declaration(
         origin,
         item,
     });
+    module
+        .direct_declarations
+        .entry((parent, kind, name.clone()))
+        .or_default()
+        .push(id);
+    if let Some(parent) = parent {
+        #[cfg(test)]
+        tests::observe_child_insertion();
+        module
+            .children_by_parent
+            .entry(parent)
+            .or_default()
+            .push(id);
+        #[cfg(test)]
+        tests::observe_role_insertion();
+        module
+            .children_by_kind
+            .entry((parent, kind))
+            .or_default()
+            .push(id);
+    }
     if parent.is_none()
         && let (Some(name), Some(namespace)) = (name, kind.namespace())
     {
