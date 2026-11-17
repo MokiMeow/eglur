@@ -272,7 +272,6 @@ impl InvocationFact {
     }
 
     /// Returns arguments in normative source evaluation order.
-    #[must_use]
     pub fn evaluation_order(&self) -> impl ExactSizeIterator<Item = &InvocationArgument> {
         self.evaluation_order
             .iter()
