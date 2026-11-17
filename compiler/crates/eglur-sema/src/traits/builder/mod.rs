@@ -9,7 +9,10 @@ use crate::capability::{
     CompileCapability, CompileSupport, DemandRecorder, PhaseAnalysis, PhaseProduct,
     TypecheckCapability,
 };
-use crate::diagnostic::record_type_error_with_related;
+use crate::diagnostic::{
+    record_type_error_with_related, record_type_error_with_related_for_obligation,
+    source_obligation_key,
+};
 use crate::type_rendering::DiagnosticTypeRenderer;
 use crate::{
     CallableSignature, CanonicalTarget, CanonicalTypeStore, DeclarationCollection, DeclarationKind,

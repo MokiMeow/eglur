@@ -13,7 +13,7 @@ struct Work {
     neutral: usize,
     poisoned: usize,
     unperformed: usize,
-    merges: usize,
+    includes: usize,
     rows: usize,
     peak_slots: usize,
 }
@@ -31,7 +31,7 @@ pub(super) enum Step {
     Neutral,
     Poisoned,
     Unperformed,
-    Merge,
+    Include,
     Row(usize),
 }
 
@@ -46,7 +46,7 @@ pub(super) fn observe(step: Step) {
             Step::Neutral => work.neutral += 1,
             Step::Poisoned => work.poisoned += 1,
             Step::Unperformed => work.unperformed += 1,
-            Step::Merge => work.merges += 1,
+            Step::Include => work.includes += 1,
             Step::Row(slots) => {
                 work.rows += 1;
                 work.peak_slots = work.peak_slots.max(slots);
@@ -221,7 +221,7 @@ fn scope_preparation_tracks_parameters_not_width_times_methods() {
                             reads: 2 * count,
                             neutral: if poisoned { count } else { 2 * count },
                             poisoned: if poisoned { count } else { 0 },
-                            merges: if poisoned { count } else { 0 },
+                            includes: if poisoned { count } else { 0 },
                             rows: count + 1,
                             peak_slots: count + 1,
                             unperformed: 0,
@@ -459,7 +459,7 @@ fn foreign_poison_errors_do_not_publish_failed_scope_summaries() {
             assert_eq!(WORK.get().builds, 2);
             assert_eq!(WORK.get().reads, 4);
             assert_eq!(WORK.get().poisoned, 4);
-            assert_eq!(WORK.get().merges, 4);
+            assert_eq!(WORK.get().includes, 4);
             assert_eq!(WORK.get().hits, 0);
             assert_eq!(WORK.get().rows, 0);
             let empty = owners(resolver, DeclarationKind::Function)[1];

@@ -3,7 +3,19 @@ use super::*;
 mod cycles;
 mod dependencies;
 
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod poison_tests;
+
 use dependencies::BindingDependencies;
+
+pub(super) struct AssociatedMismatch<'a> {
+    pub(super) name: &'a str,
+    pub(super) obligation: &'a CanonicalTarget,
+    pub(super) reason: &'static str,
+}
 
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_impl_bindings(
@@ -28,7 +40,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         }
         let mut seen = BTreeSet::new();
         let mut supplied = Vec::new();
-        let mut poison = None;
+        let mut poison = PoisonAccumulator::new();
         let module = self
             .collection
             .module(declaration_id.module())
@@ -52,7 +64,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     CanonicalTarget::Source(binding_id),
                     SemanticFact::Poisoned(found.clone()),
                 )?;
-                merge_poison(&mut poison, &found)?;
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Structural));
+                poison.include(&found)?;
                 continue;
             };
             let candidates = info.associated.get(name).map_or(&[][..], AsRef::as_ref);
@@ -69,14 +83,19 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     binding.name.origin(),
                     binding_id,
                     trait_ref,
-                    name,
-                    reason,
+                    AssociatedMismatch {
+                        name,
+                        obligation: &CanonicalTarget::Source(binding_id),
+                        reason,
+                    },
                 )?;
                 self.declarations.insert(
                     CanonicalTarget::Source(binding_id),
                     SemanticFact::Poisoned(found.clone()),
                 )?;
-                merge_poison(&mut poison, &found)?;
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Structural));
+                poison.include(&found)?;
                 continue;
             }
             supplied.push((binding_id, binding.value, candidates[0].clone()));
@@ -94,12 +113,21 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 declaration.origin(),
                 declaration_id,
                 trait_ref,
-                &name,
-                "missing",
+                AssociatedMismatch {
+                    name: &name,
+                    obligation: &associated,
+                    reason: "missing",
+                },
             )?;
-            merge_poison(&mut poison, &found)?;
+            #[cfg(test)]
+            poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Structural));
+            poison.include(&found)?;
         }
-        if let Some(found) = poison {
+        if let Some(found) = poison.finish() {
+            #[cfg(test)]
+            poison_tests::observe(poison_tests::Step::Complete(
+                poison_tests::Stage::Structural,
+            ));
             for (binding_id, _, _) in supplied {
                 self.declarations.insert(
                     CanonicalTarget::Source(binding_id),
@@ -109,6 +137,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             return Ok(Resolution::Poisoned(found));
         }
 
+        let mut poison = PoisonAccumulator::new();
         let mut pending_bindings = Vec::new();
         let mut unperformed = false;
         for (binding_id, type_ref, associated) in supplied {
@@ -137,7 +166,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         CanonicalTarget::Source(binding_id),
                         SemanticFact::Poisoned(found.clone()),
                     )?;
-                    merge_poison(&mut poison, &found)?;
+                    #[cfg(test)]
+                    poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Values));
+                    poison.include(&found)?;
                 }
                 Resolution::Unperformed => unperformed = true,
             }
@@ -145,7 +176,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let cycle =
             self.associated_binding_cycle(source, hir, trait_ref, target, &pending_bindings)?;
         let cycle_affected = if let Some((found, affected)) = cycle {
-            merge_poison(&mut poison, &found)?;
+            #[cfg(test)]
+            poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Values));
+            poison.include(&found)?;
             Some((found, affected))
         } else {
             None
@@ -160,7 +193,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 self.source_binding_structure_error(source, hir, type_ref)?
             {
                 let found = self.source_error(source, origin, code, message, BTreeMap::new())?;
-                merge_poison(&mut poison, &found)?;
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Values));
+                poison.include(&found)?;
                 SemanticFact::Poisoned(found)
             } else {
                 bindings.push(signature.clone());
@@ -171,6 +206,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             self.declarations
                 .insert(signature.declaration.clone(), fact)?;
         }
+        let poison = poison.finish();
+        #[cfg(test)]
+        if poison.is_some() {
+            poison_tests::observe(poison_tests::Step::Complete(poison_tests::Stage::Values));
+        }
+
         Ok(if let Some(poison) = poison {
             Resolution::Poisoned(poison)
         } else if unperformed {

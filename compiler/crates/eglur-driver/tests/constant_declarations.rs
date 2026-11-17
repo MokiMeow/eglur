@@ -332,3 +332,100 @@ fn imported_constant_changes_invalidate_consumer_body_fingerprints() {
         after.module(&consumer).unwrap().body()
     );
 }
+
+#[test]
+fn wide_constant_failures_preserve_dependency_priority_and_later_bodies() {
+    use eglur_sema::FactState;
+
+    for count in [8_usize, 32, 128] {
+        for mode in ["names", "dependencies", "cycle-forward", "forward"] {
+            let mut source = String::new();
+            if mode != "names" && mode != "forward" {
+                for index in 0..count {
+                    let initializer = if mode == "cycle-forward" {
+                        format!("D{}", (index + 1) % count)
+                    } else {
+                        "127 + 1".into()
+                    };
+                    source.push_str(&format!("const D{index}: i8 = {initializer}\n"));
+                }
+            }
+            let references = (0..count)
+                .map(|index| format!("{}{index}", if mode == "names" { "missing" } else { "D" }))
+                .collect::<Vec<_>>()
+                .join(" + ");
+            let forward = if mode == "cycle-forward" {
+                " + Later"
+            } else {
+                ""
+            };
+            source.push_str(&format!("const Sink: i8 = {references}{forward}\n"));
+            if mode == "forward" {
+                for index in 0..count {
+                    source.push_str(&format!("const D{index}: i8 = 127 + 1\n"));
+                }
+            }
+            source.push_str("const Later: i8 = 1\nfn after() -> i8 = Later\n");
+
+            let mut session = CompilerSession::build(
+                FileSetRequest::single("main.eglur", source.into_bytes()).unwrap(),
+                SessionOptions::default(),
+            )
+            .unwrap();
+            let catalog = TrustedCatalog::first_slice().unwrap();
+            let analysis = session
+                .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+                .unwrap();
+            assert!(!analysis.trace().has_missing(), "{mode}");
+            let resolved = analysis.resolution().unwrap();
+            let declaration = |name: &str| {
+                resolved
+                    .declarations()
+                    .modules()
+                    .flat_map(|module| module.declarations())
+                    .find(|declaration| declaration.name().is_some_and(|key| key.text() == name))
+                    .unwrap()
+                    .id()
+            };
+            assert!(matches!(
+                resolved.body_types().body(declaration("Sink")),
+                FactState::Poisoned(_)
+            ));
+            for name in ["Later", "after"] {
+                assert!(matches!(
+                    resolved.body_types().body(declaration(name)),
+                    FactState::Known(_)
+                ));
+            }
+
+            let snapshot = session.into_diagnostics(None);
+            let expected = match mode {
+                "names" => "NAME_NOT_FOUND",
+                "cycle-forward" => "CONST_CYCLE",
+                _ => "INT_OVERFLOW",
+            };
+            assert_eq!(
+                snapshot
+                    .diagnostics()
+                    .iter()
+                    .filter(|diagnostic| diagnostic.code().as_str() == expected)
+                    .count(),
+                count
+            );
+            assert_eq!(
+                snapshot
+                    .diagnostics()
+                    .iter()
+                    .filter(|diagnostic| {
+                        diagnostic.code().as_str() == "CONST_FORWARD_REFERENCE"
+                    })
+                    .count(),
+                usize::from(mode == "forward")
+            );
+            assert_eq!(
+                snapshot.diagnostics().len(),
+                count + usize::from(mode == "forward")
+            );
+        }
+    }
+}

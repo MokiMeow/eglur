@@ -104,6 +104,25 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         )?)
     }
 
+    pub(super) fn source_error_for_obligation(
+        &mut self,
+        source: &SemanticSource<'hir>,
+        origin: OriginId,
+        key: SourceObligationKey,
+        code: &'static str,
+        message: impl Into<String>,
+        data: BTreeMap<Box<str>, DiagnosticDataValue>,
+    ) -> Result<Poison, SignatureResolutionError> {
+        Ok(record_type_error_for_obligation(
+            self.diagnostics,
+            key,
+            code,
+            message,
+            self.required_span(source, origin)?,
+            data,
+        )?)
+    }
+
     pub(super) fn record_arity_error(
         &mut self,
         source: &SemanticSource<'hir>,

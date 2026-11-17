@@ -3,7 +3,7 @@ mod traversal;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use eglur_diagnostics::{DiagnosticStoreError, Poison};
+use eglur_diagnostics::{DiagnosticStoreError, Poison, PoisonAccumulator};
 use eglur_hir::{
     Body, ConstructorPayload, ExprId, ExprKind, FunctionBody, ItemKind, OriginId, PatternId,
     ReduceBySingleValue, StmtId, StmtKind,
@@ -249,19 +249,19 @@ pub(super) fn collect_effect_bodies(
             trait_evidence,
             boundary_parameters,
             operations: Vec::new(),
-            blocked: None,
+            blocking: EffectBodyState::Unblocked,
         };
         let mut state = FlowState::default();
         collector.visit_expression(root, &mut state)?;
-        bodies.push(match collector.blocked {
-            Some(EffectBodyBlock::Poisoned(poison)) => EffectBodyFact::Poisoned {
+        bodies.push(match collector.blocking {
+            EffectBodyState::Poisoned(pending) => EffectBodyFact::Poisoned {
                 owner: declaration.id(),
-                poison,
+                poison: EffectBodyState::complete_provenance(pending),
             },
-            Some(EffectBodyBlock::Unperformed) => EffectBodyFact::Unperformed {
+            EffectBodyState::Unperformed => EffectBodyFact::Unperformed {
                 owner: declaration.id(),
             },
-            None => EffectBodyFact::Known(EffectBody {
+            EffectBodyState::Unblocked => EffectBodyFact::Known(EffectBody {
                 owner: declaration.id(),
                 signature: *signature_id,
                 operations: collector.operations.into_boxed_slice(),
@@ -307,12 +307,47 @@ struct BodyCollector<'analysis> {
     trait_evidence: &'analysis TraitEvidence,
     boundary_parameters: BTreeSet<LocalBindingId>,
     operations: Vec<EffectOperation>,
-    blocked: Option<EffectBodyBlock>,
+    blocking: EffectBodyState,
 }
 
-enum EffectBodyBlock {
-    Poisoned(Poison),
+enum EffectBodyState {
+    Unblocked,
+    Poisoned(PoisonAccumulator),
     Unperformed,
+}
+
+impl EffectBodyState {
+    fn include_poison(&mut self, poison: &Poison) -> Result<(), EffectBodyError> {
+        // Foreign provenance clears this state rather than restoring prior roots.
+        let mut pending = match std::mem::replace(self, Self::Unblocked) {
+            Self::Poisoned(pending) => pending,
+            Self::Unblocked | Self::Unperformed => PoisonAccumulator::new(),
+        };
+
+        #[cfg(test)]
+        poison_tests::observe(poison_tests::Step::Input);
+
+        pending.include(poison)?;
+        *self = Self::Poisoned(pending);
+        Ok(())
+    }
+
+    fn mark_unperformed(&mut self) {
+        if matches!(self, Self::Unblocked) {
+            *self = Self::Unperformed;
+        }
+    }
+
+    fn complete_provenance(pending: PoisonAccumulator) -> Poison {
+        let poison = pending
+            .finish()
+            .expect("poisoned effect-body state includes nonempty provenance");
+
+        #[cfg(test)]
+        poison_tests::observe(poison_tests::Step::Complete);
+
+        poison
+    }
 }
 
 impl BodyCollector<'_> {
@@ -438,19 +473,11 @@ impl BodyCollector<'_> {
     }
 
     fn block_on_poison(&mut self, poison: &Poison) -> Result<(), EffectBodyError> {
-        self.blocked = Some(match self.blocked.take() {
-            Some(EffectBodyBlock::Poisoned(existing)) => {
-                EffectBodyBlock::Poisoned(existing.merge(poison)?)
-            }
-            Some(EffectBodyBlock::Unperformed) | None => EffectBodyBlock::Poisoned(poison.clone()),
-        });
-        Ok(())
+        self.blocking.include_poison(poison)
     }
 
     fn block_on_unperformed(&mut self) {
-        if self.blocked.is_none() {
-            self.blocked = Some(EffectBodyBlock::Unperformed);
-        }
+        self.blocking.mark_unperformed();
     }
 
     fn target_is_bang(&self, target: &CanonicalTarget) -> Result<bool, EffectBodyError> {
@@ -701,3 +728,6 @@ impl From<DiagnosticStoreError> for EffectBodyError {
         Self::DiagnosticStore(error)
     }
 }
+
+#[cfg(test)]
+mod poison_tests;

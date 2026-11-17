@@ -23,14 +23,16 @@ in the source from failures caused only by continuing analysis after an earlier
 failure.
 
 1. A diagnostic root is one failed normative obligation identified by its rule
-   and code-specific blame identity. That identity is the offending source
-   occurrence when one exists, the required zero-width insertion point for a
-   missing construct, or the failing input-boundary instance for a diagnostic
-   such as a missing package artifact. The failure MUST be establishable without
-   facts made unavailable solely by an earlier error.
-2. Separate blame identities that fail the same rule are separate roots. The
-   same failed obligation reached again through another traversal or compiler
-   phase remains one root.
+   and code-specific obligation identity. Its primary blame is the offending
+   source occurrence when one exists, the required zero-width insertion point
+   for a missing construct, or the location prescribed by that diagnostic's
+   rule. A source-unavailable diagnostic, such as a missing package artifact,
+   identifies the failing input-boundary instance. The failure MUST be
+   establishable without facts made unavailable solely by an earlier error.
+2. Distinct failed obligations are separate roots even when they share a rule
+   and primary span, as when an impl omits several required associated types.
+   The same failed obligation reached again through another traversal or
+   compiler phase remains one root.
 3. After emitting a root diagnostic, an implementation MAY substitute an
    internal poisoned fact so that analysis can continue. A poisoned fact records
    that a prerequisite is unavailable because at least one root diagnostic was

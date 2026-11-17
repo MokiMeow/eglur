@@ -1,6 +1,9 @@
 use super::invocation::{InvocationContinuation, InvocationFrame, InvocationPlan};
 use super::*;
 
+#[cfg(test)]
+mod poison_tests;
+
 struct DispatchRequest {
     expression: ExprId,
     origin: OriginId,
@@ -38,7 +41,7 @@ pub(super) struct DispatchArgumentsFrame {
     next: usize,
     typed: BTreeMap<ExprId, TypedExpression>,
     normal_continuation: NormalContinuation,
-    poison: Option<Poison>,
+    poison: PendingPoison,
     unperformed: bool,
 }
 
@@ -82,7 +85,7 @@ impl DispatchArgumentsFrame {
             next: 0,
             typed: BTreeMap::new(),
             normal_continuation,
-            poison: None,
+            poison: PendingPoison::default(),
             unperformed: false,
         }
     }
@@ -537,7 +540,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             frame.normal_continuation.strict(value.normal_continuation);
                         frame.typed.insert(argument, value);
                     }
-                    Outcome::Poisoned(found) => self.merge_poison(&mut frame.poison, &found)?,
+                    Outcome::Poisoned(found) => frame.poison.include(&found)?,
                     Outcome::Unperformed | Outcome::NotApplicable => frame.unperformed = true,
                     Outcome::Deferred => return Ok(InvocationPlan::Complete(Outcome::Deferred)),
                 }
@@ -882,17 +885,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .map(|&argument| self.type_occurrence(source, argument))
             .collect::<Result<Vec<_>, _>>()?;
         let mut explicit = Vec::with_capacity(explicit_arguments.len());
-        let mut poison = None;
+        let mut poison = PendingPoison::default();
         let mut unperformed = false;
         for argument in explicit_arguments {
             match argument {
                 Outcome::Known(argument) => explicit.push(argument),
-                Outcome::Poisoned(found) => self.merge_poison(&mut poison, &found)?,
+                Outcome::Poisoned(found) => poison.include(&found)?,
                 Outcome::Deferred => return Ok(InvocationPlan::Complete(Outcome::Deferred)),
                 Outcome::Unperformed | Outcome::NotApplicable => unperformed = true,
             }
         }
-        if let Some(poison) = poison {
+        if let Some(poison) = poison.take() {
             return Ok(InvocationPlan::Complete(Outcome::Poisoned(poison)));
         }
         if unperformed {

@@ -11,6 +11,9 @@ use eglur_sema::{
 #[path = "effects/traversal.rs"]
 mod traversal;
 
+#[path = "effects/poison.rs"]
+mod poison;
+
 fn effect_profile() -> SupportProfile {
     SupportProfile::compile_only(
         SupportSchemaVersion::V1,

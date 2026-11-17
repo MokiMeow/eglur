@@ -3,6 +3,9 @@ use crate::signatures::public_contracts::{
     conformance_is_externally_reachable, first_unnameable_trait, first_unnameable_type,
 };
 
+#[cfg(test)]
+mod poison_tests;
+
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_generics(&mut self) -> Result<(), SignatureResolutionError> {
         let generic_ids = self
@@ -558,7 +561,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         } else {
             let context = self.source_context(owner, false)?;
             let mut bounds = Vec::new();
-            let mut poison = None;
+            let mut poison = PoisonAccumulator::new();
             let mut unperformed = false;
             let mut seen = BTreeSet::new();
             let parameter_name = parameter.name.text().unwrap_or("<invalid>");
@@ -591,7 +594,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                     ),
                                 ]),
                             )?;
-                            merge_poison(&mut poison, &duplicate)?;
+                            #[cfg(test)]
+                            poison_tests::observe(poison_tests::Step::Input);
+
+                            poison.include(&duplicate)?;
                         } else {
                             bounds.push(bound);
                             let mut available = bounds.clone();
@@ -600,11 +606,19 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                 .insert(id.clone(), available.into_boxed_slice());
                         }
                     }
-                    Resolution::Poisoned(found) => merge_poison(&mut poison, &found)?,
+                    Resolution::Poisoned(found) => {
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Input);
+
+                        poison.include(&found)?;
+                    }
                     Resolution::Unperformed => unperformed = true,
                 }
             }
-            if let Some(poison) = poison {
+            if let Some(poison) = poison.finish() {
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Complete);
+
                 Resolution::Poisoned(poison)
             } else if unperformed {
                 Resolution::Unperformed

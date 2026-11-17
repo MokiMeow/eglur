@@ -1,5 +1,11 @@
 use super::*;
 
+#[cfg(test)]
+mod poison_tests;
+
+#[cfg(test)]
+mod enum_poison_tests;
+
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     pub(super) fn resolve_source_declarations(&mut self) -> Result<(), SignatureResolutionError> {
         let declarations = self
@@ -630,7 +636,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         let (parameter_position, result_position) = declaration.type_positions();
         let body_hir = hir.body(body);
         let mut resolved_parameters = Vec::with_capacity(parameters.len());
-        let mut poison = None;
+        let mut parameter_poison = PoisonAccumulator::new();
         let mut unperformed = false;
         for parameter in parameters {
             let parameter_name = match body_hir.pattern(parameter.pattern) {
@@ -645,7 +651,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                 origin: name.origin(),
                             },
                         )?;
-                        merge_poison(&mut poison, &found)?;
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Input(
+                            poison_tests::Stage::Parameters,
+                        ));
+
+                        parameter_poison.include(&found)?;
                         None
                     }
                     PatternKind::Invalid => {
@@ -655,7 +666,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                 origin: pattern.origin(),
                             },
                         )?;
-                        merge_poison(&mut poison, &found)?;
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Input(
+                            poison_tests::Stage::Parameters,
+                        ));
+
+                        parameter_poison.include(&found)?;
                         None
                     }
                     _ => {
@@ -666,7 +682,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             "parameter pattern is unsupported in v0.1",
                             BTreeMap::new(),
                         )?;
-                        merge_poison(&mut poison, &found)?;
+                        #[cfg(test)]
+                        poison_tests::observe(poison_tests::Step::Input(
+                            poison_tests::Stage::Parameters,
+                        ));
+
+                        parameter_poison.include(&found)?;
                         None
                     }
                 },
@@ -679,7 +700,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                         origin: parameter.origin,
                     },
                 )?;
-                merge_poison(&mut poison, &found)?;
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Parameters));
+
+                parameter_poison.include(&found)?;
                 continue;
             };
             match self.resolve_source_type(
@@ -695,7 +719,14 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     ty,
                     source_pattern: Some(parameter.pattern),
                 }),
-                Resolution::Poisoned(found) => merge_poison(&mut poison, &found)?,
+                Resolution::Poisoned(found) => {
+                    #[cfg(test)]
+                    poison_tests::observe(poison_tests::Step::Input(
+                        poison_tests::Stage::Parameters,
+                    ));
+
+                    parameter_poison.include(&found)?;
+                }
                 Resolution::Unperformed => unperformed = true,
             }
         }
@@ -710,7 +741,12 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             )? {
                 Resolution::Known(ty) => Some(ty),
                 Resolution::Poisoned(found) => {
-                    merge_poison(&mut poison, &found)?;
+                    #[cfg(test)]
+                    poison_tests::observe(poison_tests::Step::Input(
+                        poison_tests::Stage::Parameters,
+                    ));
+
+                    parameter_poison.include(&found)?;
                     None
                 }
                 Resolution::Unperformed => {
@@ -726,9 +762,20 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 "named function return type is required",
                 BTreeMap::new(),
             )?;
-            merge_poison(&mut poison, &found)?;
+            #[cfg(test)]
+            poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Parameters));
+
+            parameter_poison.include(&found)?;
             None
         };
+
+        let mut poison = parameter_poison.finish();
+        #[cfg(test)]
+        if poison.is_some() {
+            poison_tests::observe(poison_tests::Step::Complete(
+                poison_tests::Stage::Parameters,
+            ));
+        }
 
         let is_method = self.is_method(declaration_id);
         let mut receiver_kind = None;
@@ -770,6 +817,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             )?);
         }
         if poison.is_none() && !unperformed && !name.is_bang() {
+            let mut mutability_poison = PoisonAccumulator::new();
             for (index, parameter) in resolved_parameters
                 .iter()
                 .enumerate()
@@ -794,7 +842,17 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     "non-bang callable `&mut` parameter is forbidden",
                     BTreeMap::new(),
                 )?;
-                merge_poison(&mut poison, &found)?;
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Input(poison_tests::Stage::Mutability));
+
+                mutability_poison.include(&found)?;
+            }
+            poison = mutability_poison.finish();
+            #[cfg(test)]
+            if poison.is_some() {
+                poison_tests::observe(poison_tests::Step::Complete(
+                    poison_tests::Stage::Mutability,
+                ));
             }
         }
         if let Some(poison) = poison {
@@ -964,15 +1022,20 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         origin: OriginId,
         owner: DefId,
         trait_ref: &TraitRef,
-        associated: &str,
-        reason: &'static str,
+        mismatch: associated_bindings::AssociatedMismatch<'_>,
     ) -> Result<Poison, SignatureResolutionError> {
+        let associated_bindings::AssociatedMismatch {
+            name: associated,
+            obligation,
+            reason,
+        } = mismatch;
         let trait_name =
             DiagnosticTypeRenderer::new(self.collection, &self.diagnostic_type_names, self, owner)
                 .render_trait_ref(trait_ref)?;
-        self.source_error(
+        self.source_error_for_obligation(
             source,
             origin,
+            source_obligation_key(obligation),
             "TRAIT_IMPL_ASSOC_TYPE_MISMATCH",
             format!("trait impl associated type mismatch: `{associated}` is {reason}"),
             BTreeMap::from([
@@ -1056,7 +1119,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 let declarations =
                     self.child_declarations(declaration_id, DeclarationKind::EnumVariantField);
                 let mut resolved = Vec::with_capacity(fields.len());
-                let mut poison = None;
+                let mut poison = PoisonAccumulator::new();
                 let mut unperformed = false;
                 for field in fields {
                     let field_id = declarations
@@ -1080,7 +1143,10 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                             CanonicalTarget::Source(field_id),
                             SemanticFact::Poisoned(found.clone()),
                         )?;
-                        merge_poison(&mut poison, &found)?;
+                        #[cfg(test)]
+                        enum_poison_tests::observe(enum_poison_tests::Step::Input);
+
+                        poison.include(&found)?;
                         continue;
                     }
                     match self.resolve_source_type(
@@ -1106,12 +1172,18 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                                 CanonicalTarget::Source(field_id),
                                 SemanticFact::Poisoned(found.clone()),
                             )?;
-                            merge_poison(&mut poison, &found)?;
+                            #[cfg(test)]
+                            enum_poison_tests::observe(enum_poison_tests::Step::Input);
+
+                            poison.include(&found)?;
                         }
                         Resolution::Unperformed => unperformed = true,
                     }
                 }
-                Ok(if let Some(poison) = poison {
+                Ok(if let Some(poison) = poison.finish() {
+                    #[cfg(test)]
+                    enum_poison_tests::observe(enum_poison_tests::Step::Complete);
+
                     Resolution::Poisoned(poison)
                 } else if unperformed {
                     Resolution::Unperformed

@@ -14,16 +14,16 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .declaration(current)
                 .and_then(Declaration::parent);
         }
-        let mut poison = None;
+        let mut poison = PoisonAccumulator::new();
         let mut unperformed = false;
         for declaration in chain {
             match self.direct_generic_state(declaration)? {
-                Resolution::Poisoned(found) => merge_poison(&mut poison, &found)?,
+                Resolution::Poisoned(found) => poison.include(&found)?,
                 Resolution::Unperformed => unperformed = true,
                 Resolution::Known(()) => {}
             }
         }
-        Ok(if let Some(poison) = poison {
+        Ok(if let Some(poison) = poison.finish() {
             Resolution::Poisoned(poison)
         } else if unperformed {
             Resolution::Unperformed
@@ -59,7 +59,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         #[cfg(test)]
         generic_state_tests::observe(generic_state_tests::Step::Build);
 
-        let mut poison = None;
+        let mut poison = PoisonAccumulator::new();
         let mut unperformed = false;
         for generic in generics {
             #[cfg(test)]
@@ -73,9 +73,9 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                     #[cfg(test)]
                     generic_state_tests::observe(generic_state_tests::Step::Poisoned);
                     #[cfg(test)]
-                    generic_state_tests::observe(generic_state_tests::Step::Merge);
+                    generic_state_tests::observe(generic_state_tests::Step::Include);
 
-                    merge_poison(&mut poison, found)?;
+                    poison.include(found)?;
                 }
                 FactState::Unperformed => {
                     #[cfg(test)]
@@ -89,7 +89,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 }
             }
         }
-        let state = if let Some(poison) = poison {
+        let state = if let Some(poison) = poison.finish() {
             Resolution::Poisoned(poison)
         } else if unperformed {
             Resolution::Unperformed
@@ -112,7 +112,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
             .collection
             .declaration(owner)
             .and_then(Declaration::parent);
-        let mut poison = None;
+        let mut poison = PoisonAccumulator::new();
         let mut unperformed = false;
         while let Some(current) = cursor {
             match declaration_fact_state(
@@ -120,7 +120,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 &self.overload_family_poisons,
                 &CanonicalTarget::Source(current),
             ) {
-                FactState::Poisoned(found) => merge_poison(&mut poison, found)?,
+                FactState::Poisoned(found) => poison.include(found)?,
                 FactState::Unperformed => unperformed = true,
                 FactState::Known(_) | FactState::NotApplicable => {}
             }
@@ -129,7 +129,7 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
                 .declaration(current)
                 .and_then(Declaration::parent);
         }
-        Ok(if let Some(poison) = poison {
+        Ok(if let Some(poison) = poison.finish() {
             Resolution::Poisoned(poison)
         } else if unperformed {
             Resolution::Unperformed

@@ -13,11 +13,12 @@ pub use model::{
     Diagnostic, DiagnosticCode, DiagnosticDataValue, DiagnosticPhase, RelatedOrder, Severity,
 };
 pub use render::render_plain;
-pub use root::{BoundaryRootKey, DiagnosticRoot, DiagnosticRootError};
+pub use root::{BoundaryRootKey, DiagnosticRoot, DiagnosticRootError, SourceObligationKey};
 pub use snapshot::{AcceptedDiagnostics, DiagnosticSnapshot, ErrorLimit, RejectedDiagnostics};
 pub use span::{
     PrimarySpan, RelatedSpan, SourceLabel, SourceProjectionError, SourceSpan, SourceTextRange,
 };
 pub use store::{
     DiagnosticCheckpoint, DiagnosticFailure, DiagnosticStore, DiagnosticStoreError, Poison,
+    PoisonAccumulator,
 };

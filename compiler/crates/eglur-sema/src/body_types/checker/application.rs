@@ -61,7 +61,7 @@ pub(super) struct InferenceFrame {
     pass: InferencePass,
     next: usize,
     normal_continuation: NormalContinuation,
-    poison: Option<Poison>,
+    poison: PendingPoison,
     unperformed: bool,
     conflict: bool,
 }
@@ -76,7 +76,7 @@ pub(super) struct CheckingFrame {
     result: TypeId,
     next: usize,
     normal_continuation: NormalContinuation,
-    poison: Option<Poison>,
+    poison: PendingPoison,
 }
 
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
@@ -164,7 +164,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     pass: InferencePass::Probe,
                     next: 0,
                     normal_continuation: NormalContinuation::Present,
-                    poison: None,
+                    poison: PendingPoison::default(),
                     unperformed: false,
                     conflict: false,
                 }),
@@ -222,7 +222,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
 
-            if let Some(poison) = frame.poison {
+            if let Some(poison) = frame.poison.take() {
                 return Ok(ApplicationPlan::Complete(Outcome::Poisoned(poison)));
             }
             if frame.unperformed {
@@ -280,7 +280,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         }
                         argument.typed = Some(value);
                     }
-                    Outcome::Poisoned(found) => self.merge_poison(&mut frame.poison, &found)?,
+                    Outcome::Poisoned(found) => frame.poison.include(&found)?,
                     Outcome::Deferred => {}
                     Outcome::Unperformed | Outcome::NotApplicable => frame.unperformed = true,
                 }
@@ -367,7 +367,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 result,
                 next: 0,
                 normal_continuation: NormalContinuation::Present,
-                poison: None,
+                poison: PendingPoison::default(),
             }),
         )
     }
@@ -408,7 +408,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 });
             }
         }
-        if let Some(poison) = frame.poison {
+        if let Some(poison) = frame.poison.take() {
             return Ok(ApplicationPlan::Complete(Outcome::Poisoned(poison)));
         }
         Ok(ApplicationPlan::Complete(Outcome::Known(
@@ -442,10 +442,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     frame.normal_continuation.strict(value.normal_continuation);
                 if !assignable {
                     let found = self.call_argument_mismatch(source, slot, expected, value.ty)?;
-                    self.merge_poison(&mut frame.poison, &found)?;
+                    frame.poison.include(&found)?;
                 }
             }
-            Outcome::Poisoned(found) => self.merge_poison(&mut frame.poison, &found)?,
+            Outcome::Poisoned(found) => frame.poison.include(&found)?,
             Outcome::Deferred => {
                 let outcome = if frame.allow_deferred {
                     Outcome::Deferred
@@ -470,3 +470,6 @@ fn application_refusal<T>(outcome: Outcome<T>) -> Outcome<ResolvedApplication> {
         Outcome::Unperformed | Outcome::NotApplicable => Outcome::Unperformed,
     }
 }
+
+#[cfg(test)]
+mod poison_tests;

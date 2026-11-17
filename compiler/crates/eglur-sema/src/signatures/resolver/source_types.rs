@@ -2,6 +2,9 @@ use super::*;
 
 mod worklist;
 
+#[cfg(test)]
+mod poison_tests;
+
 impl<'input, 'hir> SignatureResolver<'input, 'hir> {
     fn retain_source_application(
         &mut self,
@@ -195,16 +198,24 @@ impl<'input, 'hir> SignatureResolver<'input, 'hir> {
         context: &SourceTypeContext,
     ) -> Result<Resolution<Vec<TypeId>>, SignatureResolutionError> {
         let mut values = Vec::with_capacity(types.len());
-        let mut poison = None;
+        let mut poison = PoisonAccumulator::new();
         let mut unperformed = false;
         for (&type_ref, position) in types.iter().zip(positions) {
             match self.resolve_source_type(owner, source, hir, type_ref, position, context)? {
                 Resolution::Known(ty) => values.push(ty),
-                Resolution::Poisoned(found) => merge_poison(&mut poison, &found)?,
+                Resolution::Poisoned(found) => {
+                    #[cfg(test)]
+                    poison_tests::observe(poison_tests::Step::Input);
+
+                    poison.include(&found)?;
+                }
                 Resolution::Unperformed => unperformed = true,
             }
         }
-        Ok(if let Some(poison) = poison {
+        Ok(if let Some(poison) = poison.finish() {
+            #[cfg(test)]
+            poison_tests::observe(poison_tests::Step::Complete);
+
             Resolution::Poisoned(poison)
         } else if unperformed {
             Resolution::Unperformed

@@ -1,6 +1,91 @@
 use super::*;
 
 #[test]
+fn growing_dispatch_and_explicit_types_keep_late_failures_and_later_bodies() {
+    for count in [8_usize, 32, 128] {
+        for family in ["arguments", "method-types", "overload-types"] {
+            for mode in ["distinct", "mixed", "known"] {
+                let generic = (0..count)
+                    .map(|i| format!("T{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let values = (0..count)
+                    .rev()
+                    .map(|i| {
+                        let value = if mode == "known" || mode == "mixed" && i % 2 == 0 {
+                            "0".into()
+                        } else {
+                            format!("missing{i}")
+                        };
+                        format!("v{i}={value}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let types = (0..count)
+                    .map(|i| {
+                        if mode == "known" || mode == "mixed" && i % 2 == 0 {
+                            "i64".into()
+                        } else {
+                            format!("Missing{i}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let source = match family {
+                    "arguments" => format!(
+                        "overload fn target({}) -> Unit = ()\noverload fn target({}) -> Unit = ()\nfn inspect() -> Unit = target({values})\nfn after() -> Unit = ()\n",
+                        (0..count)
+                            .map(|i| format!("v{i}: i64"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        (0..count)
+                            .map(|i| format!("v{i}: Bool"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                    "method-types" => format!(
+                        "struct Boxed {{ fn run[{generic}](self: &Self) -> Unit = () }}\nfn inspect(value: Boxed) -> Unit = (value.run)::[{types}]()\nfn after() -> Unit = ()\n"
+                    ),
+                    _ => format!(
+                        "overload fn target[{generic}](value: i64) -> Unit = ()\noverload fn target[{generic}](value: Str) -> Unit = ()\nfn inspect() -> Unit = target::[{types}](0)\nfn after() -> Unit = ()\n"
+                    ),
+                };
+                let catalog = TrustedCatalog::first_slice().unwrap();
+                let mut session = session(&source);
+                let analysis = session
+                    .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+                    .unwrap();
+                assert_eq!(analysis.trace().missing().count(), 0);
+                assert_eq!(analysis.fingerprints().is_some(), mode == "known");
+                let resolution = analysis.resolution().unwrap();
+                let after = resolution
+                    .declarations()
+                    .modules()
+                    .flat_map(|m| m.declarations())
+                    .find(|d| d.name().is_some_and(|name| name.text() == "after"))
+                    .unwrap()
+                    .id();
+                assert!(matches!(
+                    resolution.body_types().body(after),
+                    FactState::Known(_)
+                ));
+
+                let snapshot = session.into_diagnostics(None);
+                let expected = match mode {
+                    "known" => 0,
+                    "mixed" => count / 2,
+                    _ => count,
+                };
+                assert_eq!(
+                    diagnostic_codes(&snapshot),
+                    vec!["NAME_NOT_FOUND"; expected]
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn deferred_named_argument_uses_later_evidence_without_reordering_evaluation() {
     let catalog = TrustedCatalog::first_slice().unwrap();
     for (argument_type, value_type, first, second) in [
@@ -158,4 +243,132 @@ fn explicit_projection_arguments_normalize_before_slot_checking() {
         snapshot.diagnostics()[0].data().get("expected_type"),
         Some(&DiagnosticDataValue::from("i8"))
     );
+}
+#[test]
+fn growing_application_inputs_keep_later_facts_and_each_source_order_failure() {
+    for count in [8_usize, 32, 128] {
+        for mode in [
+            "inference",
+            "explicit-poison",
+            "explicit-mismatch",
+            "mixed-mismatch",
+        ] {
+            let explicit = mode != "inference";
+            let source = format!(
+                "fn target{}({}) -> Unit = ()\nfn inspect() -> Unit = target{}({})\nfn after() -> Unit = ()\n",
+                if explicit { "[T]" } else { "" },
+                (0..count)
+                    .map(|i| format!("v{i}: {}", if explicit { "T" } else { "i64" }))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if explicit { "::[i64]" } else { "" },
+                (0..count)
+                    .rev()
+                    .map(|i| format!(
+                        "v{i}={}",
+                        match mode {
+                            "inference" | "explicit-poison" => format!("missing{i}"),
+                            "mixed-mismatch" if i % 2 == 0 => "0".into(),
+                            _ => "true".into(),
+                        }
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let mut session = session(&source);
+            let catalog = TrustedCatalog::first_slice().unwrap();
+            let analysis = session
+                .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+                .unwrap();
+            assert_eq!(analysis.trace().missing().count(), 0);
+            assert!(analysis.fingerprints().is_none());
+            let resolution = analysis.resolution().unwrap();
+            let after = resolution
+                .declarations()
+                .modules()
+                .flat_map(|m| m.declarations())
+                .find(|d| d.name().is_some_and(|n| n.text() == "after"))
+                .unwrap()
+                .id();
+            assert!(matches!(
+                resolution.body_types().body(after),
+                FactState::Known(_)
+            ));
+            let snapshot = session.into_diagnostics(None);
+            let expected = if mode == "mixed-mismatch" {
+                count / 2
+            } else {
+                count
+            };
+            let code = if matches!(mode, "inference" | "explicit-poison") {
+                "NAME_NOT_FOUND"
+            } else {
+                "CALL_ARG_TYPE_MISMATCH"
+            };
+            assert_eq!(diagnostic_codes(&snapshot), vec![code; expected]);
+            if code == "CALL_ARG_TYPE_MISMATCH" {
+                let parameters = (0..count)
+                    .rev()
+                    .filter(|i| mode != "mixed-mismatch" || i % 2 == 1)
+                    .map(|i| format!("v{i}"))
+                    .collect::<Vec<_>>();
+                for (diagnostic, parameter) in snapshot.diagnostics().iter().zip(parameters) {
+                    assert_eq!(
+                        diagnostic.data().get("parameter"),
+                        Some(&DiagnosticDataValue::from(parameter))
+                    );
+                    assert_eq!(
+                        diagnostic.data().get("expected_type"),
+                        Some(&DiagnosticDataValue::from("i64"))
+                    );
+                    assert_eq!(
+                        diagnostic.data().get("actual_type"),
+                        Some(&DiagnosticDataValue::from("Bool"))
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn growing_deferred_named_applications_retain_cached_values_and_evaluation_order() {
+    for count in [8_usize, 32, 128] {
+        let source = format!(
+            "fn target[T]({}) -> Unit = ()\nfn inspect(value: i64) -> Unit = target({})\n",
+            (0..count)
+                .map(|i| format!("v{i}: Opt[T]"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            (0..count)
+                .rev()
+                .map(|i| format!("v{i}={}", if i == 0 { "Some(value)" } else { "None" }))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let mut session = session(&source);
+        let catalog = TrustedCatalog::first_slice().unwrap();
+        let analysis = session
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        assert_eq!(analysis.trace().missing().count(), 0);
+        assert!(analysis.fingerprints().is_some());
+        let resolution = analysis.resolution().unwrap();
+        let (_, invocation) = resolution
+            .body_types()
+            .invocations()
+            .find(|(_, invocation)| invocation.arguments().len() == count)
+            .unwrap();
+        assert_eq!(
+            invocation.evaluation_order().collect::<Vec<_>>(),
+            (0..count)
+                .rev()
+                .map(|i| &invocation.arguments()[i])
+                .collect::<Vec<_>>()
+        );
+        assert!(matches!(
+            session.into_diagnostics(None),
+            DiagnosticSnapshot::Accepted(_)
+        ));
+    }
 }

@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod poison_tests;
+
 pub(super) enum StatementPlan {
     Complete(Outcome<BlockStep>),
     Expression {
@@ -42,7 +45,7 @@ pub(super) struct PreparedLet {
 pub(super) struct BlockFrame {
     remaining: std::vec::IntoIter<StmtId>,
     expected: Option<TypeId>,
-    state: Outcome<()>,
+    state: UnitOutcomeFold,
     result: Option<TypeId>,
     reachable: bool,
 }
@@ -52,7 +55,7 @@ impl BlockFrame {
         Self {
             remaining: statements.into_vec().into_iter(),
             expected,
-            state: Outcome::Known(()),
+            state: UnitOutcomeFold::Known,
             result: None,
             reachable: true,
         }
@@ -85,7 +88,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             block.reachable = step.normal_continuation.is_present();
         }
-        block.state = self.merge_unit(block.state, next.map_unit())?;
+
+        #[cfg(test)]
+        if matches!(next, Outcome::Poisoned(_)) {
+            poison_tests::observe(poison_tests::Step::Input);
+        }
+
+        block.state = block.state.include(next.map_unit())?;
         Ok(block)
     }
 
@@ -93,7 +102,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         &mut self,
         block: BlockFrame,
     ) -> Result<Outcome<TypedExpression>, BodyTypingError> {
-        match block.state {
+        match block.state.finish() {
             Outcome::Known(()) => {
                 if block.reachable {
                     let region = self.current_control_region()?.clone();
@@ -112,7 +121,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 };
                 Ok(Outcome::Known(self.value_expression(result)))
             }
-            Outcome::Poisoned(poison) => Ok(Outcome::Poisoned(poison)),
+            Outcome::Poisoned(poison) => {
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Complete);
+
+                Ok(Outcome::Poisoned(poison))
+            }
             Outcome::Unperformed => Ok(Outcome::Unperformed),
             Outcome::Deferred => Ok(Outcome::Deferred),
             Outcome::NotApplicable => Ok(Outcome::NotApplicable),

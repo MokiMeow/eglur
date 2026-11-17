@@ -3,8 +3,11 @@ use std::collections::BTreeMap;
 use eglur_diagnostics::{
     Diagnostic, DiagnosticCode, DiagnosticDataValue, DiagnosticFailure, DiagnosticPhase,
     DiagnosticRoot, DiagnosticRootError, DiagnosticStore, DiagnosticStoreError, Poison,
-    PrimarySpan, RelatedOrder, RelatedSpan, Severity, SourceSpan,
+    PrimarySpan, RelatedOrder, RelatedSpan, Severity, SourceObligationKey, SourceSpan,
 };
+
+#[cfg(test)]
+mod source_obligation_tests;
 
 pub(crate) fn record_name_not_found(
     store: &mut DiagnosticStore,
@@ -139,15 +142,46 @@ pub(crate) fn record_type_error(
 ) -> Result<Poison, SemanticDiagnosticError> {
     record_root(
         store,
-        Diagnostic::new(
-            code(code_spelling),
-            Severity::Error,
-            type_phase(),
-            message.into(),
-            PrimarySpan::Source(span),
-        )
-        .with_data(data),
+        type_error_diagnostic(code_spelling, message, span, data),
     )
+}
+
+pub(crate) fn record_type_error_for_obligation(
+    store: &mut DiagnosticStore,
+    key: SourceObligationKey,
+    code_spelling: &'static str,
+    message: impl Into<String>,
+    span: SourceSpan,
+    data: BTreeMap<Box<str>, DiagnosticDataValue>,
+) -> Result<Poison, SemanticDiagnosticError> {
+    let diagnostic = type_error_diagnostic(code_spelling, message, span, data);
+    record_root_for_obligation(store, key, diagnostic)
+}
+
+fn type_error_diagnostic(
+    code_spelling: &'static str,
+    message: impl Into<String>,
+    span: SourceSpan,
+    data: BTreeMap<Box<str>, DiagnosticDataValue>,
+) -> Diagnostic {
+    Diagnostic::new(
+        code(code_spelling),
+        Severity::Error,
+        type_phase(),
+        message.into(),
+        PrimarySpan::Source(span),
+    )
+    .with_data(data)
+}
+
+pub(crate) fn source_obligation_key(target: &crate::CanonicalTarget) -> SourceObligationKey {
+    let key = match target {
+        crate::CanonicalTarget::Source(id) => {
+            format!("source:{}:{}", id.module().get(), id.local())
+        }
+        crate::CanonicalTarget::External(id) => format!("external:{}", id.as_str()),
+    };
+    SourceObligationKey::new(key).expect("tagged target identity is non-empty")
 }
 
 pub(crate) fn record_type_error_with_related(
@@ -160,16 +194,23 @@ pub(crate) fn record_type_error_with_related(
 ) -> Result<Poison, SemanticDiagnosticError> {
     record_root(
         store,
-        Diagnostic::new(
-            code(code_spelling),
-            Severity::Error,
-            type_phase(),
-            message.into(),
-            PrimarySpan::Source(span),
-        )
-        .with_related(related, RelatedOrder::CodeDefined)
-        .with_data(data),
+        type_error_diagnostic(code_spelling, message, span, data)
+            .with_related(related, RelatedOrder::CodeDefined),
     )
+}
+
+pub(crate) fn record_type_error_with_related_for_obligation(
+    store: &mut DiagnosticStore,
+    key: SourceObligationKey,
+    code_spelling: &'static str,
+    message: impl Into<String>,
+    span: SourceSpan,
+    related: impl IntoIterator<Item = RelatedSpan>,
+    data: BTreeMap<Box<str>, DiagnosticDataValue>,
+) -> Result<Poison, SemanticDiagnosticError> {
+    let diagnostic = type_error_diagnostic(code_spelling, message, span, data)
+        .with_related(related, RelatedOrder::CodeDefined);
+    record_root_for_obligation(store, key, diagnostic)
 }
 
 pub(crate) fn record_effect_violation(
@@ -211,6 +252,15 @@ fn record_root(
     diagnostic: Diagnostic,
 ) -> Result<Poison, SemanticDiagnosticError> {
     let root = DiagnosticRoot::source(diagnostic)?;
+    Ok(store.record_failure(DiagnosticFailure::Root(root))?)
+}
+
+fn record_root_for_obligation(
+    store: &mut DiagnosticStore,
+    key: SourceObligationKey,
+    diagnostic: Diagnostic,
+) -> Result<Poison, SemanticDiagnosticError> {
+    let root = DiagnosticRoot::source_obligation(key, diagnostic)?;
     Ok(store.record_failure(DiagnosticFailure::Root(root))?)
 }
 

@@ -2,6 +2,9 @@ use super::*;
 
 mod matching;
 
+#[cfg(test)]
+mod poison_tests;
+
 impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
     pub(super) fn bind_match_local(
         &mut self,
@@ -327,16 +330,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         )
                         .map(Outcome::Poisoned);
                 }
-                let mut outcome = Outcome::Known(());
+                let mut outcome = UnitOutcomeFold::Known;
                 for (element, element_ty) in elements.iter().zip(types.iter().copied()) {
                     let PatternElement::Pattern(element) = element else {
                         unreachable!("rest elements were rejected before binding")
                     };
                     let bound =
                         self.bind_pattern(module, source, body, *element, element_ty, mode)?;
-                    outcome = self.merge_unit(outcome, bound)?;
+                    outcome = outcome.include(bound)?;
                 }
-                Ok(outcome)
+                Ok(outcome.finish())
             }
             PatternKind::Invalid => Ok(Outcome::Poisoned(
                 source.invalid_poison(origin).cloned().ok_or(

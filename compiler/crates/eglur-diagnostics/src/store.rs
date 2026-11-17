@@ -1,5 +1,5 @@
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -32,6 +32,17 @@ impl Poison {
             store,
             roots: Box::new([root]),
         }
+    }
+
+    fn contains_root(&self, root: &usize) -> bool {
+        self.roots
+            .binary_search_by(|candidate| {
+                #[cfg(test)]
+                suppression_tests::observe_comparison();
+
+                candidate.cmp(root)
+            })
+            .is_ok()
     }
 
     /// Merges two provenance sets from the same diagnostic store.
@@ -75,6 +86,66 @@ impl fmt::Debug for Poison {
             .debug_struct("Poison")
             .field("root_count", &self.roots.len())
             .finish_non_exhaustive()
+    }
+}
+
+/// Accumulates provenance without materializing a complete set after each input.
+#[derive(Default)]
+pub struct PoisonAccumulator {
+    store: Option<Arc<StoreIdentity>>,
+    roots: BTreeSet<usize>,
+}
+
+impl PoisonAccumulator {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Rejects foreign provenance before changing the accumulated roots.
+    pub fn include(&mut self, poison: &Poison) -> Result<(), DiagnosticStoreError> {
+        #[cfg(test)]
+        poison_tests::observe(poison_tests::Step::Input);
+
+        if let Some(store) = &self.store {
+            #[cfg(test)]
+            poison_tests::observe(poison_tests::Step::PoolCheck);
+
+            if !Arc::ptr_eq(store, &poison.store) {
+                #[cfg(test)]
+                poison_tests::observe(poison_tests::Step::Foreign);
+
+                return Err(DiagnosticStoreError::ForeignPoison);
+            }
+        } else {
+            self.store = Some(Arc::clone(&poison.store));
+        }
+
+        for &root in &poison.roots {
+            #[cfg(test)]
+            poison_tests::observe(poison_tests::Step::Root);
+
+            self.roots.insert(root);
+        }
+        Ok(())
+    }
+
+    /// Freezes one sorted union, or returns `None` when no input was included.
+    #[must_use]
+    pub fn finish(self) -> Option<Poison> {
+        let store = self.store?;
+
+        #[cfg(test)]
+        poison_tests::observe(poison_tests::Step::Finish(self.roots.len()));
+
+        Some(Poison {
+            store,
+            roots: self
+                .roots
+                .into_iter()
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        })
     }
 }
 
@@ -252,7 +323,7 @@ impl DiagnosticStore {
         for root in later
             .roots
             .iter()
-            .filter(|root| !preceding.roots.contains(root))
+            .filter(|root| !preceding.contains_root(root))
         {
             self.superseded.insert(*root);
         }
@@ -314,3 +385,9 @@ impl Default for DiagnosticStore {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod poison_tests;
+
+#[cfg(test)]
+mod suppression_tests;

@@ -398,3 +398,156 @@ fn enum_metadata_does_not_enable_unsupported_pattern_or_constructor_paths() {
         == CompileCapability::Typecheck(TypecheckCapability::CheckBranching)));
     assert!(diagnostic_codes(&unsupported.into_diagnostics(None)).is_empty());
 }
+
+#[test]
+fn failed_tuple_patterns_preserve_all_roots_later_bindings_and_later_bodies() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for count in [8_usize, 32, 128] {
+        for mode in ["unit", "mixed", "grouped", "nested", "mut"] {
+            let pattern = (0..count)
+                .map(|i| match mode {
+                    "mixed" | "mut" if i % 2 == 0 => format!("v{i}"),
+                    "grouped" => "((()))".into(),
+                    "nested" => "((), ())".into(),
+                    _ => "()".into(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let values = (0..count)
+                .map(|_| if mode == "nested" { "(0, 1)" } else { "0" })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let source = format!(
+                "fn f() -> Unit {{ let {}({pattern}) = ({values})\nyield () }}\nfn after() -> Unit = ()\n",
+                if mode == "mut" { "mut " } else { "" }
+            );
+            let mut rejected = session(&source);
+            let analysis = rejected
+                .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+                .unwrap();
+            let resolution = analysis.resolution().unwrap();
+            let after = resolution
+                .declarations()
+                .modules()
+                .flat_map(|m| m.declarations())
+                .find(|d| d.name().is_some_and(|name| name.text() == "after"))
+                .unwrap()
+                .id();
+            assert!(matches!(
+                resolution.body_types().body(after),
+                FactState::Known(_)
+            ));
+            let locals = resolution
+                .names()
+                .locals()
+                .iter()
+                .filter(|b| b.name().text().starts_with('v'))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                locals.len(),
+                if matches!(mode, "mixed" | "mut") {
+                    count / 2
+                } else {
+                    0
+                }
+            );
+            for binding in locals {
+                let FactState::Known(local) = resolution.body_types().local(binding.id()) else {
+                    panic!("later local missing")
+                };
+                assert!(matches!(
+                    resolution.signatures().types().kind(local.ty()).unwrap(),
+                    TypeKind::Primitive(PrimitiveType::I64)
+                ));
+                assert_eq!(
+                    local.mutability(),
+                    if mode == "mut" {
+                        eglur_hir::Mutability::Mutable
+                    } else {
+                        eglur_hir::Mutability::Immutable
+                    }
+                );
+            }
+            let snapshot = rejected.into_diagnostics(None);
+            assert_eq!(
+                diagnostic_codes(&snapshot),
+                vec![
+                    "LET_PATTERN_TYPE_MISMATCH";
+                    match mode {
+                        "mixed" | "mut" => count / 2,
+                        "nested" => 2 * count,
+                        _ => count,
+                    }
+                ]
+            );
+            let spans = snapshot
+                .diagnostics()
+                .iter()
+                .map(|d| {
+                    d.primary_span()
+                        .as_source()
+                        .unwrap()
+                        .file_span()
+                        .range()
+                        .start()
+                        .as_usize()
+                })
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(spans.len(), snapshot.diagnostics().len());
+        }
+    }
+}
+
+#[test]
+fn callable_setup_binds_every_known_parameter_and_respects_signature_rejection() {
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    for count in [8_usize, 32, 128] {
+        let parameters = (0..count)
+            .map(|i| format!("v{i}: i64"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!(
+            "fn f({parameters}) -> i64 = v{}\nfn after() -> Unit = ()\n",
+            count - 1
+        );
+        let mut accepted = session(&source);
+        let analysis = accepted
+            .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+            .unwrap();
+        let resolution = analysis.resolution().unwrap();
+        assert_eq!(resolution.names().locals().len(), count);
+        assert!(
+            resolution
+                .names()
+                .locals()
+                .iter()
+                .all(|b| matches!(resolution.body_types().local(b.id()), FactState::Known(_)))
+        );
+        assert!(analysis.fingerprints().is_some());
+        assert!(diagnostic_codes(&accepted.into_diagnostics(None)).is_empty());
+
+        let parameters = (0..count)
+            .map(|i| format!("(a{i}, b{i}): (i64, i64)"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!("fn f({parameters}) -> Unit = [1]\nfn after() -> Unit = ()\n");
+        let mut rejected = session(&source);
+        let analysis = rejected.resolve(&body_profile(), Some(&catalog)).unwrap();
+        let resolution = analysis.resolution().unwrap();
+        let after = resolution
+            .declarations()
+            .modules()
+            .flat_map(|m| m.declarations())
+            .find(|d| d.name().is_some_and(|name| name.text() == "after"))
+            .unwrap()
+            .id();
+        assert!(matches!(
+            resolution.body_types().body(after),
+            FactState::Known(_)
+        ));
+        assert_eq!(
+            diagnostic_codes(&rejected.into_diagnostics(None)),
+            vec!["PARAM_PATTERN_UNSUPPORTED"; count]
+        );
+    }
+}

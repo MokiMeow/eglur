@@ -10,6 +10,9 @@ use eglur_sema::{
     TypecheckCapability,
 };
 
+#[path = "trait_evidence/missing_methods.rs"]
+mod missing_methods;
+
 fn trait_profile() -> SupportProfile {
     trait_profile_with_evidence(true)
 }

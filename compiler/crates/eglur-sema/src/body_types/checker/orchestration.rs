@@ -119,7 +119,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let region = ControlRegionKey::Callable(declaration);
         self.enter_control_region(region.clone())?;
         let outcome = (|| {
-            let mut setup = Outcome::Known(());
+            let mut setup = UnitOutcomeFold::Known;
             for parameter in signature.parameters() {
                 if let Some(pattern) = parameter.source_pattern() {
                     let origin = body
@@ -130,11 +130,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         match self.normalize_type_at(source, origin, parameter.ty())? {
                             Outcome::Known(ty) => ty,
                             Outcome::Poisoned(poison) => {
-                                setup = self.merge_unit(setup, Outcome::Poisoned(poison))?;
+                                setup = setup.include(Outcome::Poisoned(poison))?;
                                 continue;
                             }
                             Outcome::Unperformed | Outcome::Deferred | Outcome::NotApplicable => {
-                                setup = self.merge_unit(setup, Outcome::Unperformed)?;
+                                setup = setup.include(Outcome::Unperformed)?;
                                 continue;
                             }
                         };
@@ -146,10 +146,10 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         parameter_ty,
                         PatternBindingMode::Parameter,
                     )?;
-                    setup = self.merge_unit(setup, bound)?;
+                    setup = setup.include(bound)?;
                 }
             }
-            match setup {
+            match setup.finish() {
                 Outcome::Known(()) => match function.body_form {
                     FunctionBody::Absent => Ok(Outcome::NotApplicable),
                     FunctionBody::Expression(expression) | FunctionBody::Block(expression) => {
@@ -187,19 +187,24 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         let body = hir.body(value.body);
         if self.evaluate_constant_declarations {
             self.require_constant_declarations(source, item.origin());
-            let mut name_poison: Option<Poison> = None;
+            let mut name_poison = eglur_diagnostics::PoisonAccumulator::new();
             for (expression, _) in body.expressions() {
                 if let FactState::Poisoned(poison) = self
                     .names
                     .fact(ResolutionKey::Expression { module, expression })
                 {
-                    name_poison = Some(match name_poison {
-                        Some(previous) => previous.merge(poison)?,
-                        None => poison.clone(),
-                    });
+                    #[cfg(test)]
+                    super::constants::poison_tests::observe(
+                        super::constants::poison_tests::Step::Input(0),
+                    );
+                    name_poison.include(poison)?;
                 }
             }
-            if let Some(poison) = name_poison {
+            if let Some(poison) = name_poison.finish() {
+                #[cfg(test)]
+                super::constants::poison_tests::observe(
+                    super::constants::poison_tests::Step::Complete(0),
+                );
                 return self.record_body_outcome(declaration, expected, Outcome::Poisoned(poison));
             }
             if !self.is_const_evaluable_expression(module, body, value.value)? {
