@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod poison_tests;
+
 pub(super) enum BranchPlan {
     Complete(Outcome<TypedExpression>),
     Expression {
@@ -94,7 +97,7 @@ pub(super) struct MatchFrame {
     common: Option<TypeId>,
     any_normal_arm: bool,
     coverage: Vec<(usize, PatternCoverage)>,
-    poison: Option<Poison>,
+    poison: PendingPoison,
     unperformed: bool,
     deferred: bool,
 }
@@ -412,7 +415,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             scrutinee_continuation: NormalContinuation::Absent,
             common: None,
             any_normal_arm: false,
-            poison: None,
+            poison: PendingPoison::default(),
             unperformed: false,
             deferred: false,
         });
@@ -421,7 +424,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 frame.scrutinee_type = Some(value.ty);
                 frame.scrutinee_continuation = value.normal_continuation;
             }
-            Outcome::Poisoned(found) => self.merge_poison(&mut frame.poison, &found)?,
+            Outcome::Poisoned(found) => frame.poison.include(&found)?,
             Outcome::Unperformed | Outcome::NotApplicable => frame.unperformed = true,
             Outcome::Deferred => frame.deferred = true,
         }
@@ -440,7 +443,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 frame,
             });
         }
-        if frame.poison.is_none()
+        if !frame.poison.has_poison()
             && !frame.unperformed
             && !frame.deferred
             && let Some(expected) = frame.scrutinee_type
@@ -452,12 +455,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .collect::<Vec<_>>();
             match self.check_match_coverage(source, expected, &coverage)? {
                 Outcome::Known(()) => {}
-                Outcome::Poisoned(found) => self.merge_poison(&mut frame.poison, &found)?,
+                Outcome::Poisoned(found) => frame.poison.include(&found)?,
                 Outcome::Unperformed | Outcome::NotApplicable => frame.unperformed = true,
                 Outcome::Deferred => frame.deferred = true,
             }
         }
-        if let Some(poison) = frame.poison {
+        if let Some(poison) = frame.poison.take() {
             return Ok(BranchPlan::Complete(Outcome::Poisoned(poison)));
         }
         if frame.unperformed {
@@ -515,7 +518,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         )]),
                     )?;
                     self.bind_pattern_poison(module, body, arm.pattern, found.clone())?;
-                    self.merge_poison(&mut frame.poison, &found)?;
+                    frame.poison.include(&found)?;
                 } else {
                     for (binding, ty) in pattern.bindings {
                         self.bind_match_local(binding, ty)?;
@@ -525,7 +528,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             }
             Outcome::Poisoned(found) => {
                 self.bind_pattern_poison(module, body, arm.pattern, found.clone())?;
-                self.merge_poison(&mut frame.poison, &found)?;
+                frame.poison.include(&found)?;
             }
             Outcome::Unperformed | Outcome::NotApplicable => frame.unperformed = true,
             Outcome::Deferred => frame.deferred = true,
@@ -572,12 +575,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             ),
                         ]),
                     )?;
-                    self.merge_poison(&mut frame.poison, &found)?;
+                    frame.poison.include(&found)?;
                 }
                 value.normal_continuation
             }
             Outcome::Poisoned(found) => {
-                self.merge_poison(&mut frame.poison, &found)?;
+                frame.poison.include(&found)?;
                 NormalContinuation::Absent
             }
             Outcome::Unperformed | Outcome::NotApplicable => {
@@ -637,13 +640,13 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                                 ),
                             ]),
                         )?;
-                        self.merge_poison(&mut frame.poison, &found)?;
+                        frame.poison.include(&found)?;
                     }
                 } else {
                     frame.common = Some(value.ty);
                 }
             }
-            Outcome::Poisoned(found) => self.merge_poison(&mut frame.poison, &found)?,
+            Outcome::Poisoned(found) => frame.poison.include(&found)?,
             Outcome::Unperformed | Outcome::NotApplicable => frame.unperformed = true,
             Outcome::Deferred => frame.deferred = true,
         }

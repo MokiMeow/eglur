@@ -518,6 +518,78 @@ fn diagnostic_limit_stops_recovery_deterministically() {
 }
 
 #[test]
+fn diagnostic_cap_assigns_the_drained_suffix_to_the_last_failed_region() {
+    for (tail, token, kind) in [
+        ("= ,", ',', SyntaxDiagnosticKind::ParseExpectedExpression),
+        (
+            "{ let = 0 }",
+            '=',
+            SyntaxDiagnosticKind::ParseExpectedPattern,
+        ),
+    ] {
+        for count in [
+            MAX_SYNTAX_DIAGNOSTICS - 1,
+            MAX_SYNTAX_DIAGNOSTICS,
+            MAX_SYNTAX_DIAGNOSTICS + 1,
+            MAX_SYNTAX_DIAGNOSTICS + 8,
+        ] {
+            let mut text = String::new();
+            let mut primary_offsets = Vec::new();
+            for index in 0..count {
+                let line = format!("fn broken_{index}() -> Unit {tail}\n");
+                primary_offsets.push(text.len() + line.rfind(token).unwrap());
+                text.push_str(&line);
+            }
+            text.push_str("fn after() -> Unit = ()\n// trailing input\n");
+            let source = SourceFile::new(FileId::new(0), text.as_bytes().to_vec());
+            let FrontendOutcome::Parsed(parse) =
+                parse_with_entry(&source, ParseEntryPoint::CompilationUnit)
+            else {
+                panic!("diagnostic-cap fixture should be valid UTF-8");
+            };
+
+            assert_eq!(parse.syntax().text().as_bytes(), source.bytes());
+            assert_eq!(parse.diagnostics().len(), count.min(MAX_SYNTAX_DIAGNOSTICS));
+            for (diagnostic, offset) in parse.diagnostics().iter().zip(primary_offsets) {
+                assert_eq!(diagnostic.kind(), kind);
+                assert_eq!(diagnostic.span().range().start().as_usize(), offset);
+                assert_eq!(diagnostic.span().range().end().as_usize(), offset + 1);
+                assert!(diagnostic.resource_limit().is_none());
+            }
+
+            let nodes = parse.syntax().children().collect::<Vec<_>>();
+            assert_eq!(
+                nodes.iter().any(|node| node.kind() == SyntaxKind::FnDecl),
+                count < MAX_SYNTAX_DIAGNOSTICS
+            );
+            for node in nodes
+                .iter()
+                .filter(|node| node.kind() == SyntaxKind::ErrorNode)
+            {
+                assert!(parse.diagnostics().iter().any(|diagnostic| {
+                    let recovery = diagnostic.recovery_span().range();
+                    let invalid = node.span().range();
+                    recovery.start() <= invalid.start() && invalid.end() <= recovery.end()
+                }));
+            }
+            if count >= MAX_SYNTAX_DIAGNOSTICS {
+                assert_eq!(
+                    parse
+                        .diagnostics()
+                        .last()
+                        .unwrap()
+                        .recovery_span()
+                        .range()
+                        .end()
+                        .as_usize(),
+                    text.len()
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn ordinary_control_body_is_not_reclassified_as_a_restricted_suffix() {
     let source = SourceFile::new(FileId::new(0), b"if ready { value } {}".to_vec());
     let FrontendOutcome::Parsed(parse) = parse_with_entry(&source, ParseEntryPoint::ControlHead)

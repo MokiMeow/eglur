@@ -6,6 +6,9 @@ use eglur_driver::{
 use eglur_hir::ItemKind;
 use eglur_source::FileId;
 
+#[path = "session/recovery_cap.rs"]
+mod recovery_cap;
+
 fn text_file(path: &str, text: &str) -> FileInput {
     FileInput::new(path, text.as_bytes().to_vec())
 }

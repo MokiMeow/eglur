@@ -1,4 +1,10 @@
+mod item_children;
+mod parameters;
+mod pattern_heads;
 mod traversal;
+mod visit_outcome;
+
+use visit_outcome::{VisitFold, VisitOutcome};
 
 #[cfg(test)]
 mod tests;
@@ -521,12 +527,9 @@ impl Resolver<'_, '_> {
                 )?)?
             }
             ItemKind::Trait(declaration) => {
-                let mut nested =
+                let nested =
                     self.visit_generics(module, source, hir, &declaration.generic_parameters)?;
-                for &child in &declaration.items {
-                    nested = nested.merge(self.visit_item(module, source, hir, child)?)?;
-                }
-                nested
+                self.visit_item_children(module, source, hir, nested, &declaration.items)?
             }
             ItemKind::Impl(declaration) => {
                 let mut nested =
@@ -534,10 +537,7 @@ impl Resolver<'_, '_> {
                 nested = nested
                     .merge(self.visit_type(module, source, hir, declaration.trait_ref)?)?
                     .merge(self.visit_type(module, source, hir, declaration.target)?)?;
-                for &child in &declaration.items {
-                    nested = nested.merge(self.visit_item(module, source, hir, child)?)?;
-                }
-                nested
+                self.visit_item_children(module, source, hir, nested, &declaration.items)?
             }
             ItemKind::Struct(declaration) => {
                 let mut nested =
@@ -548,10 +548,7 @@ impl Resolver<'_, '_> {
                     hir,
                     declaration.base,
                 )?)?;
-                for &child in &declaration.items {
-                    nested = nested.merge(self.visit_item(module, source, hir, child)?)?;
-                }
-                nested
+                self.visit_item_children(module, source, hir, nested, &declaration.items)?
             }
             ItemKind::Enum(declaration) => {
                 let mut nested =
@@ -604,11 +601,8 @@ impl Resolver<'_, '_> {
                 }
             }
             ItemKind::Property(property) => {
-                let mut nested = self.visit_type(module, source, hir, property.ty)?;
-                for &accessor in &property.accessors {
-                    nested = nested.merge(self.visit_item(module, source, hir, accessor)?)?;
-                }
-                nested
+                let nested = self.visit_type(module, source, hir, property.ty)?;
+                self.visit_item_children(module, source, hir, nested, &property.accessors)?
             }
             ItemKind::Invalid => self.invalid_outcome(source, item.origin())?,
         })?;
@@ -745,152 +739,12 @@ impl Resolver<'_, '_> {
         root: Option<ExprId>,
     ) -> Result<VisitOutcome, NameResolutionError> {
         self.push_scope(module, body.id(), ScopeKind::CallableParameters)?;
-        let mut outcome = VisitOutcome::Known;
-        for parameter in parameters {
-            let group = self.pattern_bindings(source, body, parameter.pattern)?;
-            if let Some(collision) = self.first_collision(&group) {
-                outcome = outcome.merge(self.record_binding_collision(source, collision)?)?;
-            } else {
-                outcome = outcome.merge(self.bind_group(source, group, None)?)?;
-            }
-            outcome =
-                outcome.merge(self.visit_optional_type(module, source, hir, parameter.ty)?)?;
-        }
+        let mut outcome = self.visit_parameters(module, source, hir, body, parameters)?;
         if let Some(root) = root {
-            outcome = outcome.merge(self.visit_expr(module, source, hir, body, root)?)?;
+            outcome = outcome.include(self.visit_expr(module, source, hir, body, root)?)?;
         }
         self.pop_scope();
-        Ok(outcome)
-    }
-
-    fn visit_pattern_heads(
-        &mut self,
-        module: ModuleId,
-        source: &SemanticSource<'_>,
-        body: &Body,
-        pattern_id: PatternId,
-    ) -> Result<VisitOutcome, NameResolutionError> {
-        let pattern = body
-            .pattern(pattern_id)
-            .ok_or(NameResolutionError::WrongBodyPattern(pattern_id))?;
-        let mut outcome = match pattern.kind() {
-            PatternKind::Variant { path, .. } if path.is_unqualified_residual_constructor() => {
-                let name = &path.segments()[0];
-                let name_key =
-                    NameKey::from_hir(name).expect("residual constructor has a valid name");
-                let plan = self.plan_unqualified(
-                    module,
-                    &name_key,
-                    UnqualifiedLookup::ResidualConstructor,
-                )?;
-                let outcome = self.materialize_lookup_plan(
-                    source,
-                    name.origin(),
-                    LookupPurpose::Ordinary,
-                    &plan,
-                )?;
-                self.record_fact(
-                    ResolutionKey::Pattern {
-                        module,
-                        pattern: pattern_id,
-                    },
-                    outcome.clone(),
-                )?;
-                outcome
-            }
-            PatternKind::Variant {
-                path,
-                payload: eglur_hir::PatternPayload::Named(_),
-            }
-            | PatternKind::Struct {
-                path: Some(path), ..
-            } => self.resolve_path(
-                module,
-                source,
-                path,
-                PathLookup::BracedConstructor,
-                ResolutionKey::Pattern {
-                    module,
-                    pattern: pattern_id,
-                },
-                LookupPurpose::Ordinary,
-            )?,
-            PatternKind::Variant { path, .. } => self.resolve_path(
-                module,
-                source,
-                path,
-                PathLookup::Namespace(Namespace::Value),
-                ResolutionKey::Pattern {
-                    module,
-                    pattern: pattern_id,
-                },
-                LookupPurpose::Ordinary,
-            )?,
-            PatternKind::Invalid => self.invalid_outcome(source, pattern.origin())?,
-            _ => VisitOutcome::Known,
-        };
-        match pattern.kind() {
-            PatternKind::Or(patterns) => {
-                for pattern in patterns {
-                    outcome =
-                        outcome.merge(self.visit_pattern_heads(module, source, body, *pattern)?)?;
-                }
-            }
-            PatternKind::Tuple(elements) => {
-                for element in elements {
-                    let PatternElement::Pattern(pattern) = element else {
-                        continue;
-                    };
-                    outcome =
-                        outcome.merge(self.visit_pattern_heads(module, source, body, *pattern)?)?;
-                }
-            }
-            PatternKind::Alias { pattern, .. } | PatternKind::Group(pattern) => {
-                outcome =
-                    outcome.merge(self.visit_pattern_heads(module, source, body, *pattern)?)?;
-            }
-            PatternKind::Variant { payload, .. } => match payload {
-                eglur_hir::PatternPayload::Positional(elements) => {
-                    for element in elements {
-                        if let PatternElement::Pattern(pattern) = element {
-                            outcome = outcome
-                                .merge(self.visit_pattern_heads(module, source, body, *pattern)?)?;
-                        }
-                    }
-                }
-                eglur_hir::PatternPayload::Named(fields) => {
-                    for field in fields {
-                        if let eglur_hir::FieldPattern::Field {
-                            pattern: Some(pattern),
-                            ..
-                        } = field
-                        {
-                            outcome = outcome
-                                .merge(self.visit_pattern_heads(module, source, body, *pattern)?)?;
-                        }
-                    }
-                }
-                eglur_hir::PatternPayload::Absent => {}
-            },
-            PatternKind::Struct { fields, .. } => {
-                for field in fields {
-                    if let eglur_hir::FieldPattern::Field {
-                        pattern: Some(pattern),
-                        ..
-                    } = field
-                    {
-                        outcome = outcome
-                            .merge(self.visit_pattern_heads(module, source, body, *pattern)?)?;
-                    }
-                }
-            }
-            PatternKind::Binding(_)
-            | PatternKind::Wildcard
-            | PatternKind::Literal(_)
-            | PatternKind::Unit
-            | PatternKind::Invalid => {}
-        }
-        Ok(outcome)
+        Ok(outcome.finish())
     }
 
     fn resolve_name(
@@ -1222,7 +1076,7 @@ impl Resolver<'_, '_> {
             return Ok(None);
         }
         let mut candidates = Vec::new();
-        let mut poison: Option<Poison> = None;
+        let mut poison = eglur_diagnostics::PoisonAccumulator::new();
         let mut unperformed = false;
         let mut private = false;
         for &import in imported {
@@ -1240,10 +1094,10 @@ impl Resolver<'_, '_> {
                     }
                 }
                 FactState::Poisoned(next) => {
-                    poison = Some(match poison {
-                        Some(existing) => existing.merge(next)?,
-                        None => next.clone(),
-                    });
+                    #[cfg(test)]
+                    crate::imports::poison_tests::input(0);
+
+                    poison.include(next)?;
                 }
                 FactState::Unperformed => unperformed = true,
                 FactState::NotApplicable => {
@@ -1251,7 +1105,10 @@ impl Resolver<'_, '_> {
                 }
             }
         }
-        if let Some(poison) = poison {
+        if let Some(poison) = poison.finish() {
+            #[cfg(test)]
+            crate::imports::poison_tests::complete(0);
+
             return Ok(Some(NameLookupDecision::Poisoned(poison)));
         }
         if unperformed {
@@ -2144,31 +2001,6 @@ impl Resolver<'_, '_> {
                 file: source.file(),
                 origin,
             })
-    }
-}
-
-#[derive(Clone)]
-enum VisitOutcome {
-    Known,
-    Resolved(ResolvedName),
-    Poisoned(Poison),
-    Unperformed,
-    NotApplicable,
-}
-
-impl VisitOutcome {
-    fn merge(self, other: Self) -> Result<Self, NameResolutionError> {
-        match (self, other) {
-            (Self::Poisoned(left), Self::Poisoned(right)) => {
-                Ok(Self::Poisoned(left.merge(&right)?))
-            }
-            (Self::Poisoned(poison), _) | (_, Self::Poisoned(poison)) => Ok(Self::Poisoned(poison)),
-            (Self::Unperformed, _) | (_, Self::Unperformed) => Ok(Self::Unperformed),
-            (Self::NotApplicable, value) | (value, Self::NotApplicable) => Ok(value),
-            (Self::Resolved(_), Self::Resolved(_)) => Ok(Self::Known),
-            (Self::Resolved(_), Self::Known) | (Self::Known, Self::Resolved(_)) => Ok(Self::Known),
-            (Self::Known, Self::Known) => Ok(Self::Known),
-        }
     }
 }
 

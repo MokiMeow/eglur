@@ -7,11 +7,14 @@ use eglur_hir::{
 
 use super::{
     BindingGroup, LookupPurpose, NameResolutionError, PathLookup, ResolutionKey, ResolvedName,
-    Resolver, ScopeBarrier, ScopeKind, VisitOutcome,
+    Resolver, ScopeBarrier, ScopeKind, VisitFold, VisitOutcome,
 };
 use crate::{
     CompileCapability, ModuleId, Namespace, ResolveCapability, SemanticLocation, SemanticSource,
 };
+
+#[cfg(test)]
+mod poison_tests;
 
 enum VisitStep<'hir> {
     Expression(&'hir Body, ExprId),
@@ -34,6 +37,28 @@ struct Traversal<'hir> {
 }
 
 impl<'hir> Traversal<'hir> {
+    fn complete_sequence(
+        &mut self,
+        seed: Option<VisitOutcome>,
+        count: usize,
+    ) -> Result<(), NameResolutionError> {
+        let start = self
+            .outcomes
+            .len()
+            .checked_sub(count)
+            .expect("all sequence children are visited");
+        let children = self.outcomes.split_off(start);
+        let mut folded = VisitFold::Empty;
+        if let Some(seed) = seed {
+            folded = folded.include(seed)?;
+        }
+        for outcome in children {
+            folded = folded.include(outcome)?;
+        }
+        self.outcomes.push(folded.finish());
+        Ok(())
+    }
+
     fn sequence(&mut self, seed: Option<VisitOutcome>, children: Vec<VisitStep<'hir>>) {
         // A Known seed erases a lone Resolved identity; forwarding constructs must
         // keep an unseeded child outcome rather than flattening all visits together.
@@ -83,22 +108,7 @@ impl Resolver<'_, '_> {
                 }),
                 VisitStep::Outcome(outcome) => traversal.outcomes.push(outcome),
                 VisitStep::Merge(seed, count) => {
-                    let start = traversal
-                        .outcomes
-                        .len()
-                        .checked_sub(count)
-                        .expect("all sequence children are visited");
-                    let children = traversal.outcomes.split_off(start);
-                    let mut combined = seed;
-                    for outcome in children {
-                        combined = Some(match combined {
-                            Some(previous) => previous.merge(outcome)?,
-                            None => outcome,
-                        });
-                    }
-                    traversal
-                        .outcomes
-                        .push(combined.unwrap_or(VisitOutcome::Known));
+                    traversal.complete_sequence(seed, count)?;
                 }
                 VisitStep::ExitScope => self.pop_scope(),
                 VisitStep::BindLet(group, mut outcome, initializer) => {
@@ -406,22 +416,9 @@ impl Resolver<'_, '_> {
             ExprKind::Lambda(lambda) => {
                 let body = hir.body(lambda.body);
                 self.push_scope(module, body.id(), ScopeKind::LambdaParameters)?;
-                let mut outcome = VisitOutcome::Known;
-                for parameter in &lambda.parameters {
-                    let group = self.pattern_bindings(source, body, parameter.pattern)?;
-                    outcome =
-                        outcome.merge(if let Some(collision) = self.first_collision(&group) {
-                            self.record_binding_collision(source, collision)?
-                        } else {
-                            self.bind_group(source, group, None)?
-                        })?;
-                    outcome = outcome.merge(self.visit_optional_type(
-                        module,
-                        source,
-                        hir,
-                        parameter.ty,
-                    )?)?;
-                }
+                let outcome = self
+                    .visit_parameters(module, source, hir, body, &lambda.parameters)?
+                    .finish();
                 self.push_scope(module, body.id(), ScopeKind::LambdaBody)?;
                 traversal.pending.push(VisitStep::ExitScope);
                 traversal.pending.push(VisitStep::ExitScope);

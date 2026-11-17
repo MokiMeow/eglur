@@ -18,6 +18,7 @@ mod inhabitance;
 mod integer;
 mod language_items;
 mod overloads;
+mod owned_poison;
 mod ownership;
 mod program;
 mod resolve;

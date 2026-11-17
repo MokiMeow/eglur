@@ -6,10 +6,10 @@ use eglur_hir::{HirFile, OriginId};
 use eglur_source::FileId;
 
 use crate::ModuleAddress;
+use crate::owned_poison::OwnedPoisonUnion;
 
-mod invalid_poisons;
-
-use invalid_poisons::InvalidPoisonGroup;
+#[cfg(test)]
+mod tests;
 
 /// Normalized semantic-phase input for one driver-owned compilation unit.
 pub struct SemanticSource<'hir> {
@@ -57,12 +57,12 @@ impl<'hir> SemanticSource<'hir> {
             return Err(SourceInputError::OriginWithoutHir);
         }
 
-        let mut merged_invalid = BTreeMap::<OriginId, InvalidPoisonGroup>::new();
+        let mut merged_invalid = BTreeMap::<OriginId, OwnedPoisonUnion>::new();
         for (origin, poison) in invalid_poisons {
             if let Some(existing) = merged_invalid.remove(&origin) {
                 merged_invalid.insert(origin, existing.include(poison)?);
             } else {
-                merged_invalid.insert(origin, InvalidPoisonGroup::One(poison));
+                merged_invalid.insert(origin, OwnedPoisonUnion::new(poison));
             }
         }
         let expected_invalid = hir

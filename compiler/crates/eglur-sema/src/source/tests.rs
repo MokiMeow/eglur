@@ -1,44 +1,14 @@
-use std::cell::Cell;
-use std::collections::BTreeSet;
-
+use super::*;
+use crate::owned_poison::test_support::{reset, work};
 use eglur_diagnostics::{
     BoundaryRootKey, Diagnostic, DiagnosticCode, DiagnosticFailure, DiagnosticPhase,
-    DiagnosticRoot, DiagnosticStore, PrimarySpan, Severity, SourceLabel, SourceSpan,
+    DiagnosticRoot, DiagnosticStore, Poison, PrimarySpan, Severity, SourceLabel, SourceSpan,
 };
 use eglur_hir::{HirFile, OriginId, lower};
 use eglur_source::{FileId, LineIndex, SourceFile};
 use eglur_syntax::parse_validated;
-
-use super::*;
-use crate::{ModuleAddress, SemanticSource, SourceInputError};
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct Work {
-    pairs: usize,
-    includes: usize,
-    finishes: usize,
-}
-
-thread_local! {
-    static WORK: Cell<Work> = Cell::new(Work::default());
-}
-
-pub(super) enum Operation {
-    Pair,
-    Include,
-    Finish,
-}
-
-pub(super) fn observe(operation: Operation) {
-    WORK.update(|mut work| {
-        match operation {
-            Operation::Pair => work.pairs += 1,
-            Operation::Include => work.includes += 1,
-            Operation::Finish => work.finishes += 1,
-        }
-        work
-    });
-}
+use std::cell::Cell;
+use std::collections::BTreeSet;
 
 fn roots(store: &mut DiagnosticStore, count: usize) -> Vec<Poison> {
     (0..count)
@@ -58,14 +28,6 @@ fn roots(store: &mut DiagnosticStore, count: usize) -> Vec<Poison> {
             store.record_failure(DiagnosticFailure::Root(root)).unwrap()
         })
         .collect()
-}
-
-fn union(poisons: &[Poison]) -> Poison {
-    let mut result = poisons[0].clone();
-    for poison in &poisons[1..] {
-        result = result.merge(poison).unwrap();
-    }
-    result
 }
 
 fn assert_roots(
@@ -135,70 +97,6 @@ fn module() -> ModuleAddress {
 }
 
 #[test]
-fn staged_groups_preserve_exact_distinct_shared_and_overlapping_roots() {
-    for count in [1, 2, 3, 8, 32, 128] {
-        for family in 0..3 {
-            let mut store = DiagnosticStore::new();
-            let roots = roots(&mut store, count + 3);
-            let inputs = (0..count)
-                .map(|index| match family {
-                    0 => roots[index + 1].clone(),
-                    1 => roots[1].clone(),
-                    2 => roots[index + 1].merge(&roots[index + 2]).unwrap(),
-                    _ => unreachable!(),
-                })
-                .collect::<Vec<_>>();
-            let expected = match family {
-                0 => (1..=count).collect(),
-                1 => BTreeSet::from([1]),
-                2 => (1..=count + 1).collect(),
-                _ => unreachable!(),
-            };
-
-            WORK.set(Work::default());
-            let mut group = InvalidPoisonGroup::One(inputs[0].clone());
-            for poison in &inputs[1..] {
-                group = group.include(poison.clone()).unwrap();
-            }
-            let poison = group.finish();
-            let work = WORK.get();
-            assert!(work.pairs <= 1);
-            assert!(work.includes <= inputs.len());
-            assert!(work.finishes <= 1);
-            assert_eq!(work.pairs, usize::from(inputs.len() > 1));
-            assert_eq!(work.finishes, usize::from(inputs.len() > 2));
-
-            assert_roots(store, &roots, &poison, &expected);
-        }
-    }
-}
-
-#[test]
-fn wide_singletons_and_pairs_keep_the_pairwise_kernel() {
-    for count in [1, 2] {
-        let mut store = DiagnosticStore::new();
-        let roots = roots(&mut store, 129);
-        let wide = union(&roots[1..]);
-
-        WORK.set(Work::default());
-        let mut group = InvalidPoisonGroup::One(wide.clone());
-        for _ in 1..count {
-            group = group.include(wide.clone()).unwrap();
-        }
-        let poison = group.finish();
-        assert_eq!(
-            WORK.get(),
-            Work {
-                pairs: count - 1,
-                includes: 0,
-                finishes: 0,
-            }
-        );
-        assert_roots(store, &roots, &poison, &(1..roots.len()).collect());
-    }
-}
-
-#[test]
 fn source_keeps_interleaved_origin_groups_separate_and_preserves_other_fields() {
     let prepared = prepare();
     for count in [1, 2, 3, 8, 32] {
@@ -212,7 +110,7 @@ fn source_keeps_interleaved_origin_groups_separate_and_preserves_other_fields() 
                 }
             }
 
-            WORK.set(Work::default());
+            reset();
             let source = SemanticSource::new(
                 prepared.hir.file(),
                 module(),
@@ -222,7 +120,7 @@ fn source_keeps_interleaved_origin_groups_separate_and_preserves_other_fields() 
                 Some(roots.last().unwrap().clone()),
             )
             .unwrap();
-            let work = WORK.get();
+            let work = work();
             assert!(work.pairs <= prepared.invalid.len());
             assert!(work.includes <= count * prepared.invalid.len());
             assert!(work.finishes <= prepared.invalid.len());
@@ -273,7 +171,7 @@ fn foreign_same_origin_stops_input_before_invalid_coverage_checks() {
             .into_iter()
             .inspect(|_| consumed.set(consumed.get() + 1));
 
-        WORK.set(Work::default());
+        reset();
         let error = SemanticSource::new(
             prepared.hir.file(),
             module(),
@@ -290,7 +188,7 @@ fn foreign_same_origin_stops_input_before_invalid_coverage_checks() {
             ))
         );
         assert_eq!(consumed.get(), count);
-        assert_eq!(WORK.get().finishes, 0);
+        assert_eq!(work().finishes, 0);
     }
 }
 
@@ -363,7 +261,7 @@ fn coverage_failure_does_not_finalize_accumulating_groups() {
         .map(|poison| (prepared.invalid[1], poison))
         .inspect(|_| consumed.set(consumed.get() + 1));
 
-    WORK.set(Work::default());
+    reset();
     let error = SemanticSource::new(
         prepared.hir.file(),
         module(),
@@ -375,6 +273,6 @@ fn coverage_failure_does_not_finalize_accumulating_groups() {
     .err();
     assert_eq!(error, Some(SourceInputError::InvalidPoisonCoverage));
     assert_eq!(consumed.get(), roots.len());
-    assert!(WORK.get().includes > 0);
-    assert_eq!(WORK.get().finishes, 0);
+    assert!(work().includes > 0);
+    assert_eq!(work().finishes, 0);
 }

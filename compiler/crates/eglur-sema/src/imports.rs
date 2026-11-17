@@ -1,3 +1,6 @@
+#[cfg(test)]
+pub(crate) mod poison_tests;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 

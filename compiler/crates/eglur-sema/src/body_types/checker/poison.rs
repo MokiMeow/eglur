@@ -6,6 +6,10 @@ pub(super) struct PendingPoison {
 }
 
 impl PendingPoison {
+    pub(super) fn has_poison(&self) -> bool {
+        self.pending.is_some()
+    }
+
     pub(super) fn include(&mut self, incoming: &Poison) -> Result<(), BodyTypingError> {
         #[cfg(test)]
         tests::observe(tests::Step::Input);
