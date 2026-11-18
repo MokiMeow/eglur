@@ -271,7 +271,8 @@ impl Parser<'_> {
         }
         self.parse_expression(!tuple, true);
         self.skip_newlines();
-        if self.eat(TokenKind::Comma) {
+        if tuple || self.at(TokenKind::Comma) {
+            self.expect(TokenKind::Comma);
             self.skip_newlines();
             while !self.at(TokenKind::RightParen) && !self.at_eof() && !self.halted() {
                 self.parse_expression(false, true);
@@ -280,6 +281,9 @@ impl Parser<'_> {
                     break;
                 }
                 self.skip_newlines();
+            }
+            if tuple && !self.at(TokenKind::RightParen) && !self.halted() {
+                self.error_current(SyntaxDiagnosticKind::ParseUnexpectedToken);
             }
             self.expect_closing(TokenKind::RightParen);
             Some(self.complete(parenthesized, SyntaxKind::TupleExpr))
