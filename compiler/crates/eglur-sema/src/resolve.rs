@@ -1,9 +1,12 @@
+mod bindings;
 mod item_children;
 mod parameters;
 mod pattern_heads;
 mod traversal;
 mod visit_outcome;
 
+use bindings::ResolvedPatternBindings;
+pub(crate) use bindings::{BodyBindingView, PatternBindingSite};
 use visit_outcome::{VisitFold, VisitOutcome};
 
 #[cfg(test)]
@@ -220,6 +223,7 @@ pub struct NameResolution {
     scopes: Box<[ScopeRecord]>,
     locals: Box<[LocalBinding]>,
     local_by_origin: BTreeMap<(ModuleId, BodyId, OriginId), LocalBindingId>,
+    pattern_bindings: ResolvedPatternBindings,
 }
 
 impl NameResolution {
@@ -269,6 +273,14 @@ impl NameResolution {
         self.local_by_origin.get(&(module, body, origin)).copied()
     }
 
+    pub(crate) fn body_bindings(
+        &self,
+        module: ModuleId,
+        body: BodyId,
+    ) -> Option<BodyBindingView<'_>> {
+        self.pattern_bindings.body(module, body)
+    }
+
     pub(crate) fn pattern_bindings(
         &self,
         module: ModuleId,
@@ -292,10 +304,18 @@ impl NameResolution {
             .ok_or(PatternBindingQueryError::WrongBodyPattern(pattern_id))?;
         match pattern.kind() {
             PatternKind::Binding(name) => {
-                bindings.insert(self.required_local_binding(module, body.id(), name.origin())?);
+                bindings.insert(self.required_pattern_binding(
+                    module,
+                    pattern_id,
+                    name.origin(),
+                )?);
             }
             PatternKind::Alias { name, pattern } => {
-                bindings.insert(self.required_local_binding(module, body.id(), name.origin())?);
+                bindings.insert(self.required_pattern_binding(
+                    module,
+                    pattern_id,
+                    name.origin(),
+                )?);
                 self.collect_pattern_bindings(module, body, *pattern, bindings)?;
             }
             PatternKind::Group(inner) => {
@@ -353,19 +373,19 @@ impl NameResolution {
         Ok(())
     }
 
-    fn required_local_binding(
+    fn required_pattern_binding(
         &self,
         module: ModuleId,
-        body: BodyId,
+        pattern: PatternId,
         origin: OriginId,
     ) -> Result<LocalBindingId, PatternBindingQueryError> {
-        self.local_binding(module, body, origin).ok_or(
-            PatternBindingQueryError::MissingLocalOrigin {
+        self.body_bindings(module, pattern.body())
+            .and_then(|bindings| bindings.binding(PatternBindingSite::Name(pattern)))
+            .ok_or(PatternBindingQueryError::MissingLocalOrigin {
                 module,
-                body,
+                body: pattern.body(),
                 origin,
-            },
-        )
+            })
     }
 }
 
@@ -415,6 +435,7 @@ pub fn resolve_names(
         scopes: Vec::new(),
         locals: Vec::new(),
         local_by_origin: BTreeMap::new(),
+        pattern_bindings: ResolvedPatternBindings::default(),
         active_scopes: Vec::new(),
         current_owner: None,
         next_scope: BTreeMap::new(),
@@ -441,6 +462,7 @@ struct Resolver<'analysis, 'support> {
     scopes: Vec<ScopeRecord>,
     locals: Vec<LocalBinding>,
     local_by_origin: BTreeMap<(ModuleId, BodyId, OriginId), LocalBindingId>,
+    pattern_bindings: ResolvedPatternBindings,
     active_scopes: Vec<ActiveScope>,
     current_owner: Option<crate::DefId>,
     next_scope: BTreeMap<(ModuleId, BodyId), usize>,
@@ -456,6 +478,7 @@ impl Resolver<'_, '_> {
                 scopes: self.scopes.into_boxed_slice(),
                 locals: self.locals.into_boxed_slice(),
                 local_by_origin: self.local_by_origin,
+                pattern_bindings: self.pattern_bindings,
             }))
     }
 
@@ -1645,15 +1668,15 @@ impl Resolver<'_, '_> {
     ) -> Result<BindingGroup, NameResolutionError> {
         enum Step<'hir> {
             Pattern(PatternId),
-            Name(&'hir Name),
+            Name(&'hir Name, PatternBindingSite),
         }
 
         let mut pending = vec![Step::Pattern(pattern)];
         let mut introductions = Vec::new();
         while let Some(step) = pending.pop() {
-            let pattern = match step {
-                Step::Name(name) => {
-                    match self.binding_introduction(source, name)? {
+            let pattern_id = match step {
+                Step::Name(name, site) => {
+                    match self.binding_introduction(source, name, Some(site))? {
                         BindingName::Known(introduction) => introductions.push(introduction),
                         BindingName::Poisoned(poison) => {
                             return Ok(BindingGroup::Poisoned(poison));
@@ -1661,15 +1684,18 @@ impl Resolver<'_, '_> {
                     }
                     continue;
                 }
-                Step::Pattern(pattern) => body
-                    .pattern(pattern)
-                    .ok_or(NameResolutionError::WrongBodyPattern(pattern))?,
+                Step::Pattern(pattern) => pattern,
             };
+            let pattern = body
+                .pattern(pattern_id)
+                .ok_or(NameResolutionError::WrongBodyPattern(pattern_id))?;
             match pattern.kind() {
-                PatternKind::Binding(name) => pending.push(Step::Name(name)),
+                PatternKind::Binding(name) => {
+                    pending.push(Step::Name(name, PatternBindingSite::Name(pattern_id)))
+                }
                 PatternKind::Alias { name, pattern } => {
                     pending.push(Step::Pattern(*pattern));
-                    pending.push(Step::Name(name));
+                    pending.push(Step::Name(name, PatternBindingSite::Name(pattern_id)));
                 }
                 PatternKind::Group(pattern) => pending.push(Step::Pattern(*pattern)),
                 PatternKind::Tuple(elements)
@@ -1691,13 +1717,19 @@ impl Resolver<'_, '_> {
                     payload: eglur_hir::PatternPayload::Named(fields),
                     ..
                 } => {
-                    for field in fields.iter().rev() {
+                    for (field_index, field) in fields.iter().enumerate().rev() {
                         match field {
                             eglur_hir::FieldPattern::Field {
                                 name,
                                 pattern: None,
                                 ..
-                            } => pending.push(Step::Name(name)),
+                            } => pending.push(Step::Name(
+                                name,
+                                PatternBindingSite::Shorthand {
+                                    pattern: pattern_id,
+                                    field: field_index,
+                                },
+                            )),
                             eglur_hir::FieldPattern::Field {
                                 pattern: Some(pattern),
                                 ..
@@ -1725,7 +1757,7 @@ impl Resolver<'_, '_> {
                 } => {}
             }
         }
-        Ok(BindingGroup::known(introductions))
+        Ok(BindingGroup::known(introductions).at_pattern(pattern))
     }
 
     fn single_name_group(
@@ -1733,7 +1765,7 @@ impl Resolver<'_, '_> {
         source: &SemanticSource<'_>,
         name: &Name,
     ) -> Result<BindingGroup, NameResolutionError> {
-        Ok(match self.binding_introduction(source, name)? {
+        Ok(match self.binding_introduction(source, name, None)? {
             BindingName::Known(introduction) => BindingGroup::known(vec![introduction]),
             BindingName::Poisoned(poison) => BindingGroup::Poisoned(poison),
         })
@@ -1743,6 +1775,7 @@ impl Resolver<'_, '_> {
         &self,
         source: &SemanticSource<'_>,
         name: &Name,
+        site: Option<PatternBindingSite>,
     ) -> Result<BindingName, NameResolutionError> {
         let Some(name_key) = NameKey::from_hir(name) else {
             return Ok(BindingName::Poisoned(
@@ -1756,12 +1789,15 @@ impl Resolver<'_, '_> {
         };
         Ok(BindingName::Known(BindingIntroduction {
             name: name_key,
-            origins: vec![name.origin()],
+            occurrences: vec![BindingOccurrence {
+                origin: name.origin(),
+                site,
+            }],
         }))
     }
 
     fn first_collision(&self, group: &BindingGroup) -> Option<BindingCollision> {
-        let BindingGroup::Known(introductions) = group else {
+        let BindingGroup::Known { introductions, .. } = group else {
             return None;
         };
         let scope = self.active_scopes.last()?;
@@ -1798,24 +1834,37 @@ impl Resolver<'_, '_> {
         initializer: Option<VisitOutcome>,
     ) -> Result<VisitOutcome, NameResolutionError> {
         let state = match (&group, initializer.as_ref()) {
-            (BindingGroup::Known(_), Some(VisitOutcome::Poisoned(poison))) => {
+            (BindingGroup::Known { .. }, Some(VisitOutcome::Poisoned(poison))) => {
                 BindingActivation::Poisoned(poison.clone())
             }
-            (BindingGroup::Known(_), Some(VisitOutcome::Unperformed)) => {
+            (BindingGroup::Known { .. }, Some(VisitOutcome::Unperformed)) => {
                 BindingActivation::Unperformed
             }
-            (BindingGroup::Known(_), _) => BindingActivation::Known,
+            (BindingGroup::Known { .. }, _) => BindingActivation::Known,
             (BindingGroup::Poisoned(poison), _) => BindingActivation::Poisoned(poison.clone()),
         };
-        let introductions = match group {
-            BindingGroup::Known(introductions) => introductions,
+        let (root, introductions) = match group {
+            BindingGroup::Known {
+                root,
+                introductions,
+            } => (root, introductions),
             BindingGroup::Poisoned(poison) => {
                 self.set_scope_barrier(Some(ScopeBarrier::Poisoned(poison.clone())))?;
                 return Ok(VisitOutcome::Poisoned(poison));
             }
         };
+        let mut bindings = Vec::with_capacity(introductions.len());
         for introduction in introductions {
-            self.activate_binding(introduction, state.clone())?;
+            bindings.push(self.activate_binding(introduction, state.clone())?);
+        }
+        if let Some(root) = root {
+            let module = self
+                .active_scopes
+                .last()
+                .ok_or(NameResolutionError::MissingActiveScope)?
+                .id
+                .module();
+            self.pattern_bindings.publish_root(module, root, bindings);
         }
         Ok(state.outcome())
     }
@@ -1824,7 +1873,7 @@ impl Resolver<'_, '_> {
         &mut self,
         introduction: BindingIntroduction,
         state: BindingActivation,
-    ) -> Result<(), NameResolutionError> {
+    ) -> Result<LocalBindingId, NameResolutionError> {
         let scope = self
             .active_scopes
             .last()
@@ -1843,9 +1892,14 @@ impl Resolver<'_, '_> {
             id,
             scope,
             name: introduction.name.clone(),
-            origins: introduction.origins.clone().into_boxed_slice(),
+            origins: introduction
+                .occurrences
+                .iter()
+                .map(|occurrence| occurrence.origin)
+                .collect(),
         };
-        for &origin in &introduction.origins {
+        for occurrence in &introduction.occurrences {
+            let origin = occurrence.origin;
             if self
                 .local_by_origin
                 .insert((id.module(), id.body(), origin), id)
@@ -1856,6 +1910,9 @@ impl Resolver<'_, '_> {
                     body: id.body(),
                     origin,
                 });
+            }
+            if let Some(site) = occurrence.site {
+                self.pattern_bindings.insert(site, id);
             }
         }
         self.locals.push(binding);
@@ -1870,7 +1927,7 @@ impl Resolver<'_, '_> {
         {
             return Err(NameResolutionError::UncheckedLocalCollision);
         }
-        Ok(())
+        Ok(id)
     }
 
     fn push_scope(
@@ -2068,12 +2125,17 @@ impl BindingActivation {
 
 struct BindingIntroduction {
     name: NameKey,
-    origins: Vec<OriginId>,
+    occurrences: Vec<BindingOccurrence>,
+}
+
+struct BindingOccurrence {
+    origin: OriginId,
+    site: Option<PatternBindingSite>,
 }
 
 impl BindingIntroduction {
     fn origin(&self) -> OriginId {
-        self.origins[0]
+        self.occurrences[0].origin
     }
 }
 
@@ -2083,7 +2145,10 @@ enum BindingName {
 }
 
 enum BindingGroup {
-    Known(Vec<BindingIntroduction>),
+    Known {
+        root: Option<PatternId>,
+        introductions: Vec<BindingIntroduction>,
+    },
     Poisoned(Poison),
 }
 
@@ -2095,16 +2160,28 @@ impl BindingGroup {
         let mut positions = BTreeMap::<NameKey, usize>::new();
         for introduction in introductions {
             #[cfg(test)]
-            tests::record_origin_visits(introduction.origins.len());
+            tests::record_origin_visits(introduction.occurrences.len());
 
             if let Some(&index) = positions.get(&introduction.name) {
-                canonical[index].origins.extend(introduction.origins);
+                canonical[index]
+                    .occurrences
+                    .extend(introduction.occurrences);
             } else {
                 positions.insert(introduction.name.clone(), canonical.len());
                 canonical.push(introduction);
             }
         }
-        Self::Known(canonical)
+        Self::Known {
+            root: None,
+            introductions: canonical,
+        }
+    }
+
+    fn at_pattern(mut self, pattern: PatternId) -> Self {
+        if let Self::Known { root, .. } = &mut self {
+            *root = Some(pattern);
+        }
+        self
     }
 }
 

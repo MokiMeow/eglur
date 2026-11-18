@@ -1,10 +1,12 @@
 use eglur_hir::{ExprId, Mutability};
 
+use super::LocalTypeFacts;
+
 use crate::{
     CallableInstanceId, CallableSignatureId, CanonicalTarget, CheckedNumericOperation,
-    ControlRegion, ControlRegionKey, ControlTransfer, DefId, ExpressionKey, FactState, FactTable,
-    GenericParameterId, IntegerValue, LocalBindingId, NormalContinuation, ReferenceMutability,
-    SemanticFact, SemanticLocation, SubstId, TraitRef, TypeId, WitnessSlotId,
+    ControlRegion, ControlRegionKey, ControlTransfer, ControlTransferSource, DefId, ExpressionKey,
+    FactState, FactTable, GenericParameterId, IntegerValue, LocalBindingId, NormalContinuation,
+    ReferenceMutability, SemanticFact, SemanticLocation, SubstId, TraitRef, TypeId, WitnessSlotId,
 };
 
 /// Stable storage identity retained for a typed place expression.
@@ -422,7 +424,7 @@ impl BodyTypeSummary {
 /// Body-owned canonical facts produced without trait search or control-flow closure.
 pub struct BodyTypes {
     pub(super) expressions: FactTable<ExpressionKey, TypedExpression>,
-    pub(super) locals: FactTable<LocalBindingId, LocalTypeFact>,
+    pub(super) locals: LocalTypeFacts,
     pub(super) members: FactTable<ExpressionKey, MemberAccess>,
     pub(super) invocations: FactTable<ExpressionKey, InvocationFact>,
     pub(super) callable_values: FactTable<ExpressionKey, CallableInstanceId>,
@@ -564,6 +566,17 @@ impl BodyTypes {
     }
 
     #[must_use]
+    pub(crate) fn transfers_from(&self, source: &ControlTransferSource) -> &[ControlTransfer] {
+        // Completed transfers are published with source as their leading sort key.
+        let start = self
+            .transfers
+            .partition_point(|transfer| transfer.source() < source);
+        let remaining = &self.transfers[start..];
+        let count = remaining.partition_point(|transfer| transfer.source() == source);
+        &remaining[..count]
+    }
+
+    #[must_use]
     pub fn callable_instance(&self, id: CallableInstanceId) -> Option<&CallableInstance> {
         self.callable_instances.get(id.index())
     }
@@ -581,7 +594,7 @@ impl BodyTypes {
     #[must_use]
     pub fn fact_count(&self) -> usize {
         self.expressions.iter().len()
-            + self.locals.iter().len()
+            + self.locals.len()
             + self.members.iter().len()
             + self.invocations.iter().len()
             + self.callable_values.iter().len()

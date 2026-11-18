@@ -2,6 +2,87 @@ use super::*;
 use crate::signatures::resolver::tests::with_resolver;
 
 #[test]
+fn shared_alias_failures_retain_every_bound_occurrence_and_exact_roots() {
+    for count in [8, 32, 128] {
+        let missing = (0..count)
+            .map(|index| format!("Missing{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let bounds = vec!["Uses[Root]"; count].join("+");
+        let text = format!(
+            "type Root = ({missing})\ntrait Uses[A] {{}}\nfn bad[T:{bounds}]() -> Unit = ()\nfn other[U:Uses[OtherMissing]]() -> Unit = ()"
+        );
+
+        with_resolver(&[&text], |resolver, sources| {
+            let declarations = resolver
+                .collection
+                .modules()
+                .flat_map(|module| module.declarations())
+                .collect::<Vec<_>>();
+            let parameter = declarations
+                .iter()
+                .find(|declaration| {
+                    declaration.kind() == DeclarationKind::GenericParameter
+                        && declaration.name().is_some_and(|name| name.text() == "T")
+                })
+                .unwrap()
+                .id();
+            let alias = declarations
+                .iter()
+                .find(|declaration| declaration.name().is_some_and(|name| name.text() == "Root"))
+                .unwrap();
+            let span = sources[0].origin_span(alias.origin()).unwrap();
+            let checkpoint = resolver.diagnostics.checkpoint();
+
+            resolver.resolve_source_generics().unwrap();
+            let expected = resolver
+                .diagnostics
+                .roots_since_within(&checkpoint, span)
+                .unwrap()
+                .unwrap();
+            let bound_ids = resolver
+                .source_generic_parameter(parameter)
+                .unwrap()
+                .1
+                .bounds
+                .clone();
+            assert_eq!(bound_ids.len(), count);
+            for bound in bound_ids {
+                let FactState::Poisoned(poison) = resolver
+                    .occurrences
+                    .state(&TypeOccurrenceId::new(sources[0].file(), bound))
+                else {
+                    panic!("every written bound must retain its failed occurrence");
+                };
+                resolver
+                    .diagnostics
+                    .select_preceding_roots(poison, &expected)
+                    .unwrap();
+                resolver
+                    .diagnostics
+                    .select_preceding_roots(&expected, poison)
+                    .unwrap();
+            }
+            let store = std::mem::replace(resolver.diagnostics, DiagnosticStore::new());
+            let snapshot = store.finalize(None);
+            let names = snapshot
+                .diagnostics()
+                .iter()
+                .map(|diagnostic| {
+                    assert_eq!(diagnostic.code().as_str(), "NAME_NOT_FOUND");
+                    diagnostic.data().get("name").unwrap().clone()
+                })
+                .collect::<Vec<_>>();
+            let expected = (0..count)
+                .map(|index| DiagnosticDataValue::from(format!("Missing{index}")))
+                .chain([DiagnosticDataValue::from("OtherMissing")])
+                .collect::<Vec<_>>();
+            assert_eq!(names, expected);
+        });
+    }
+}
+
+#[test]
 fn terminal_failed_bounds_publish_poisoned_occurrences() {
     for text in [
         "trait Has[A] { type Item }\nfn bad[T:Has[T::Item]]() -> Unit = ()",

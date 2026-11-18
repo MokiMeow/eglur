@@ -15,8 +15,8 @@ use crate::{
 
 use super::authorization::authorize_effects;
 use super::body::{
-    EffectBody, EffectBodyError, EffectBodyFact, EffectDispatch, EffectOperation, MutablePath,
-    MutableRoot, collect_effect_bodies,
+    EffectBody, EffectBodyError, EffectBodyFact, EffectCall, EffectDispatch, EffectOperation,
+    MutablePath, MutableRoot, collect_effect_bodies,
 };
 use super::{
     EffectCategory, EffectSummary, KnownEffectSummary, StateScope, TrustedEffectEnvironment,
@@ -313,6 +313,19 @@ fn is_trait_requirement(collection: &DeclarationCollection, declaration: DefId) 
         .is_some_and(|parent| parent.kind() == DeclarationKind::Trait)
 }
 
+enum PendingContributions<'body> {
+    Initial,
+    Calls(Vec<&'body EffectCall>),
+}
+
+impl<'body> PendingContributions<'body> {
+    fn include(&mut self, calls: &[&'body EffectCall]) {
+        if let Self::Calls(pending) = self {
+            pending.extend_from_slice(calls);
+        }
+    }
+}
+
 fn solve_component(
     members: &[DefId],
     bodies: &BTreeMap<DefId, &EffectBody>,
@@ -322,7 +335,7 @@ fn solve_component(
     let mut dependents = members
         .iter()
         .copied()
-        .map(|member| (member, BTreeSet::new()))
+        .map(|member| (member, BTreeMap::<DefId, Vec<&EffectCall>>::new()))
         .collect::<BTreeMap<_, _>>();
     for &caller in members {
         let body = bodies
@@ -340,7 +353,9 @@ fn solve_component(
                 dependents
                     .get_mut(callee)
                     .expect("every effect SCC member has a dependent set")
-                    .insert(caller);
+                    .entry(caller)
+                    .and_modify(|calls| calls.push(call))
+                    .or_insert_with(|| vec![call]);
             }
         }
     }
@@ -355,6 +370,11 @@ fn solve_component(
         .map(|member| (member, 0_usize))
         .collect::<BTreeMap<_, _>>();
     let mut pending = member_set.clone();
+    let mut contributions = members
+        .iter()
+        .copied()
+        .map(|member| (member, PendingContributions::Initial))
+        .collect::<BTreeMap<_, _>>();
 
     while let Some(&member) = pending.first() {
         pending.remove(&member);
@@ -362,7 +382,27 @@ fn solve_component(
             .get(&member)
             .copied()
             .ok_or(EffectAnalysisError::MissingEffectBody(member))?;
-        let summary = match summarize_body(body, &member_set, &current, solved)? {
+        let work = contributions
+            .get_mut(&member)
+            .expect("every effect SCC member has pending contributions");
+        let summary = match work {
+            PendingContributions::Initial => {
+                *work = PendingContributions::Calls(Vec::new());
+                summarize_body(body, &member_set, &current, solved)?
+            }
+            PendingContributions::Calls(calls) => {
+                // Unchanged contributions are already below the retained summary.
+                // Defer changed calls to this visit: transfer itself need not be monotone.
+                let summary = summarize_contributions(
+                    calls
+                        .iter()
+                        .map(|call| summarize_call(call, &member_set, &current, solved)),
+                )?;
+                calls.clear();
+                summary
+            }
+        };
+        let summary = match summary {
             SummaryOutcome::Known(summary) => summary,
             SummaryOutcome::Poisoned(poison) => {
                 for &member in members {
@@ -393,13 +433,16 @@ fn solve_component(
                 members.to_vec().into_boxed_slice(),
             ));
         }
-        pending.extend(
-            dependents
-                .get(&member)
-                .expect("every effect SCC member has a dependent set")
-                .iter()
-                .copied(),
-        );
+        for (&caller, calls) in dependents
+            .get(&member)
+            .expect("every effect SCC member has a dependent set")
+        {
+            contributions
+                .get_mut(&caller)
+                .expect("every dependent has pending contributions")
+                .include(calls);
+            pending.insert(caller);
+        }
     }
 
     for (member, summary) in current {
@@ -414,44 +457,55 @@ fn summarize_body(
     current: &BTreeMap<DefId, EffectSummary>,
     solved: &BTreeMap<CanonicalTarget, SolvedFact>,
 ) -> Result<SummaryOutcome, EffectAnalysisError> {
+    summarize_contributions(body.operations().iter().map(|operation| match operation {
+        EffectOperation::Mutation(mutation) => Ok(mutation_summary(mutation.path())),
+        EffectOperation::Call(call) => summarize_call(call, component, current, solved),
+    }))
+}
+
+fn summarize_call(
+    call: &EffectCall,
+    component: &BTreeSet<DefId>,
+    current: &BTreeMap<DefId, EffectSummary>,
+    solved: &BTreeMap<CanonicalTarget, SolvedFact>,
+) -> Result<SummaryOutcome, EffectAnalysisError> {
+    let callee = match call.dispatch() {
+        EffectDispatch::Constructor | EffectDispatch::CallableValue => {
+            SummaryOutcome::Known(EffectSummary::pure())
+        }
+        EffectDispatch::BoundRequirement { .. } if call.is_bang() => {
+            SummaryOutcome::Known(EffectSummary::Unknown)
+        }
+        EffectDispatch::BoundRequirement { .. } => SummaryOutcome::Known(EffectSummary::pure()),
+        EffectDispatch::Target(CanonicalTarget::Source(declaration))
+            if component.contains(declaration) =>
+        {
+            SummaryOutcome::Known(
+                current
+                    .get(declaration)
+                    .cloned()
+                    .ok_or(EffectAnalysisError::MissingCurrentSummary(*declaration))?,
+            )
+        }
+        EffectDispatch::Target(target) => solved
+            .get(target)
+            .map(SolvedFact::as_outcome)
+            .unwrap_or(SummaryOutcome::Unperformed),
+    };
+    Ok(match callee {
+        SummaryOutcome::Known(summary) => {
+            SummaryOutcome::Known(transfer_call(&summary, call.mutable_paths()))
+        }
+        blocked => blocked,
+    })
+}
+
+fn summarize_contributions(
+    contributions: impl IntoIterator<Item = Result<SummaryOutcome, EffectAnalysisError>>,
+) -> Result<SummaryOutcome, EffectAnalysisError> {
     let mut summary = EffectSummary::pure();
-    for operation in body.operations() {
-        let contribution =
-            match operation {
-                EffectOperation::Mutation(mutation) => mutation_summary(mutation.path()),
-                EffectOperation::Call(call) => {
-                    let callee =
-                        match call.dispatch() {
-                            EffectDispatch::Constructor | EffectDispatch::CallableValue => {
-                                SummaryOutcome::Known(EffectSummary::pure())
-                            }
-                            EffectDispatch::BoundRequirement { .. } if call.is_bang() => {
-                                SummaryOutcome::Known(EffectSummary::Unknown)
-                            }
-                            EffectDispatch::BoundRequirement { .. } => {
-                                SummaryOutcome::Known(EffectSummary::pure())
-                            }
-                            EffectDispatch::Target(CanonicalTarget::Source(declaration))
-                                if component.contains(declaration) =>
-                            {
-                                SummaryOutcome::Known(current.get(declaration).cloned().ok_or(
-                                    EffectAnalysisError::MissingCurrentSummary(*declaration),
-                                )?)
-                            }
-                            EffectDispatch::Target(target) => solved
-                                .get(target)
-                                .map(SolvedFact::as_outcome)
-                                .unwrap_or(SummaryOutcome::Unperformed),
-                        };
-                    match callee {
-                        SummaryOutcome::Known(summary) => {
-                            SummaryOutcome::Known(transfer_call(&summary, call.mutable_paths()))
-                        }
-                        blocked => blocked,
-                    }
-                }
-            };
-        match contribution {
+    for contribution in contributions {
+        match contribution? {
             SummaryOutcome::Known(contribution) => summary = summary.join(&contribution),
             SummaryOutcome::Poisoned(poison) => return Ok(SummaryOutcome::Poisoned(poison)),
             SummaryOutcome::Unperformed => return Ok(SummaryOutcome::Unperformed),

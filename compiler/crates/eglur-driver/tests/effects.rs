@@ -14,6 +14,9 @@ mod traversal;
 #[path = "effects/poison.rs"]
 mod poison;
 
+#[path = "effects/recursive.rs"]
+mod recursive;
+
 fn effect_profile() -> SupportProfile {
     SupportProfile::compile_only(
         SupportSchemaVersion::V1,

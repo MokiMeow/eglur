@@ -70,6 +70,40 @@ fn parser_budgeted_tuple_patterns_retain_the_payload_type() {
 }
 
 #[test]
+fn skewed_tuple_patterns_preserve_each_mixed_payload_type() {
+    for count in [8, 32, 128] {
+        for left in [false, true] {
+            let mut ty = "i64".to_owned();
+            let mut pattern = "leaf".to_owned();
+            for index in 0..count {
+                if left {
+                    ty = format!("({ty}, Bool)");
+                    pattern = format!("({pattern}, value_{index})");
+                } else {
+                    ty = format!("(Bool, {ty})");
+                    pattern = format!("(value_{index}, {pattern})");
+                }
+            }
+            let source = format!("fn f(input: {ty}) -> i64 = match input {{ {pattern} => leaf }}");
+            check_pattern(&source, &[], |resolution, trace| {
+                assert!(!trace.has_missing());
+                assert_i64_binding(resolution, "leaf");
+                for index in 0..count {
+                    let FactState::Known(fact) = local(resolution, &format!("value_{index}"))
+                    else {
+                        panic!("tuple payload binding lost its type");
+                    };
+                    assert_eq!(
+                        resolution.signatures().types().kind(fact.ty()).unwrap(),
+                        &TypeKind::Primitive(PrimitiveType::Bool)
+                    );
+                }
+            });
+        }
+    }
+}
+
+#[test]
 fn mixed_alias_tuple_and_variant_patterns_preserve_every_binding() {
     let depth = 70;
     let mut ty = "i64".to_owned();
@@ -131,6 +165,36 @@ fn deep_variant_and_tuple_rest_patterns_skip_unbound_payloads() {
         assert!(!trace.has_missing());
         assert_i64_binding(resolution, "value");
     });
+}
+
+#[test]
+fn intrinsic_constructor_rest_patterns_keep_nested_payload_types() {
+    for width in [8, 32, 128] {
+        let tuple = (0..width)
+            .map(|index| if index % 2 == 0 { "i64" } else { "Bool" })
+            .collect::<Vec<_>>()
+            .join(", ");
+        for (pattern, value) in [("Some(..)", "0"), ("Some((first, second, ..))", "first")] {
+            let source = format!(
+                "fn f(input: Opt[({tuple})]) -> i64 = match input {{ {pattern} => {value}, None => 0 }}"
+            );
+            check_pattern(&source, &[], |resolution, trace| {
+                assert!(!trace.has_missing());
+                if value == "first" {
+                    assert_i64_binding(resolution, "first");
+                    let FactState::Known(fact) = local(resolution, "second") else {
+                        panic!("nested intrinsic payload lost its Bool binding")
+                    };
+                    assert_eq!(
+                        resolution.signatures().types().kind(fact.ty()).unwrap(),
+                        &TypeKind::Primitive(PrimitiveType::Bool)
+                    );
+                } else {
+                    assert_eq!(resolution.names().locals().len(), 1);
+                }
+            });
+        }
+    }
 }
 
 #[test]

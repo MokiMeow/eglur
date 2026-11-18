@@ -39,11 +39,20 @@ pub(super) fn with_inputs(
 pub(super) fn sources() -> Vec<(&'static str, String, bool)> {
     let id = "fn id[T](value: T) -> T = value";
     let mut sources = vec![
+        ("nested-path-barriers", "fn stop() -> Never = stop()\nfn as_bool(value: Bool) -> Bool = value\nfn inspect(x: Opt[i32]) -> Opt[i32] = if as_bool(stop()) {\nlet value: Opt[i32] = result {\nyield if as_bool(stop()) { let item = x?\nyield x } else { yield x }\n}\nyield value\n} else { yield x }".into(), true),
         ("nested", format!("{id}\nfn inspect(x: i32) -> i32 = id({{ yield (id(x), x).0 }})"), true),
         ("explicit", format!("{id}\nfn inspect(x: i32) -> i32 = id::[i32](x)"), true),
         ("probe", format!("{id}\nfn inspect(x: i32) -> Unit {{\nlet out = id(x)\n}}"), true),
         ("function-value", format!("{id}\nfn inspect(x: i32) -> i32 {{\nlet f: Fn(i32) -> i32 = id\nyield f(x)\n}}"), true),
+        ("wide-callable-value", "struct S {}\noverload fn choose[T](x: S, seed: T, tag: Bool) -> T = seed\noverload fn choose[T, U](x: T, seed: U, tag: i32) -> U = seed\nfn inspect() -> Unit {\nlet value: Fn((i32, i32, i32, i32), i32, i32) -> i32 = choose\nyield ()\n}".into(), true),
         ("branches", "fn inspect(flag: Bool, x: i32, y: i32) -> i32 {\nlet v: i32 = if flag { yield x } else { yield y }\nyield match v { _ if flag => x, _ => y }\n}".into(), true),
+        ("pattern-bindings", format!("{id}\nfn inspect(input: ((i32, i32), (i32, i32))) -> i32 = match input {{ ((first, second), (third, fourth)) if true => id(first), ((a, b), (c, d)) => id(d) }}"), true),
+        ("alias-patterns", format!("{id}\nfn inspect(input: (i32, i32)) -> i32 = match input {{ whole @ (first, second) if true => id(first), other @ (third, fourth) => id(fourth) }}"), true),
+        ("alias-duplicate", format!("{id}\nfn inspect(input: (i32, i32)) -> i32 = match input {{ same @ (same, other) => id(other), _ => 0 }}"), false),
+        ("alias-structural-failure", format!("{id}\nfn inspect(input: (i32, i32)) -> i32 = match input {{ same @ (same, true) => id(same), _ => 0 }}"), false),
+        ("tuple-rest", format!("type Wide = (i32, Bool, i32, Bool, i32, Bool, i32, Bool)\n{id}\nfn inspect(input: Wide) -> i32 = match input {{ (first, ..) if true => id(first), (last, ..) => id(last) }}"), true),
+        ("variant-rest", format!("enum Wide[T] {{ Wrap(T, Bool, T, Bool, T, Bool, T, Bool)\nEnd }}\n{id}\nfn inspect(input: Wide[i32]) -> i32 = match input {{ Wide::Wrap(first, ..) if true => id(first), Wide::Wrap(last, ..) => id(last), _ => 0 }}"), true),
+        ("pattern-prefix-failure", format!("{id}\nfn inspect(input: ((i32, i32), i32)) -> i32 = match input {{ ((first, second), (bad, _)) => id(first), _ => 0 }}"), false),
         ("result", "fn inspect(x: Opt[i32]) -> Opt[i32] = result {\nlet y = x?\nyield x\n}".into(), true),
         ("member-reference", format!("struct Pair {{ field value: i32 }}\n{id}\nfn inspect(x: i32) -> i32 {{\nlet p = Pair {{ value: x }}\nyield id(* &p.value)\n}}"), true),
         ("ordinary-reduce-by", "struct Counter { fn reduce_by(self: &Self, pair: (i32, i32)) -> i32 = pair.0 }\nfn inspect(c: &Counter, x: i32) -> i32 = c.reduce_by((x, x))".into(), true),

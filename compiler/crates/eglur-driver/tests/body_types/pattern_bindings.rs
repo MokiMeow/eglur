@@ -1,7 +1,59 @@
 use super::{body_profile, branching_profile, diagnostic_codes, session};
 use eglur_diagnostics::DiagnosticDataValue;
-use eglur_driver::{SupportProfile, SupportProfileId, SupportSchemaVersion, TrustedCatalog};
+use eglur_driver::{
+    CompilerSession, FileInput, FileSetRequest, SessionOptions, SupportProfile, SupportProfileId,
+    SupportSchemaVersion, TrustedCatalog,
+};
 use eglur_sema::{CompileCapability, FactState, PrimitiveType, TypeKind, TypecheckCapability};
+
+#[test]
+fn matching_local_ordinals_in_distinct_modules_keep_their_pattern_types() {
+    let request = FileSetRequest::new(
+        [
+            FileInput::new(
+                "first.eglur",
+                b"fn f(input: i64) -> i64 = match input { value => value }".to_vec(),
+            ),
+            FileInput::new(
+                "second.eglur",
+                b"fn g(input: Bool) -> Bool = match input { value => value }".to_vec(),
+            ),
+        ],
+        "first.eglur",
+        Some("."),
+    )
+    .unwrap();
+    let mut session = CompilerSession::build(request, SessionOptions::new(false)).unwrap();
+    let catalog = TrustedCatalog::first_slice().unwrap();
+    let analysis = session
+        .resolve(&SupportProfile::semantic_core_v1(), Some(&catalog))
+        .unwrap();
+    assert!(!analysis.trace().has_missing());
+    let resolution = analysis.resolution().unwrap();
+    let bindings = resolution
+        .names()
+        .locals()
+        .iter()
+        .filter(|local| local.name().text() == "value")
+        .collect::<Vec<_>>();
+    assert_eq!(bindings.len(), 2);
+    assert_ne!(bindings[0].id().module(), bindings[1].id().module());
+    assert_eq!(bindings[0].id().body(), bindings[1].id().body());
+    assert_eq!(bindings[0].id().local(), bindings[1].id().local());
+    for (binding, primitive) in bindings
+        .iter()
+        .zip([PrimitiveType::I64, PrimitiveType::Bool])
+    {
+        let FactState::Known(local) = resolution.body_types().local(binding.id()) else {
+            panic!("missing local type")
+        };
+        assert_eq!(
+            resolution.signatures().types().kind(local.ty()).unwrap(),
+            &TypeKind::Primitive(primitive)
+        );
+    }
+    assert!(session.into_diagnostics(None).diagnostics().is_empty());
+}
 
 #[test]
 fn duplicate_aliases_report_the_later_binding_not_an_internal_collision() {

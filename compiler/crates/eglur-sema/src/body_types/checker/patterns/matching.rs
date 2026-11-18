@@ -67,6 +67,11 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         pattern_id: PatternId,
         expected: TypeId,
     ) -> Result<Outcome<PatternCheck>, BodyFlow> {
+        context
+            .body
+            .pattern(pattern_id)
+            .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
+        self.pattern_bindings.begin(context.module, pattern_id);
         let mut pending = (pattern_id, expected);
         let mut continuations = Vec::new();
         loop {
@@ -146,16 +151,31 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         FactState::Known(_) | FactState::NotApplicable => {}
                     }
                 }
-                let binding = self.local_binding(module, body.id(), name.origin())?;
+                let binding = self.pattern_binding(
+                    module,
+                    body.id(),
+                    crate::resolve::PatternBindingSite::Name(pattern_id),
+                    name.origin(),
+                )?;
+                self.pattern_bindings
+                    .observe(binding, pattern_id, name.origin())?;
+                self.pattern_bindings.type_binding(binding, expected)?;
                 Ok(PatternPlan::Complete(Outcome::Known(
-                    PatternCheck::binding(binding, expected),
+                    PatternCheck::irrefutable(),
                 )))
             }
             PatternKind::Wildcard => Ok(PatternPlan::Complete(Outcome::Known(
                 PatternCheck::irrefutable(),
             ))),
             PatternKind::Alias { name, pattern } => {
-                let binding = self.local_binding(module, body.id(), name.origin())?;
+                let binding = self.pattern_binding(
+                    module,
+                    body.id(),
+                    crate::resolve::PatternBindingSite::Name(pattern_id),
+                    name.origin(),
+                )?;
+                self.pattern_bindings
+                    .observe(binding, pattern_id, name.origin())?;
                 Ok(PatternPlan::Child {
                     pattern: *pattern,
                     expected,
@@ -240,7 +260,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .pattern(pattern_id)
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?
             .origin();
-        let TypeKind::Tuple(types) = self.signatures.types().kind(expected)?.clone() else {
+        let TypeKind::Tuple(types) = self.signatures.types().kind(expected)? else {
             return self
                 .pattern_type_mismatch(source, origin, "tuple", expected, None)
                 .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
@@ -278,12 +298,17 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 PatternCheck::irrefutable(),
             )));
         };
+        let types = types[..explicit].to_vec();
+
+        #[cfg(test)]
+        super::tuple_tests::observe_copy(types.len());
+
         Ok(PatternPlan::Child {
             pattern,
             expected: types[type_index],
             continuation: PatternContinuation::Tuple {
                 cursor,
-                types: types.into_vec(),
+                types,
                 check: PatternCheck::irrefutable(),
             },
         })
@@ -301,7 +326,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
             .body
             .pattern(pattern_id)
             .ok_or(BodyTypingError::WrongBodyPattern(pattern_id))?;
-        let target = match self.pattern_constructor_target(
+        let (target, kind) = match self.pattern_constructor_target(
             context.module,
             source,
             pattern_id,
@@ -316,8 +341,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 return Ok(PatternPlan::Complete(Outcome::Unperformed));
             }
         };
-        if matches!(payload, eglur_hir::PatternPayload::Named(_))
-            && target.kind.is_type_namespace_target()
+        if matches!(payload, eglur_hir::PatternPayload::Named(_)) && kind.is_type_namespace_target()
         {
             return Ok(PatternPlan::Complete(self.unsupported(
                 TypecheckCapability::CheckAdvancedPatterns,
@@ -325,7 +349,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 pattern.origin(),
             )));
         }
-        if target.kind != ResolvedTargetKind::VariantConstructor {
+        if kind != ResolvedTargetKind::VariantConstructor {
             return self
                 .pattern_type_mismatch(source, pattern.origin(), "variant", expected, None)
                 .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
@@ -397,12 +421,15 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
         }
         match (contract.shape, payload) {
-            (ConstructorShape::Absent, eglur_hir::PatternPayload::Absent) => {
+            (PatternConstructorShape::Absent, eglur_hir::PatternPayload::Absent) => {
                 Ok(PatternPlan::Complete(Outcome::Known(
                     PatternCheck::variant(contract.declaration, PatternCheck::irrefutable()),
                 )))
             }
-            (ConstructorShape::Tuple(types), eglur_hir::PatternPayload::Positional(elements)) => {
+            (
+                PatternConstructorShape::Tuple(arity),
+                eglur_hir::PatternPayload::Positional(elements),
+            ) => {
                 let explicit = elements
                     .iter()
                     .filter(|element| matches!(element, PatternElement::Pattern(_)))
@@ -410,7 +437,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                 let has_rest = elements
                     .iter()
                     .any(|element| matches!(element, PatternElement::Rest(_)));
-                if (!has_rest && explicit != types.len()) || (has_rest && explicit > types.len()) {
+                if (!has_rest && explicit != arity) || (has_rest && explicit > arity) {
                     return self
                         .type_error(
                             source,
@@ -420,7 +447,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                             BTreeMap::from([
                                 (
                                     Box::<str>::from("expected_count"),
-                                    self.diagnostic_count(types.len())?,
+                                    self.diagnostic_count(arity)?,
                                 ),
                                 (
                                     Box::<str>::from("actual_count"),
@@ -431,11 +458,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                         .map(|poison| PatternPlan::Complete(Outcome::Poisoned(poison)));
                 }
                 let mut cursor = PatternElementCursor::new(elements);
-                let Some((pattern, type_index)) = cursor.next(types.len()) else {
+                let Some((pattern, type_index)) = cursor.next(arity) else {
                     return Ok(PatternPlan::Complete(Outcome::Known(
                         PatternCheck::variant(contract.declaration, PatternCheck::irrefutable()),
                     )));
                 };
+                let types = self.pattern_constructor_prefix(&contract.declaration, explicit)?;
                 let child_type = self
                     .signatures
                     .types_mut()
@@ -452,7 +480,7 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
                     },
                 })
             }
-            (ConstructorShape::Named(_), eglur_hir::PatternPayload::Named(_)) => {
+            (PatternConstructorShape::Named, eglur_hir::PatternPayload::Named(_)) => {
                 Ok(PatternPlan::Complete(self.unsupported(
                     TypecheckCapability::CheckAdvancedPatterns,
                     source,
@@ -474,9 +502,12 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         outcome: Outcome<PatternCheck>,
     ) -> Result<PatternPlan<'body>, BodyFlow> {
         match continuation {
-            PatternContinuation::Alias { binding, expected } => Ok(PatternPlan::Complete(
-                outcome.map(|check| check.with_binding(binding, expected)),
-            )),
+            PatternContinuation::Alias { binding, expected } => {
+                if let Outcome::Known(_) = &outcome {
+                    self.pattern_bindings.type_binding(binding, expected)?;
+                }
+                Ok(PatternPlan::Complete(outcome))
+            }
             PatternContinuation::Group => Ok(PatternPlan::Complete(outcome)),
             PatternContinuation::Tuple {
                 mut cursor,

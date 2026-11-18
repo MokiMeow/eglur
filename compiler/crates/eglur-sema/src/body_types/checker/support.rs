@@ -381,14 +381,16 @@ impl<'input, 'hir, 'support> BodyChecker<'input, 'hir, 'support> {
         }
     }
 
-    pub(super) fn local_binding(
+    pub(super) fn pattern_binding(
         &self,
         module: ModuleId,
         body: BodyId,
+        site: crate::resolve::PatternBindingSite,
         origin: OriginId,
     ) -> Result<LocalBindingId, BodyFlow> {
         self.names
-            .local_binding(module, body, origin)
+            .body_bindings(module, body)
+            .and_then(|bindings| bindings.binding(site))
             .ok_or(BodyFlow::Internal(BodyTypingError::MissingLocalOrigin {
                 module,
                 body,

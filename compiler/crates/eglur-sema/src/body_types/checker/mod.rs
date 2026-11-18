@@ -33,6 +33,7 @@ use crate::{
 };
 
 use super::{BodyTypes, BodyTypingError, *};
+use patterns::PatternBindingScratch;
 use poison::PendingPoison;
 
 mod application;
@@ -73,6 +74,9 @@ mod test_support;
 
 #[cfg(test)]
 mod unit_outcome_tests;
+
+#[cfg(test)]
+mod pattern_check_tests;
 
 /// Checks source bodies once against canonical declaration signatures.
 #[allow(
@@ -225,7 +229,8 @@ fn typecheck_bodies_inner<'hir>(
         evaluate_constant_declarations: support.supports(CompileCapability::Typecheck(
             TypecheckCapability::EvaluateSelectedIntegerConstDeclarations,
         )),
-        locals: FactTable::new(),
+        locals: LocalTypeFacts::new(),
+        pattern_bindings: PatternBindingScratch::default(),
         members: FactTable::new(),
         invocations: FactTable::new(),
         callable_values: FactTable::new(),
@@ -271,7 +276,8 @@ struct BodyChecker<'input, 'hir, 'support> {
     const_eligibility: BTreeMap<ExpressionKey, bool>,
     preparing_numeric_tree: bool,
     evaluate_constant_declarations: bool,
-    locals: FactTable<LocalBindingId, LocalTypeFact>,
+    locals: LocalTypeFacts,
+    pattern_bindings: PatternBindingScratch,
     members: FactTable<ExpressionKey, MemberAccess>,
     invocations: FactTable<ExpressionKey, InvocationFact>,
     callable_values: FactTable<ExpressionKey, CallableInstanceId>,
@@ -538,17 +544,9 @@ struct ConstructorTarget {
     kind: ResolvedTargetKind,
 }
 
-struct PatternConstructorContract {
-    declaration: CanonicalTarget,
-    generic_parameters: Vec<GenericParameterId>,
-    result: TypeId,
-    shape: ConstructorShape,
-}
-
 struct PatternCheck {
     coverage: PatternCoverage,
     irrefutable: bool,
-    bindings: BTreeMap<LocalBindingId, TypeId>,
 }
 
 impl PatternCheck {
@@ -559,7 +557,6 @@ impl PatternCheck {
                 variants: BTreeSet::new(),
             },
             irrefutable: true,
-            bindings: BTreeMap::new(),
         }
     }
 
@@ -570,26 +567,16 @@ impl PatternCheck {
                 variants: BTreeSet::new(),
             },
             irrefutable: false,
-            bindings: BTreeMap::new(),
         }
-    }
-
-    fn binding(binding: LocalBindingId, ty: TypeId) -> Self {
-        Self::irrefutable().with_binding(binding, ty)
-    }
-
-    fn with_binding(mut self, binding: LocalBindingId, ty: TypeId) -> Self {
-        self.bindings.entry(binding).or_insert(ty);
-        self
     }
 
     fn merge(&mut self, other: Self) {
+        #[cfg(test)]
+        pattern_check_tests::observe_merge();
+
         self.irrefutable &= other.irrefutable;
         self.coverage.total = self.irrefutable;
         self.coverage.variants.clear();
-        for (binding, ty) in other.bindings {
-            self.bindings.entry(binding).or_insert(ty);
-        }
     }
 
     fn variant(declaration: CanonicalTarget, payload: Self) -> Self {
@@ -603,7 +590,6 @@ impl PatternCheck {
                 },
             },
             irrefutable: false,
-            bindings: payload.bindings,
         }
     }
 }
